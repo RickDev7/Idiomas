@@ -1,0 +1,51 @@
+import { runTest } from './assert';
+import { testConfidenceService } from './ConfidenceService.test';
+import { testLearningStateEngine } from './LearningStateEngine.test';
+import { testBottleneckDetector } from './BottleneckDetector.test';
+import { testNextBestActivityEngine } from './NextBestActivityEngine.test';
+import { testRapidResponseEngine } from './RapidResponseEngine.test';
+import { testTransferEngine } from './TransferEngine.test';
+import { testMemoryStrengthEngine } from './MemoryStrengthEngine.test';
+import { testActiveRecallEngine } from './ActiveRecallEngine.test';
+import { testListeningLadderEngine } from './ListeningLadderEngine.test';
+import { testRealUseEngine } from './RealUseEngine.test';
+import { testConversationOrchestrator } from './ConversationOrchestrator.test';
+import { testMicroPracticeEngine } from './MicroPracticeEngine.test';
+import { testScaffoldingEngine } from './ScaffoldingEngine.test';
+import { testVariationEngine } from './VariationEngine.test';
+import { testSpontaneousUseDetector } from './SpontaneousUseDetector.test';
+import { testAutomationScoreEngine } from './AutomationScoreEngine.test';
+import { testReviewEngine } from './ReviewEngine.test';
+import { testPersonalLearningAdaptation } from './PersonalLearningAdaptation.test';
+import { testE2ECycle } from './e2eCycle.test';
+import { testPersonalAiCoach, testMemoryRelevanceEngine } from '../../coach/__tests__/PersonalAiCoach.test';
+
+console.log('DEUTSCH TURBO V3 — Testes do motor de aprendizagem\n');
+
+await runTest('ConfidenceService', testConfidenceService);
+await runTest('LearningStateEngine', testLearningStateEngine);
+await runTest('BottleneckDetector', testBottleneckDetector);
+await runTest('NextBestActivityEngine', testNextBestActivityEngine);
+await runTest('RapidResponseEngine', testRapidResponseEngine);
+await runTest('TransferEngine', testTransferEngine);
+await runTest('VariationEngine', testVariationEngine);
+await runTest('MemoryStrengthEngine', testMemoryStrengthEngine);
+await runTest('ActiveRecallEngine', testActiveRecallEngine);
+await runTest('ListeningLadderEngine', testListeningLadderEngine);
+await runTest('RealUseEngine', testRealUseEngine);
+await runTest('ConversationOrchestrator', testConversationOrchestrator);
+await runTest('MicroPracticeEngine', testMicroPracticeEngine);
+await runTest('ScaffoldingEngine', testScaffoldingEngine);
+await runTest('SpontaneousUseDetector', testSpontaneousUseDetector);
+await runTest('AutomationScoreEngine', testAutomationScoreEngine);
+await runTest('ReviewEngine', testReviewEngine);
+await runTest('PersonalLearningAdaptation', testPersonalLearningAdaptation);
+await runTest('MemoryRelevanceEngine', testMemoryRelevanceEngine);
+await runTest('PersonalAiCoach', testPersonalAiCoach);
+await runTest('TranslationService', async () => {
+  const { testTranslationService } = await import('../../ai/__tests__/TranslationService.test');
+  await testTranslationService();
+});
+await runTest('E2E Cycle (Pause)', testE2ECycle);
+
+console.log('\nFim dos testes.');
