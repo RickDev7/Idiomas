@@ -176,6 +176,8 @@ export function useGeminiLive(profile: UserProfile | null): GeminiLiveUI {
     setUserTurns(userTurnsRef.current);
     const decision = await orchRef.current.handleUserUtterance(trimmed);
     await applyDecision(decision);
+    const wrap = orchRef.current.maybeZeroLanguageWrapUp();
+    if (wrap) await applyDecision(wrap);
   }, [applyDecision]);
 
   const buildProfile = useCallback(async () => {
@@ -197,7 +199,14 @@ export function useGeminiLive(profile: UserProfile | null): GeminiLiveUI {
       setTargetPhrase(pendingReview?.german ?? plan.target?.german ?? null);
       const stages = plan.training?.stages?.length ?? 0;
       const minutes = plan.training?.totalMinutes ?? profile.dailyMinutes ?? 20;
-      setTargetTurns(Math.max(4, Math.min(8, stages || Math.round(minutes / 4) || 5)));
+      const zeroMode = !!(live as { zeroLanguageMode?: boolean }).zeroLanguageMode;
+      // L0: barra de progresso = orçamento de tempo (minutos), não “5 frases e fim”
+      if (zeroMode) {
+        const { zeroLanguageSessionUnits } = await import('@/services/teacher/ZeroLanguageMode');
+        setTargetTurns(zeroLanguageSessionUnits(minutes));
+      } else {
+        setTargetTurns(Math.max(4, Math.min(8, stages || Math.round(minutes / 4) || 5)));
+      }
 
       const { prepareSession } = await import('@/services/teacher/sessionContinuity');
       const prepared = prepareSession(profile, learning);
@@ -211,7 +220,6 @@ export function useGeminiLive(profile: UserProfile | null): GeminiLiveUI {
       const known = Object.values(learning.phrases).filter((c) => c.confidence >= 50).map((c) => c.phraseId).slice(0, 12);
       const weak = Object.values(learning.phrases).filter((c) => c.confidence > 0 && c.confidence < 40).map((c) => c.phraseId).slice(0, 6);
       const ctx = prepared.sessionContext;
-      const zeroMode = !!(live as { zeroLanguageMode?: boolean }).zeroLanguageMode;
       const openingGerman = zeroMode
         ? (plan.target?.german || prepared.opening.german)
         : (openingRef.current?.german || prepared.opening.german);

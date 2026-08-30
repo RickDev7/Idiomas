@@ -79,14 +79,38 @@ function levenshtein(a: string, b: string): number {
 
 /** Progressão L0: frases curtas em ordem (uma por vez). */
 export const ZERO_LANGUAGE_SEED_SPECS: Array<{ id: string; german: string; portuguese: string }> = [
+  // Bloco 1 — Cumprimentos
   { id: 'l0-guten-morgen', german: 'Guten Morgen.', portuguese: 'Bom dia.' },
+  { id: 'l0-guten-abend', german: 'Guten Abend.', portuguese: 'Boa tarde / boa noite (início da noite).' },
+  { id: 'l0-gute-nacht', german: 'Gute Nacht.', portuguese: 'Boa noite (ao dormir).' },
+  // Bloco 2 — Como estou
   { id: 'l0-wie-gehts', german: "Wie geht's?", portuguese: 'Como você está?' },
   { id: 'l0-mir-gehts-gut', german: "Mir geht's gut.", portuguese: 'Estou bem.' },
+  { id: 'survival-gut', german: 'Mir geht es gut.', portuguese: 'Estou bem.' },
+  // Bloco 3 — Apresentação
   { id: 'l0-hallo', german: 'Hallo.', portuguese: 'Oi.' },
   { id: 'l0-ich-heisse', german: 'Ich heiße...', portuguese: 'Eu me chamo...' },
   { id: 'survival-heisse', german: 'Ich heiße...', portuguese: 'Me chamo...' },
-  { id: 'survival-gut', german: 'Mir geht es gut.', portuguese: 'Estou bem.' },
   { id: 'survival-arbeite', german: 'Ich arbeite.', portuguese: 'Eu trabalho.' },
+];
+
+/** Blocos pedagógicos L0 — recuperação volta ao início do bloco atual, não da sessão. */
+export const ZERO_LANGUAGE_BLOCKS: Array<{ id: string; namePt: string; phraseIds: string[] }> = [
+  {
+    id: 'greetings',
+    namePt: 'Cumprimentos',
+    phraseIds: ['l0-guten-morgen', 'l0-guten-abend', 'l0-gute-nacht'],
+  },
+  {
+    id: 'wellbeing',
+    namePt: 'Como estou',
+    phraseIds: ['l0-wie-gehts', 'l0-mir-gehts-gut', 'survival-gut'],
+  },
+  {
+    id: 'identity',
+    namePt: 'Apresentação',
+    phraseIds: ['l0-hallo', 'l0-ich-heisse', 'survival-heisse', 'survival-arbeite'],
+  },
 ];
 
 export function zeroLanguageSeedPhrases(): Phrase[] {
@@ -119,16 +143,57 @@ export function mergeZeroLanguagePhrases(phrases: Phrase[]): Phrase[] {
   return [...byId.values()];
 }
 
-const L0_PRIORITY_IDS = [
-  'l0-guten-morgen',
-  'l0-wie-gehts',
-  'l0-mir-gehts-gut',
-  'l0-hallo',
-  'l0-ich-heisse',
-  'survival-heisse',
-  'survival-gut',
-  'survival-arbeite',
-];
+const L0_PRIORITY_IDS = ZERO_LANGUAGE_BLOCKS.flatMap((b) => b.phraseIds);
+
+/** Mínimo de acertos guiados antes de avançar à próxima frase no bloco. */
+export const L0_MIN_CORRECT_BEFORE_ADVANCE = 2;
+
+export function findZeroLanguageBlock(phraseId: string) {
+  return ZERO_LANGUAGE_BLOCKS.find((b) => b.phraseIds.includes(phraseId)) || null;
+}
+
+/** Frases do bloco desde o início até a frase falhada (inclusive), para recuperação. */
+export function getBlockRecoverySequence(
+  phraseId: string,
+  phrases: Phrase[],
+): Array<{ id: string; german: string; portuguese: string }> {
+  const block = findZeroLanguageBlock(phraseId);
+  if (!block) return [];
+  const pool = mergeZeroLanguagePhrases(phrases);
+  const idx = block.phraseIds.indexOf(phraseId);
+  const slice = idx >= 0 ? block.phraseIds.slice(0, idx + 1) : block.phraseIds.slice(0, 1);
+  return slice
+    .map((id) => {
+      const p = pool.find((x) => x.id === id);
+      const seed = ZERO_LANGUAGE_SEED_SPECS.find((s) => s.id === id);
+      if (!p && !seed) return null;
+      return {
+        id,
+        german: p?.german || seed!.german,
+        portuguese: p?.portuguese || seed!.portuguese,
+      };
+    })
+    .filter((x): x is { id: string; german: string; portuguese: string } => !!x);
+}
+
+/** Erro relevante no meio do bloco → recuperação pedagógica (não near-miss isolado). */
+export function shouldRecoverZeroLanguageBlock(
+  phraseId: string,
+  verdict: ProductionDiagnosis['verdict'],
+  errorType?: ProductionErrorType,
+): boolean {
+  if (verdict !== 'INCORRECT') return false;
+  if (errorType === 'pronunciation_approx') return false;
+  const block = findZeroLanguageBlock(phraseId);
+  if (!block) return false;
+  return block.phraseIds.indexOf(phraseId) > 0;
+}
+
+/** Progresso da UI em L0 = orçamento de tempo, não “5 frases e acabou”. */
+export function zeroLanguageSessionUnits(dailyMinutes: number): number {
+  const m = Math.max(10, Math.min(90, dailyMinutes || 20));
+  return m;
+}
 
 export function pickZeroLanguageTarget(
   learning: UserLearningProfile,
@@ -142,10 +207,11 @@ export function pickZeroLanguageTarget(
     if (conf && isAutomated(conf)) continue;
     const score = conf ? readAutomationScore(conf) : 0;
     const times = conf?.timesCorrect ?? 0;
+    // Domínio mínimo antes de avançar: ≥2 acertos e score decente
     if (!conf || conf.state === 'new' || times === 0) {
       return { conf, phrase, action: 'introduce' };
     }
-    if (score < 35 || (conf.needsHelp && times < 3)) {
+    if (times < L0_MIN_CORRECT_BEFORE_ADVANCE || score < 40 || (conf.needsHelp && times < 3)) {
       return { conf, phrase, action: 'practice' };
     }
     if (score < 55 && times < 4) {
@@ -238,28 +304,32 @@ export function zeroLanguageDirective(opts: {
   targetPt?: string;
   scaffoldLevel: SupportLevel;
   action: string;
+  sessionMinutes?: number;
 }): string {
   const de = opts.targetGerman || 'Guten Morgen.';
   const pt = opts.targetPt || 'Bom dia.';
+  const minutes = opts.sessionMinutes ?? 20;
   return [
     '=== ZERO LANGUAGE MODE (nível 0) ===',
-    'O aluno está no nível ZERO. Ele pode NÃO entender alemão.',
-    'Português = língua principal de EXPLICAÇÃO. Alemão = doses pequenas.',
-    'Padrão de microaula por VOZ (conteúdo NOVO):',
-    '1) Em PT: "Vamos aprender uma frase simples." / "Vamos aprender a dizer …"',
-    `2) Em PT: "Em alemão: ${de}"`,
-    `3) Em PT: "Significa ${pt}."`,
-    '4) Em PT: "Escute."',
-    `5) Pronuncie claramente em alemão: "${de}"`,
-    '6) Em PT: "Agora você." / "Agora repita."',
-    '7) PARE e AGUARDE o aluno. Silêncio ≠ erro imediato.',
-    '8) Se errar: Quase → ponto difícil → Escute novamente → modelo → Agora você. NÃO mude de assunto.',
-    '9) Se acertar com modelo: "Perfeito! Sehr gut!" — isso é produção GUIADA, não automação.',
-    '10) Depois: recall sem tradução ("Como dizemos …?") → microconversa curta.',
-    'UMA estrutura por vez. Frases muito curtas. Não teste. Não avance rápido.',
+    'O aluno entende pouco ou NENHUM alemão — ensine como a uma criança pequena: UMA coisa por vez.',
+    'Português = suporte. Alemão = doses mínimas. Fale CURTO. Não monologue.',
+    `DURAÇÃO DA SESSÃO: ~${minutes} minutos. NÃO encerre só porque ensinou poucas frases.`,
+    'Use o tempo: ensinar → repetir → corrigir → revisar → recuperar → só então avançar.',
+    'Ciclo OBRIGATÓRIO por frase nova (VOZ):',
+    '1) PT: "Vamos aprender uma frase nova."',
+    `2) PT: "${pt} em alemão é ${de}"`,
+    `3) DE (modelo claro): "${de}"`,
+    `4) PT: "Significa ${pt}."`,
+    `5) DE de novo: "${de}"`,
+    '6) PT: "Agora repita." / "Agora você."',
+    '7) PARE. AGUARDE o microfone. Silêncio ≠ erro.',
+    '8) Se quase (pronúncia): "Quase!" → destaque a parte → modelo → "Agora você." AGUARDE.',
+    '9) Se erro claro no meio do bloco: corrija a frase → depois "Vamos fazer de novo" e recupere o bloco desde o início.',
+    '10) Só avance à PRÓXIMA frase após domínio (repetições corretas). UMA estrutura nova por vez.',
+    'PROIBIDO em L0: Wo wohnst du? / Was machst du? / Was brauchst du? / perguntas abertas sem estrutura ensinado.',
+    'PROIBIDO: aula teórica longa, despejar várias frases, falar enquanto o aluno deve responder.',
     `AÇÃO: ${opts.action}. SCAFFOLD: ${opts.scaffoldLevel}/5.`,
     `FRASE ATUAL: "${de}" = "${pt}"`,
-    'PROIBIDO: perguntas abertas longas, vocabulário não ensinado, monólogo em alemão, reiniciar com Hallo/Wie geht\'s sem motivo pedagógico.',
     '=== FIM ZERO LANGUAGE MODE ===',
   ].join('\n');
 }
@@ -300,14 +370,14 @@ export function zeroLanguageKickoff(opts: {
 
   return [
     '[INSTRUÇÃO INTERNA — não leia isto em voz alta]',
-    'ZERO LANGUAGE MODE — microaula por voz AGORA (fale nesta ordem):',
-    '1. Em português: "Vamos aprender uma frase simples."',
-    `2. Em português: explique o sentido ("${pt} em alemão é:")`,
+    'ZERO LANGUAGE MODE — microaula por voz AGORA (fale nesta ordem, CURTO):',
+    '1. Em português: "Vamos aprender uma frase nova."',
+    `2. Em português: "${pt} em alemão é:"`,
     `3. Em alemão, claro: "${de}"`,
     `4. Em português: "Significa ${pt}."`,
     '5. Em português: "Escute."',
     `6. Em alemão novamente: "${de}"`,
-    `7. Em português: "Agora você." / "Agora repita: ${stem}."`,
+    `7. Em português: "Agora repita: ${stem}."`,
     '8. PARE. AGUARDE o aluno. Não continue sozinho. Silêncio não é erro imediato.',
   ].join('\n');
 }
@@ -322,7 +392,9 @@ export function teachFromErrorNudge(opts: {
 }): string {
   const soft = opts.attempt <= 1 ? 'Quase!' : 'Vamos tentar de novo.';
   const focus = opts.hardPart
-    ? `A palavra/parte difícil é "${opts.hardPart}".`
+    ? opts.errorType === 'pronunciation_approx'
+      ? `É "${opts.hardPart}".`
+      : `A palavra/parte difícil é "${opts.hardPart}".`
     : opts.errorType === 'conjugation'
       ? 'Só uma pequena correção na forma do verbo.'
       : 'Só uma pequena correção.';
@@ -331,7 +403,7 @@ export function teachFromErrorNudge(opts: {
     : `Diga: "Escute novamente." Depois modele: "${opts.correction}"`;
   return [
     '[INSTRUÇÃO INTERNA — não leia isto em voz alta]',
-    'ENSINO A PARTIR DO ERRO — obrigatório:',
+    'ENSINO A PARTIR DO ERRO — obrigatório (CURTO):',
     `O aluno disse: "${opts.userSaid}"`,
     `Forma correta: "${opts.correction}"`,
     soft,
@@ -347,8 +419,42 @@ export function praiseGuidedRetryNudge(correction: string): string {
   return [
     '[INSTRUÇÃO INTERNA — não leia isto em voz alta]',
     `O aluno acertou após correção: "${correction}"`,
-    'Elogie de forma curta: "Perfeito! Sehr gut!"',
+    'Elogie de forma curta: "Perfeito!"',
     'Isso foi produção GUIADA (havia modelo). NÃO declare fluência.',
-    'Pode avançar para a próxima micro-etapa do mesmo tema (recall ou contexto curto).',
+    'Não avance imediatamente para uma frase nova sem reforço se houver recuperação de bloco pendente.',
+  ].join('\n');
+}
+
+/** Recuperação do bloco atual (sem apagar memória / sem reiniciar a sessão). */
+export function blockRecoveryNudge(opts: {
+  failedGerman: string;
+  sequence: Array<{ german: string; portuguese?: string }>;
+  blockNamePt?: string;
+}): string {
+  const lines = opts.sequence
+    .map((p, i) => `${i + 1}. Modele "${p.german}" → "Agora você." → AGUARDE → confirme com "Perfeito!" se ok.`)
+    .join('\n');
+  return [
+    '[INSTRUÇÃO INTERNA — não leia isto em voz alta]',
+    'RECUPERAÇÃO DE BLOCO L0 — obrigatória (não reinicie a sessão inteira):',
+    `O aluno errou em "${opts.failedGerman}" após avançar no bloco${opts.blockNamePt ? ` "${opts.blockNamePt}"` : ''}.`,
+    'Em português, curto: "Vamos fazer de novo."',
+    'Percorra EM ORDEM, UMA de cada vez, com AGUARDA após cada pedido:',
+    lines,
+    'Só depois de recuperar o bloco, continue a progressão normal.',
+    'NÃO apague progresso. NÃO volte ao nível zero da jornada. Só reforce este bloco.',
+  ].join('\n');
+}
+
+/** Encerramento suave quando o tempo da sessão está no fim. */
+export function zeroLanguageWrapUpNudge(opts: { minutes: number; learnedHint?: string }): string {
+  return [
+    '[INSTRUÇÃO INTERNA — não leia isto em voz alta]',
+    `O tempo da sessão (~${opts.minutes} min) está no fim.`,
+    'NÃO inicie uma sequência longa nova.',
+    'Conclua o exercício atual em 1–2 turnos curtos.',
+    'Em português: "Vamos terminar por hoje."',
+    opts.learnedHint ? `Mencione de forma curta o que praticou: ${opts.learnedHint}` : 'Elogie o esforço em uma frase curta.',
+    'Encerre naturalmente. O app salva o estado.',
   ].join('\n');
 }

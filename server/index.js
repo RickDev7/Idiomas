@@ -4,11 +4,15 @@
 import 'dotenv/config';
 import express from 'express';
 import http from 'node:http';
+import path from 'node:path';
+import fs from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import { GoogleGenAI, Modality } from '@google/genai';
 import crypto from 'node:crypto';
 
 const PORT = process.env.PORT || 8787;
+const HOST = process.env.HOST || '0.0.0.0';
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
 const MODEL = process.env.GEMINI_MODEL || 'gemini-3.1-flash-live-preview';
 const TEXT_MODEL = process.env.GEMINI_TEXT_MODEL || 'gemini-3.6-flash';
@@ -19,6 +23,41 @@ const TEXT_MODEL_FALLBACKS = [
   'gemini-2.0-flash',
 ].filter((m, i, arr) => m && arr.indexOf(m) === i);
 const TOKEN_TTL_MS = 5 * 60 * 1000; // 5 minutos
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const DIST_PATH = path.resolve(__dirname, '../dist');
+
+const DEFAULT_ALLOWED_ORIGINS = [
+  'https://idiomas-kappa.vercel.app',
+  'http://localhost:5173',
+  'http://127.0.0.1:5173',
+  'http://localhost:4173',
+  'http://127.0.0.1:4173',
+  'http://localhost:4175',
+  'http://127.0.0.1:4175',
+];
+
+const ALLOWED_ORIGINS = new Set([
+  ...DEFAULT_ALLOWED_ORIGINS,
+  ...(process.env.ALLOWED_ORIGINS || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean),
+]);
+
+function isAllowedOrigin(origin) {
+  if (!origin) return false;
+  if (ALLOWED_ORIGINS.has(origin)) return true;
+  // Previews Vercel opcionais: ALLOW_VERCEL_PREVIEWS=1
+  if (process.env.ALLOW_VERCEL_PREVIEWS === '1') {
+    try {
+      const host = new URL(origin).hostname;
+      return host.endsWith('.vercel.app');
+    } catch {
+      return false;
+    }
+  }
+  return false;
+}
 
 if (!GEMINI_API_KEY) {
   console.warn('[gemini] GEMINI_API_KEY ausente. /api/gemini/token retornará erro 503.');
@@ -27,14 +66,20 @@ if (!GEMINI_API_KEY) {
 const app = express();
 app.use(express.json({ limit: '256kb' }));
 
-// CORS: permite o frontend dev (Vite) chamar o backend
+// CORS: allowlist (Vercel + localhost). Sem * em produção.
 app.use((req, res, next) => {
   const origin = req.headers.origin;
-  if (origin) res.setHeader('Access-Control-Allow-Origin', origin);
+  if (origin && isAllowedOrigin(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+  }
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
   res.setHeader('Vary', 'Origin');
-  if (req.method === 'OPTIONS') return res.sendStatus(204);
+  if (req.method === 'OPTIONS') {
+    if (origin && !isAllowedOrigin(origin)) return res.sendStatus(403);
+    return res.sendStatus(204);
+  }
   next();
 });
 
@@ -42,6 +87,14 @@ const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
 
 // token efêmero -> sessão
 const sessions = new Map();
+
+app.get('/api/health', (_req, res) => {
+  res.json({
+    ok: true,
+    service: 'deutsch-turbo-backend',
+    geminiConfigured: Boolean(GEMINI_API_KEY),
+  });
+});
 
 function buildSystemInstruction(profile) {
   const known = (profile.knownPhrases || []).slice(0, 12).join('\n');
@@ -673,6 +726,15 @@ wss.on('connection', (ws, req) => {
   });
 });
 
-server.listen(PORT, () => {
-  console.log(`Deutsch Turbo backend rodando em http://localhost:${PORT}`);
+// PWA estático (produção): serve ../dist no mesmo processo do API/WS
+if (fs.existsSync(DIST_PATH)) {
+  app.use(express.static(DIST_PATH, { index: false, maxAge: '1h' }));
+  app.get(/^\/(?!api\/).*/, (_req, res) => {
+    res.sendFile(path.join(DIST_PATH, 'index.html'));
+  });
+  console.log(`[static] servindo PWA de ${DIST_PATH}`);
+}
+
+server.listen(Number(PORT), HOST, () => {
+  console.log(`Deutsch Turbo backend em http://${HOST}:${PORT}`);
 });

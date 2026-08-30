@@ -1,3 +1,5 @@
+import { resolveBackendUrl, httpBackendBase, wsBackendBase } from '@/utils/backendUrl';
+
 export type LiveSessionState = 'idle' | 'connecting' | 'connected' | 'error' | 'reconnecting';
 
 export interface LiveProfile {
@@ -64,7 +66,7 @@ export class GeminiLiveService {
   constructor(profile: LiveProfile, handlers: LiveHandlers, backendUrl?: string) {
     this.profile = profile;
     this.handlers = handlers;
-    this.backendUrl = backendUrl || (import.meta.env.VITE_BACKEND_URL as string) || 'http://localhost:8787';
+    this.backendUrl = resolveBackendUrl(backendUrl);
   }
 
   getState(): LiveSessionState {
@@ -96,7 +98,7 @@ export class GeminiLiveService {
   private async ensureToken(): Promise<void> {
     const now = Date.now();
     if (this.token && now - this.tokenIssuedAt < TOKEN_TTL_MS) return;
-    const res = await fetch(`${this.backendUrl}/api/gemini/token`, {
+    const res = await fetch(`${httpBackendBase(this.backendUrl)}/api/gemini/token`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ profile: this.profile }),
@@ -116,7 +118,7 @@ export class GeminiLiveService {
       try { this.ws.onclose = null; this.ws.onerror = null; this.ws.onmessage = null; this.ws.close(); } catch {}
       this.ws = null;
     }
-    const wsUrl = this.backendUrl.replace(/^http/, 'ws') + `/api/gemini/live?token=${this.token}`;
+    const wsUrl = `${wsBackendBase(this.backendUrl)}/api/gemini/live?token=${this.token}`;
     this.ws = new WebSocket(wsUrl);
 
     this.ws.onopen = () => {

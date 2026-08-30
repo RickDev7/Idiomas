@@ -1,6 +1,8 @@
 /* Tradução DE→PT após o turno completo.
    Cache + dedupe + 429 controlado. Nunca traduz chunk a chunk. */
 
+import { resolveBackendUrl, httpBackendBase } from '@/utils/backendUrl';
+
 export type TranslationStatus = 'HIDDEN' | 'LOADING' | 'READY' | 'ERROR';
 
 export type TranslationErrorCode =
@@ -86,12 +88,7 @@ export const LOCAL_DE_PT: Record<string, string> = {
 };
 
 function backendUrl(): string {
-  try {
-    const env = (import.meta as { env?: { VITE_BACKEND_URL?: string } }).env;
-    return env?.VITE_BACKEND_URL || 'http://localhost:8787';
-  } catch {
-    return 'http://localhost:8787';
-  }
+  return httpBackendBase(resolveBackendUrl());
 }
 
 export function normalizeGerman(text: string): string {

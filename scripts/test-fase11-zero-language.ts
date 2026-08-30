@@ -282,6 +282,68 @@ assert(
 );
 console.log('  ✓ ciclo conjugação Ich arbeiten → Ich arbeite');
 
+// Blocos + recuperação L0
+const {
+  ZERO_LANGUAGE_BLOCKS,
+  getBlockRecoverySequence,
+  shouldRecoverZeroLanguageBlock,
+  zeroLanguageSessionUnits,
+  blockRecoveryNudge,
+} = await import('../src/services/teacher/ZeroLanguageMode');
+assert(ZERO_LANGUAGE_BLOCKS[0].phraseIds[0] === 'l0-guten-morgen', 'bloco 1 começa com Guten Morgen');
+assert(ZERO_LANGUAGE_BLOCKS[0].phraseIds.includes('l0-gute-nacht'), 'bloco 1 tem Gute Nacht');
+assert(shouldRecoverZeroLanguageBlock('l0-gute-nacht', 'INCORRECT', 'mismatch') === true, 'erro no meio do bloco → recovery');
+assert(shouldRecoverZeroLanguageBlock('l0-guten-morgen', 'INCORRECT', 'mismatch') === false, '1ª frase do bloco → sem recovery de bloco');
+assert(shouldRecoverZeroLanguageBlock('l0-gute-nacht', 'NEEDS_REPAIR', 'pronunciation_approx') === false, 'near-miss → sem recovery de bloco');
+const seq = getBlockRecoverySequence('l0-gute-nacht', mergeZeroLanguagePhrases([]));
+assert(seq.length === 3, `recovery seq length 3 (got ${seq.length})`);
+assert(/Guten Morgen/i.test(seq[0].german) && /Gute Nacht/i.test(seq[2].german), 'recovery Morgen→…→Nacht');
+assert(zeroLanguageSessionUnits(20) === 20, 'duração 20 → 20 unidades');
+assert(zeroLanguageSessionUnits(10) === 10, 'duração 10 → 10 unidades');
+const nudgeRec = blockRecoveryNudge({ failedGerman: 'Gute Nacht.', sequence: seq, blockNamePt: 'Cumprimentos' });
+assert(/Vamos fazer de novo|RECUPERAÇÃO DE BLOCO/i.test(nudgeRec), 'nudge recovery');
+assert(/Guten Morgen/i.test(nudgeRec) && /Gute Nacht/i.test(nudgeRec), 'nudge lista o bloco');
+console.log('  ✓ blocos L0 + regra de recuperação');
+
+// Orquestrador: near-miss não agenda recovery; mismatch no meio do bloco agenda
+await EventStore.clear();
+await MemoryService.saveConfidenceMap({});
+const orchNear = ConversationOrchestrator.create({
+  profile: zero,
+  learning: buildLearningProfile(zero, [], [], null, {}),
+  phrases: mergeZeroLanguagePhrases([
+    fakePhrase('l0-guten-morgen', 'Guten Morgen.', 'Bom dia.'),
+  ]),
+  sessionId: 'fase11-near',
+});
+await orchNear.handle({ type: 'SESSION_STARTED' });
+const nearDec = await orchNear.handleUserUtterance('Guten Morgem.');
+assert(
+  nearDec.flow === 'intervenePedagogically' || nearDec.eventsRecorded.includes('PHRASE_FAILED'),
+  'near-miss Morgen intervém',
+);
+const nearOk = await orchNear.handleUserUtterance('Guten Morgen.');
+assert(/Perfeito/i.test(nearOk.geminiNudge || ''), 'near-miss → elogio');
+assert(shouldRecoverZeroLanguageBlock('l0-guten-morgen', 'NEEDS_REPAIR', 'pronunciation_approx') === false, 'flag recovery off p/ near-miss na 1ª');
+console.log('  ✓ near-miss sem recovery de bloco');
+
+// Simula recovery nudge pós-correção compondo as funções (mesmo contrato do orquestrador)
+const failedId = 'l0-gute-nacht';
+const seq2 = getBlockRecoverySequence(failedId, mergeZeroLanguagePhrases([]));
+const composed = [
+  (await import('../src/services/teacher/ZeroLanguageMode')).praiseGuidedRetryNudge('Gute Nacht.'),
+  blockRecoveryNudge({ failedGerman: 'Gute Nacht.', sequence: seq2, blockNamePt: 'Cumprimentos' }),
+].join('\n');
+assert(/Perfeito/i.test(composed) && /Vamos fazer de novo|RECUPERAÇÃO/i.test(composed), 'compose praise+recovery');
+assert(shouldRecoverZeroLanguageBlock(failedId, 'INCORRECT', 'wrong_word'), 'Gute Nacht INCORRECT → recovery flag');
+console.log('  ✓ orquestrador recovery (contrato nudge + flag)');
+
+// Regressão: plano A2 ainda sem ZERO e sem blocos L0 no directive
+const planA2b = buildConversationPlan(profileA2(), learning, phrases);
+assert(!planA2b.teacherDirective.includes('RECUPERAÇÃO DE BLOCO'), 'A2 sem recovery L0');
+assert(!planA2b.teacherDirective.includes('DURAÇÃO DA SESSÃO'), 'A2 sem duração L0 no zero block');
+console.log('  ✓ regressão A2 após política L0');
+
 // Backend Gemini (opcional)
 const BACKEND = process.env.GEMINI_BACKEND_URL || 'http://127.0.0.1:8787';
 try {
@@ -314,4 +376,4 @@ try {
 }
 
 console.log('\nFASE 11 OK (automatizado)');
-console.log('Validação voz real: abrir app com perfil nível 0 → Hallo → Morgem → correção → retry.');
+console.log('Validação voz real L0: PT→Guten Morgen→repita→Morgem→correção→retry→bloco→recovery→tempo.');

@@ -1,4 +1,5 @@
 import { MockAIService } from '@/services/ai/MockAIService';
+import { resolveBackendUrl, httpBackendBase } from '@/utils/backendUrl';
 
 /**
  * GeminiAIService — tarefas de texto/planejamento/análise (não realtime).
@@ -10,12 +11,12 @@ export class GeminiAIService extends MockAIService {
 
   constructor(backendUrl?: string) {
     super();
-    this.backendUrl = backendUrl || (import.meta.env.VITE_BACKEND_URL as string) || 'http://localhost:8787';
+    this.backendUrl = resolveBackendUrl(backendUrl);
   }
 
   private async proxy(action: string, payload: unknown): Promise<any | null> {
     try {
-      const res = await fetch(`${this.backendUrl}/api/gemini/text`, {
+      const res = await fetch(`${httpBackendBase(this.backendUrl)}/api/gemini/text`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action, payload }),

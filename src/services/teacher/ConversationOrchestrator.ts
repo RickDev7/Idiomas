@@ -87,13 +87,19 @@ import { selectRelevantCoachContext } from '@/services/coach/MemoryRelevanceEngi
 import { seedFromUserProfile, loadCoachMemory, saveCoachMemory } from '@/services/coach/CoachMemory';
 import {
   diagnoseProduction,
+  getBlockRecoverySequence,
+  findZeroLanguageBlock,
   isZeroLanguageMode,
   mergeZeroLanguagePhrases,
   pickZeroLanguageTarget,
   praiseGuidedRetryNudge,
+  blockRecoveryNudge,
+  shouldRecoverZeroLanguageBlock,
   teachFromErrorNudge,
   zeroLanguageDirective,
   zeroLanguageKickoff,
+  zeroLanguageWrapUpNudge,
+  L0_MIN_CORRECT_BEFORE_ADVANCE,
   type ProductionErrorType,
 } from '@/services/teacher/ZeroLanguageMode';
 
@@ -351,7 +357,7 @@ function actionLabel(action: OrchestratorAction): string {
   return labels[action];
 }
 
-function buildDirective(plan: Omit<ConversationPlan, 'teacherDirective' | 'actionKickoff'>, zeroMode = false): string {
+function buildDirective(plan: Omit<ConversationPlan, 'teacherDirective' | 'actionKickoff'>, zeroMode = false, sessionMinutes?: number): string {
   const personal = loadPersonalLearningProfile();
   const adapt = geminiAdaptationSnippet(personal);
   const lines = [
@@ -373,6 +379,7 @@ function buildDirective(plan: Omit<ConversationPlan, 'teacherDirective' | 'actio
           targetPt: plan.target?.portuguese,
           scaffoldLevel: plan.scaffoldLevel,
           action: plan.action,
+          sessionMinutes,
         })
       : '',
     'REGRAS:',
@@ -516,7 +523,7 @@ export function buildConversationPlan(
   };
   return {
     ...partial,
-    teacherDirective: buildDirective(partial, zeroMode),
+    teacherDirective: buildDirective(partial, zeroMode, training.totalMinutes),
     actionKickoff: buildActionKickoff(partial, zeroMode),
   };
 }
@@ -530,8 +537,41 @@ export function reevaluatePlan(
   userTurns: number,
 ): ConversationPlan {
   const fresh = buildConversationPlan(profile, learning, phrases, elapsedMs);
-  const stickTarget = previous.target && userTurns % 3 !== 0;
+  const zeroMode = isZeroLanguageMode(profile);
   const prevConf = previous.target ? learning.phrases[previous.target.id] : undefined;
+  const prevTimes = prevConf?.timesCorrect ?? 0;
+  const prevScore = prevConf ? readAutomationScore(prevConf) : 0;
+
+  // L0: permanece na frase até domínio mínimo (não troca a cada 3 turnos)
+  if (zeroMode && previous.target && prevTimes < L0_MIN_CORRECT_BEFORE_ADVANCE && prevScore < 45) {
+    const action: OrchestratorAction =
+      prevTimes === 0 ? 'introduce' : prevScore < 40 ? 'practice' : 'recall';
+    const stageIdx = stageFromElapsed(elapsedMs, previous.training);
+    const stageId = previous.training.stages[stageIdx]?.id ?? previous.stageId;
+    const resolved = resolvePhrase(previous.target.id, phrases);
+    const target = resolved ? phraseToTarget(resolved, prevConf) : { ...previous.target };
+    const partial = {
+      topic: previous.topic,
+      training: previous.training,
+      stageId,
+      action,
+      target,
+      scaffoldLevel: Math.max(
+        scaffoldFor(prevConf, action, previous.target?.id),
+        action === 'introduce' ? 4 : 3,
+      ) as SupportLevel,
+      bottleneck: fresh.bottleneck,
+      actionReason: 'ZERO_LANGUAGE_MODE — manter frase até domínio',
+      previousAction: previous.action,
+    };
+    return {
+      ...partial,
+      teacherDirective: buildDirective(partial, true, previous.training.totalMinutes),
+      actionKickoff: buildActionKickoff(partial, true),
+    };
+  }
+
+  const stickTarget = !zeroMode && previous.target && userTurns % 3 !== 0;
   if (stickTarget && previous.target && prevConf) {
     const nba = decideNextBestAction(prevConf, { bottleneck: learning.bottleneck, sessionGoal: 'auto' });
     const action = mapKind(nba.action);
@@ -552,8 +592,8 @@ export function reevaluatePlan(
     };
     return {
       ...partial,
-      teacherDirective: buildDirective(partial, isZeroLanguageMode(profile)),
-      actionKickoff: buildActionKickoff(partial, isZeroLanguageMode(profile)),
+      teacherDirective: buildDirective(partial, false, previous.training.totalMinutes),
+      actionKickoff: buildActionKickoff(partial, false),
     };
   }
   return fresh;
@@ -643,6 +683,12 @@ export class ConversationOrchestrator {
     errorType: ProductionErrorType;
     hardPart?: string;
   } | null = null;
+  /** L0: após corrigir erro relevante, recuperar o bloco atual (não a sessão inteira). */
+  private pendingBlockRecovery: {
+    phraseId: string;
+    failedGerman: string;
+  } | null = null;
+  private wrapUpSent = false;
 
   private constructor(deps: OrchestratorDeps, plan: ConversationPlan, ctx: ConversationContext) {
     this.profile = deps.profile;
@@ -1034,6 +1080,50 @@ export class ConversationOrchestrator {
     if (this.micro && this.micro.phase !== 'done') return null;
     if (this.pendingTransfer) return null;
 
+    // L0: não saltar para transfer/conversa livre após um acerto — reforçar ou avançar 1 frase no bloco
+    if (isZeroLanguageMode(this.profile)) {
+      const times = conf.timesCorrect ?? 0;
+      const score = readAutomationScore(conf);
+      if (times < L0_MIN_CORRECT_BEFORE_ADVANCE || score < 40) {
+        this.refreshPlan();
+        this.persist();
+        return {
+          flow: 'continueConversation',
+          action: 'practice',
+          mode: 'GUIDED_CONVERSATION',
+          reason: 'ZERO_LANGUAGE_MODE — reforçar mesma frase',
+          targetItem: this.plan.target?.german ?? this.ctx.targetItem,
+          geminiNudge: [
+            '[INSTRUÇÃO INTERNA — não leia isto em voz alta]',
+            'ZERO LANGUAGE MODE — ainda na mesma frase.',
+            'Elogie curto ("Perfeito!").',
+            `Peça de novo sem pressa: modele "${this.plan.target?.german || conf.phraseId}" e diga "Agora você."`,
+            'AGUARDE. Não avance para outra frase ainda.',
+          ].join('\n'),
+          eventsRecorded: [],
+        };
+      }
+      this.refreshPlan();
+      this.persist();
+      const next = this.plan.target;
+      return {
+        flow: 'continueConversation',
+        action: this.plan.action === 'introduce' ? 'introduce' : 'practice',
+        mode: 'GUIDED_CONVERSATION',
+        reason: 'ZERO_LANGUAGE_MODE — próxima frase do bloco (só após domínio)',
+        targetItem: next?.german ?? this.ctx.targetItem,
+        geminiNudge: [
+          '[INSTRUÇÃO INTERNA — não leia isto em voz alta]',
+          'ZERO LANGUAGE MODE — avance UMA frase (se houver nova).',
+          next
+            ? `Nova frase-alvo: "${next.german}" (= ${next.portuguese || ''}). Ciclo PT→modelo→repita→AGUARDE.`
+            : 'Continue reforçando o que já foi ensinado com variação mínima.',
+          'Não faça perguntas abertas. Não despeje várias frases.',
+        ].join('\n'),
+        eventsRecorded: [],
+      };
+    }
+
     const nba = decideNextBestAction(conf, {
       bottleneck: this.learning.bottleneck,
       recentError: this.justErrored,
@@ -1151,6 +1241,28 @@ export class ConversationOrchestrator {
   /** Fase 1A — entrada explícita do turno do aluno (Live). */
   async handleUserUtterance(userUtterance: string): Promise<OrchestratorDecision> {
     return this.handle({ type: 'USER_UTTERANCE', text: userUtterance });
+  }
+
+  /**
+   * L0: quando ~90% do dailyMinutes passou, pedir encerramento suave (sem segunda duração).
+   */
+  maybeZeroLanguageWrapUp(): OrchestratorDecision | null {
+    if (!isZeroLanguageMode(this.profile) || this.wrapUpSent) return null;
+    if (this.pendingCorrectionRetry || this.pendingBlockRecovery) return null;
+    const minutes = this.plan.training?.totalMinutes || this.profile.dailyMinutes || 20;
+    const elapsedMin = (Date.now() - this.startedAt) / 60000;
+    if (elapsedMin < minutes * 0.9) return null;
+    this.wrapUpSent = true;
+    const hint = this.ctx.targetItem || this.plan.target?.german || undefined;
+    return {
+      flow: 'continueConversation',
+      action: this.plan.action,
+      mode: 'GUIDED_CONVERSATION',
+      reason: 'ZERO_LANGUAGE_MODE — wrap_up_por_tempo',
+      targetItem: this.ctx.targetItem,
+      geminiNudge: zeroLanguageWrapUpNudge({ minutes, learnedHint: hint }),
+      eventsRecorded: [],
+    };
   }
 
   /**
@@ -1484,6 +1596,31 @@ export class ConversationOrchestrator {
       this.justErrored = false;
       this.refreshPlan();
       this.persist();
+
+      if (isZeroLanguageMode(this.profile) && this.pendingBlockRecovery) {
+        const recovery = this.pendingBlockRecovery;
+        this.pendingBlockRecovery = null;
+        const sequence = getBlockRecoverySequence(recovery.phraseId, this.phrases);
+        const block = findZeroLanguageBlock(recovery.phraseId);
+        return {
+          flow: 'continueConversation',
+          action: 'practice',
+          mode: this.ctx.mode,
+          reason: `correction_retry_ok_block_recovery:attempt_${pending.attempt}`,
+          correction: pending.expected,
+          targetItem: pending.expected,
+          geminiNudge: [
+            praiseGuidedRetryNudge(pending.expected),
+            blockRecoveryNudge({
+              failedGerman: recovery.failedGerman,
+              sequence,
+              blockNamePt: block?.namePt,
+            }),
+          ].join('\n'),
+          eventsRecorded,
+        };
+      }
+
       return {
         flow: 'continueConversation',
         action: 'practice',
@@ -2059,6 +2196,14 @@ export class ConversationOrchestrator {
         errorType,
         hardPart: diagnosis.hardPart,
       };
+      if (
+        isZeroLanguageMode(this.profile) &&
+        shouldRecoverZeroLanguageBlock(targetId, verdict, errorType)
+      ) {
+        this.pendingBlockRecovery = { phraseId: targetId, failedGerman: target.german };
+      } else {
+        this.pendingBlockRecovery = null;
+      }
       try {
         const { recordSessionMistake } = await import('@/services/teacher/sessionContinuity');
         recordSessionMistake(trimmed, target.german);

@@ -4,6 +4,8 @@
 interface ImportMetaEnv {
   readonly VITE_AI_PROVIDER?: string;
   readonly VITE_AI_PROXY_URL?: string;
+  readonly VITE_USE_GEMINI_LIVE?: string;
+  readonly VITE_BACKEND_URL?: string;
 }
 
 interface ImportMeta {
