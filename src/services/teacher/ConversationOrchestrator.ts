@@ -215,6 +215,7 @@ export interface PersistedOrchestratorState {
   actionReason?: string;
   previousAction?: OrchestratorAction;
   actionHistory?: Array<{ action: string; reason: string; timestamp: string; result?: string }>;
+  l0PhrasePhase?: L0PhrasePhase;
 }
 
 export interface OrchestratorSnapshot {
@@ -577,8 +578,6 @@ export function reevaluatePlan(
   }
 
   const prevConf = previous.target ? learning.phrases[previous.target.id] : undefined;
-  const prevTimes = prevConf?.timesCorrect ?? 0;
-  const prevScore = prevConf ? readAutomationScore(prevConf) : 0;
 
   const stickTarget = !zeroMode && previous.target && userTurns % 3 !== 0;
   if (stickTarget && previous.target && prevConf) {
@@ -1070,6 +1069,7 @@ export class ConversationOrchestrator {
       actionReason: this.plan.actionReason,
       previousAction: this.plan.previousAction,
       actionHistory: this.actionHistory.slice(-12),
+      l0PhrasePhase: this.l0PhrasePhase,
     });
   }
 
