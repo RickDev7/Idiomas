@@ -87,6 +87,9 @@ import { selectRelevantCoachContext } from '@/services/coach/MemoryRelevanceEngi
 import { seedFromUserProfile, loadCoachMemory, saveCoachMemory } from '@/services/coach/CoachMemory';
 import {
   diagnoseProduction,
+  diagnoseAgainstAccepted,
+  buildL0TurnEvalSnapshot,
+  buildL0AcceptedAnswers,
   findZeroLanguageBlock,
   isZeroLanguageMode,
   mergeZeroLanguagePhrases,
@@ -98,7 +101,9 @@ import {
   zeroLanguageKickoff,
   zeroLanguageWrapUpNudge,
   isZeroLanguagePhraseAccepted,
+  L0_MAX_IMMEDIATE_CORRECT_STREAK,
   type L0PhrasePhase,
+  type L0TurnEvalSnapshot,
   type ProductionErrorType,
 } from '@/services/teacher/ZeroLanguageMode';
 
@@ -407,9 +412,17 @@ function buildDirective(plan: Omit<ConversationPlan, 'teacherDirective' | 'actio
 function buildActionKickoff(plan: Omit<ConversationPlan, 'teacherDirective' | 'actionKickoff'>, zeroMode = false): string {
   const target = plan.target;
   if (zeroMode) {
+    if (plan.action === 'converse' || !target) {
+      return [
+        '[INSTRUÇÃO INTERNA — não leia isto em voz alta]',
+        'ZERO LANGUAGE MODE — microbloco concluído / sem repetição imediata.',
+        'Elogie curto. NÃO peça a mesma frase de novo.',
+        'Ou avance para OUTRA frase conhecida, ou encerre o microbloco.',
+      ].join('\n');
+    }
     return zeroLanguageKickoff({
-      targetGerman: target?.german,
-      targetPt: target?.portuguese,
+      targetGerman: target.german,
+      targetPt: target.portuguese,
       scaffoldLevel: plan.scaffoldLevel,
       returning: plan.action === 'recall' || plan.action === 'practice',
     });
@@ -438,7 +451,7 @@ export function buildConversationPlan(
   learning: UserLearningProfile,
   phrases: Phrase[],
   elapsedMs = 0,
-  opts?: { l0BlockReviewPhraseId?: string | null },
+  opts?: { l0BlockReviewPhraseId?: string | null; l0ExcludePhraseId?: string | null },
 ): ConversationPlan {
   const zeroMode = isZeroLanguageMode(profile);
   const phrasePool = zeroMode ? mergeZeroLanguagePhrases(phrases) : phrases;
@@ -463,7 +476,10 @@ export function buildConversationPlan(
       : bottleneck;
 
   const zeroPick = zeroMode
-    ? pickZeroLanguageTarget(learning, phrasePool, { blockReviewPhraseId: opts?.l0BlockReviewPhraseId })
+    ? pickZeroLanguageTarget(learning, phrasePool, {
+      blockReviewPhraseId: opts?.l0BlockReviewPhraseId,
+      excludePhraseId: opts?.l0ExcludePhraseId,
+    })
     : null;
   const picked = zeroPick
     ? { conf: zeroPick.conf, phrase: zeroPick.phrase, action: zeroPick.action as OrchestratorAction }
@@ -498,15 +514,20 @@ export function buildConversationPlan(
       action = 'practice';
     }
   } else {
-    // L0: nunca transfer/spontaneous/converse aberto no plano inicial
-    if (action === 'transfer' || action === 'spontaneous' || action === 'converse' || action === 'automation') {
-      action = picked.conf && (picked.conf.timesCorrect ?? 0) > 0 ? 'practice' : 'introduce';
+    // L0: após currículo aceito, converse/recall espaçado são válidos.
+    // NÃO reescrever converse→practice (isso causava loop "fale de novo").
+    if (action === 'transfer' || action === 'spontaneous' || action === 'automation') {
+      action = picked.phrase
+        ? ((picked.conf?.timesCorrect ?? 0) > 0 ? 'practice' : 'introduce')
+        : 'converse';
     }
   }
 
   const target = picked.phrase ? phraseToTarget(picked.phrase, picked.conf) : null;
   let scaffoldLevel = scaffoldFor(picked.conf, action, picked.phrase?.id || picked.conf?.phraseId);
-  if (zeroMode) scaffoldLevel = Math.max(scaffoldLevel, action === 'introduce' ? 4 : 3) as SupportLevel;
+  if (zeroMode && action !== 'converse') {
+    scaffoldLevel = Math.max(scaffoldLevel, action === 'introduce' ? 4 : 3) as SupportLevel;
+  }
 
   const partial = {
     topic,
@@ -518,6 +539,7 @@ export function buildConversationPlan(
     bottleneck: effectiveBottleneck?.type ?? null,
     actionReason: [
       zeroMode ? 'ZERO_LANGUAGE_MODE — aquisição guiada' : '',
+      zeroPick?.action === 'converse' ? 'L0_CURRICULUM_COMPLETE — sem repetição imediata' : '',
       nba.reason,
       !zeroMode && personal.teachingStrategy.reason ? `adaptação: ${personal.teachingStrategy.reason}` : '',
     ]
@@ -538,10 +560,15 @@ export function reevaluatePlan(
   phrases: Phrase[],
   elapsedMs: number,
   userTurns: number,
-  opts?: { l0BlockReviewPhraseId?: string | null; l0StickPhraseId?: string | null },
+  opts?: {
+    l0BlockReviewPhraseId?: string | null;
+    l0StickPhraseId?: string | null;
+    l0ExcludePhraseId?: string | null;
+  },
 ): ConversationPlan {
   const fresh = buildConversationPlan(profile, learning, phrases, elapsedMs, {
     l0BlockReviewPhraseId: opts?.l0BlockReviewPhraseId,
+    l0ExcludePhraseId: opts?.l0ExcludePhraseId,
   });
   const zeroMode = isZeroLanguageMode(profile);
 
@@ -705,6 +732,17 @@ export class ConversationOrchestrator {
   /** L0: revisões do target — detecta sobrescrita / regressão em logs. */
   private l0TargetRevision = 0;
   private wrapUpSent = false;
+  /** L0: snapshot imutável do alvo no momento em que o professor pediu a resposta. */
+  private l0TurnEvalSnapshot: L0TurnEvalSnapshot | null = null;
+  private l0PreviousTargetId: string | null = null;
+  private l0PreviousTargetText: string | null = null;
+  private l0LastEvalUtteranceKey: string | null = null;
+  private l0EvalSeq = 0;
+  /** Frase aceita mais recente — exclusão de recall imediato. */
+  private l0JustAcceptedId: string | null = null;
+  /** Acertos seguidos no mesmo target sem erro (anti TARGET_STUCK). */
+  private l0CorrectStreakOnTarget = 0;
+  private l0CorrectStreakTargetId: string | null = null;
 
   private logL0(phase: string, extra?: Record<string, unknown>) {
     if (!isZeroLanguageMode(this.profile)) return;
@@ -1095,7 +1133,7 @@ export class ConversationOrchestrator {
     });
   }
 
-  private refreshPlan() {
+  private refreshPlan(excludePhraseId?: string | null) {
     const elapsed = Date.now() - this.startedAt;
     const prevAction = this.plan.action;
     const prevTargetId = this.plan.target?.id ?? null;
@@ -1109,6 +1147,7 @@ export class ConversationOrchestrator {
       {
         l0BlockReviewPhraseId: this.l0BlockReviewPhraseId,
         l0StickPhraseId: this.pendingCorrectionRetry?.phraseId ?? null,
+        l0ExcludePhraseId: excludePhraseId ?? this.l0JustAcceptedId,
       },
     );
     this.plan = { ...this.plan, previousAction: prevAction };
@@ -1122,6 +1161,7 @@ export class ConversationOrchestrator {
       this.logL0('AFTER_PLAN_RECALC', {
         previousTargetId: prevTargetId,
         selectedNextTarget: nextId,
+        excludePhraseId: excludePhraseId ?? this.l0JustAcceptedId,
         recoveryReason: this.pendingBlockRecovery ? 'pendingBlockRecovery' : this.l0BlockReviewPhraseId ? 'blockReview' : null,
       });
     }
@@ -1154,24 +1194,59 @@ export class ConversationOrchestrator {
           eventsRecorded: [],
         };
       }
+
+      // Anti-loop: após aceitar, EXCLUIR esta frase do recall imediato
+      this.l0JustAcceptedId = phraseId;
       this.l0PhrasePhase = 'ADVANCE';
       this.l0BlockReviewPhraseId = null;
-      this.refreshPlan();
+      this.refreshPlan(phraseId);
       this.persist();
       const next = this.plan.target;
+      const sameTarget = !!next && next.id === phraseId;
+      const noTarget = !next;
+
+      this.logL0('AFTER_ACCEPT_ADVANCE', {
+        acceptedId: phraseId,
+        nextTargetId: next?.id ?? null,
+        nextTargetText: next?.german ?? null,
+        action: this.plan.action,
+        targetStuck: sameTarget,
+        reason: sameTarget || noTarget ? 'TARGET_STUCK_OR_CURRICULUM_END' : 'ADVANCE',
+      });
+
+      if (sameTarget || noTarget || this.plan.action === 'converse') {
+        return {
+          flow: 'continueConversation',
+          action: 'converse',
+          mode: 'GUIDED_CONVERSATION',
+          reason: 'ZERO_LANGUAGE_MODE — TARGET_STUCK evitado; sem repetição imediata',
+          targetItem: next?.german ?? this.ctx.targetItem,
+          geminiNudge: [
+            '[INSTRUÇÃO INTERNA — não leia isto em voz alta]',
+            'ZERO LANGUAGE MODE — frase ACEITA. Elogie curto ("Perfeito!").',
+            'PROIBIDO: pedir a MESMA frase de novo ("fale de novo para fixar").',
+            'PROIBIDO: repetição imediata / drill da frase que acabou de acertar.',
+            next && next.id !== phraseId
+              ? `Se continuar, use outra frase já conhecida em RECALL leve: "${next.german}".`
+              : 'Varie: pergunta natural curta ligada ao tema, OU revise OUTRA frase já aprendida, OU encerre o microbloco com "Muito bem. Vamos seguir."',
+            'Domínio (automation) sobe em recall/transfer FUTUROS — não agora.',
+          ].join('\n'),
+          eventsRecorded: [],
+        };
+      }
+
       return {
         flow: 'continueConversation',
-        action: next && (this.learning.phrases[next.id]?.timesCorrect ?? 0) === 0 ? 'introduce' : 'practice',
+        action: this.plan.action === 'recall' ? 'recall' : (this.learning.phrases[next.id]?.timesCorrect ?? 0) === 0 ? 'introduce' : 'practice',
         mode: 'GUIDED_CONVERSATION',
         reason: 'ZERO_LANGUAGE_MODE — frase aceita, próximo alvo',
-        targetItem: next?.german ?? this.ctx.targetItem,
+        targetItem: next.german,
         geminiNudge: [
           '[INSTRUÇÃO INTERNA — não leia isto em voz alta]',
           'ZERO LANGUAGE MODE — frase aceita. Elogie curto ("Perfeito!") e AVANCE.',
-          next
-            ? `Nova frase-alvo ÚNICA: "${next.german}" (= ${next.portuguese || ''}). Ciclo PT→modelo→repita→AGUARDE.`
-            : 'Continue com recall leve da última frase — sem reiniciar o currículo.',
-          'PROIBIDO: voltar para Wie geht\'s / Guten Morgen / Hallo só porque estavam em memória fraca.',
+          `Nova frase-alvo ÚNICA: "${next.german}" (= ${next.portuguese || ''}). Ciclo PT→modelo→repita→AGUARDE.`,
+          'PROIBIDO: voltar para a frase que acabou de acertar.',
+          'PROIBIDO: "fale de novo para fixar" na mesma frase.',
           'Não faça perguntas abertas. Não despeje várias frases.',
         ].join('\n'),
         eventsRecorded: [],
@@ -1523,6 +1598,36 @@ export class ConversationOrchestrator {
     if (/\b(?:sag|wiederhole|say|repeat|diga)\b/i.test(text)) {
       this.recentTeacherRequests = [...this.recentTeacherRequests, text].slice(-8);
     }
+    if (isZeroLanguageMode(this.profile) && this.plan.target) {
+      const tid = this.plan.target.id;
+      const ttext = this.plan.target.german;
+      if (this.l0TurnEvalSnapshot && this.l0TurnEvalSnapshot.targetId !== tid) {
+        this.l0PreviousTargetId = this.l0TurnEvalSnapshot.targetId;
+        this.l0PreviousTargetText = this.l0TurnEvalSnapshot.targetText;
+      } else if (!this.l0PreviousTargetId && this.l0TurnEvalSnapshot) {
+        this.l0PreviousTargetId = this.l0TurnEvalSnapshot.targetId;
+        this.l0PreviousTargetText = this.l0TurnEvalSnapshot.targetText;
+      }
+      this.l0EvalSeq += 1;
+      this.l0TurnEvalSnapshot = buildL0TurnEvalSnapshot({
+        turnId: `${this.sessionId}:teach:${this.l0EvalSeq}`,
+        targetId: tid,
+        targetText: ttext,
+        previousTargetId: this.l0PreviousTargetId,
+        previousTargetText: this.l0PreviousTargetText,
+        teacherText: text,
+      });
+      this.logL0('TEACHER_TURN_SNAPSHOT', {
+        turnId: this.l0TurnEvalSnapshot.turnId,
+        currentTargetId: tid,
+        currentTargetText: ttext,
+        previousTargetId: this.l0PreviousTargetId,
+        previousTargetText: this.l0PreviousTargetText,
+        expectedAnswer: this.l0TurnEvalSnapshot.expectedAnswer,
+        acceptedAnswers: this.l0TurnEvalSnapshot.acceptedAnswers,
+        teacherText: text.slice(0, 160),
+      });
+    }
     this.persist();
     return this.continueResult('fala do professor registrada');
   }
@@ -1618,7 +1723,17 @@ export class ConversationOrchestrator {
     eventsRecorded.push('USER_UTTERANCE');
 
     const diagnosis = diagnoseProduction(trimmed, pending.expected);
-    if (diagnosis.verdict === 'CORRECT' || looksLikeCorrectProduction(trimmed, pending.expected)) {
+    const l0RetryDiag = isZeroLanguageMode(this.profile)
+      ? diagnoseAgainstAccepted(
+        trimmed,
+        buildL0AcceptedAnswers(pending.expected, this.ctx.lastTeacherUtterance || ''),
+        pending.expected,
+      )
+      : null;
+    const retryOk = l0RetryDiag
+      ? l0RetryDiag.verdict === 'CORRECT'
+      : (diagnosis.verdict === 'CORRECT' || looksLikeCorrectProduction(trimmed, pending.expected));
+    if (retryOk) {
       this.pendingCorrectionRetry = null;
       this.ctx.mode = isZeroLanguageMode(this.profile) ? 'GUIDED_CONVERSATION' : 'FREE_CONVERSATION';
       this.ctx.targetItem = pending.expected;
@@ -1656,6 +1771,7 @@ export class ConversationOrchestrator {
       if (isZeroLanguageMode(this.profile)) {
         this.pendingBlockRecovery = null;
         this.l0BlockReviewPhraseId = null;
+        this.l0JustAcceptedId = pending.phraseId;
       }
 
       this.l0PhrasePhase = 'CORRECT';
@@ -1752,6 +1868,18 @@ export class ConversationOrchestrator {
     const trimmed = text.trim();
     if (!trimmed) return this.continueResult('utterance vazia');
 
+    const zeroModeEarly = isZeroLanguageMode(this.profile);
+    const utteranceKeyEarly = `${this.sessionId}:${this.pendingCorrectionRetry?.phraseId || this.plan.target?.id || 'x'}:${trimmed.toLowerCase()}`;
+    if (zeroModeEarly && this.l0LastEvalUtteranceKey === utteranceKeyEarly) {
+      this.logL0('EVAL_IDEMPOTENT_SKIP', {
+        utteranceKey: utteranceKeyEarly,
+        userTranscript: trimmed,
+        currentTargetId: this.plan.target?.id ?? null,
+        currentTargetText: this.plan.target?.german ?? null,
+      });
+      return this.continueResult('utterance_idempotent', { eventsRecorded: [] });
+    }
+
     // Durante microtreino, respostas vão para o ciclo do micro (não para a conversa livre)
     if (this.micro && this.micro.phase !== 'done') {
       return this.onMicroAnswer(trimmed);
@@ -1765,8 +1893,36 @@ export class ConversationOrchestrator {
     }
 
     // Ciclo de correção pendente — avaliar nova tentativa ANTES de outros ramos
+    // L0: se o plano já avançou para outro target e a fala casa com o target ATUAL,
+    // não avaliar o callback antigo contra o target anterior.
     if (this.pendingCorrectionRetry) {
-      return this.onCorrectionRetry(trimmed);
+      if (
+        isZeroLanguageMode(this.profile) &&
+        this.plan.target?.id &&
+        this.pendingCorrectionRetry.phraseId !== this.plan.target.id
+      ) {
+        const currentAccepted = buildL0AcceptedAnswers(
+          this.plan.target.german,
+          this.ctx.lastTeacherUtterance || '',
+        );
+        const currentHit = diagnoseAgainstAccepted(trimmed, currentAccepted, this.plan.target.german);
+        if (currentHit.verdict === 'CORRECT') {
+          this.logL0('STALE_RETRY_IGNORED', {
+            pendingPhraseId: this.pendingCorrectionRetry.phraseId,
+            pendingExpected: this.pendingCorrectionRetry.expected,
+            currentTargetId: this.plan.target.id,
+            currentTargetText: this.plan.target.german,
+            userTranscript: trimmed,
+            evaluationResult: 'CORRECT',
+            matchedTargetId: this.plan.target.id,
+          });
+          this.pendingCorrectionRetry = null;
+        } else {
+          return this.onCorrectionRetry(trimmed);
+        }
+      } else {
+        return this.onCorrectionRetry(trimmed);
+      }
     }
 
     this.userTurns += 1;
@@ -1779,11 +1935,19 @@ export class ConversationOrchestrator {
     const usedHelp = this.helpUsedThisTurn;
     this.helpUsedThisTurn = false;
 
-    const eventsRecorded: LearningEventType[] = [];
-    const expected =
-      this.ctx.mode === 'PEDAGOGICAL_INTERVENTION'
+    // L0: avaliar SEMPRE contra o alemão do target (ou snapshot do turno),
+    // NUNCA contra plan.target.expected truncado ("ich arbeite" de 3 tokens).
+    const zeroMode = isZeroLanguageMode(this.profile);
+    const snap = zeroMode ? this.l0TurnEvalSnapshot : null;
+    const expected = zeroMode
+      ? (snap?.expectedAnswer || this.plan.target?.german || this.ctx.targetItem || null)
+      : this.ctx.mode === 'PEDAGOGICAL_INTERVENTION'
         ? this.ctx.targetItem || this.plan.target?.expected || this.plan.target?.german
         : this.plan.target?.expected || this.plan.target?.german;
+    const utteranceKey = `${this.sessionId}:${this.plan.target?.id || 'x'}:${trimmed.toLowerCase()}`;
+    if (zeroMode) this.l0LastEvalUtteranceKey = utteranceKey;
+
+    const eventsRecorded: LearningEventType[] = [];
     const productionCtx = JSON.stringify({
       text: trimmed,
       sessionId: this.sessionId,
@@ -1793,6 +1957,8 @@ export class ConversationOrchestrator {
       helpUsed: usedHelp,
       independent: !usedHelp,
       lastTeacher: this.ctx.lastTeacherUtterance || null,
+      turnId: snap?.turnId ?? null,
+      acceptedAnswers: snap?.acceptedAnswers ?? null,
     });
 
     await saveLearningEvent('USER_UTTERANCE', {
@@ -2075,7 +2241,62 @@ export class ConversationOrchestrator {
       });
     }
 
-    const verdict = evaluateProduction(trimmed, expected);
+    const l0Accepted = zeroMode
+      ? (snap?.acceptedAnswers?.length
+        ? snap.acceptedAnswers
+        : buildL0AcceptedAnswers(
+          this.plan.target?.german || expected || '',
+          this.ctx.lastTeacherUtterance || '',
+        ))
+      : [];
+    const l0Diag = zeroMode
+      ? diagnoseAgainstAccepted(trimmed, l0Accepted, expected)
+      : null;
+    const verdict: ProductionVerdict = zeroMode
+      ? (l0Diag!.verdict === 'CORRECT'
+        ? 'CORRECT'
+        : l0Diag!.verdict === 'NEEDS_REPAIR'
+          ? 'NEEDS_REPAIR'
+          : l0Diag!.verdict === 'INCORRECT'
+            ? 'INCORRECT'
+            : evaluateProduction(trimmed, expected))
+      : evaluateProduction(trimmed, expected);
+
+    // L0: com target explícito, UNKNOWN não pode “passar” — trata como erro da frase atual
+    const effectiveVerdict: ProductionVerdict =
+      zeroMode && verdict === 'UNKNOWN' && !!(this.plan.target?.german || expected)
+        ? 'INCORRECT'
+        : verdict;
+
+    if (zeroMode) {
+      this.logL0('EVAL_TURN', {
+        sessionId: this.sessionId,
+        turnId: snap?.turnId ?? `user-${this.userTurns}`,
+        utteranceId: utteranceKey,
+        currentTargetId: this.plan.target?.id ?? null,
+        currentTargetText: this.plan.target?.german ?? null,
+        previousTargetId: snap?.previousTargetId ?? this.l0PreviousTargetId,
+        previousTargetText: snap?.previousTargetText ?? this.l0PreviousTargetText,
+        expectedAnswer: expected,
+        acceptedAnswers: l0Accepted,
+        userTranscript: trimmed,
+        evaluationResult: effectiveVerdict,
+        rawVerdict: verdict,
+        matchedTargetId: l0Diag?.matchedAnswer ? this.plan.target?.id ?? null : null,
+        matchedAnswer: l0Diag?.matchedAnswer ?? null,
+        matchScore: effectiveVerdict === 'CORRECT' ? 1 : effectiveVerdict === 'NEEDS_REPAIR' ? 0.5 : 0,
+        nearMiss: l0Diag?.errorType === 'pronunciation_approx' || effectiveVerdict === 'NEEDS_REPAIR',
+        helpLevel: this.sessionSupport,
+        failureCount: this.plan.target?.id
+          ? (this.l0BlockErrors[findZeroLanguageBlock(this.plan.target.id)?.id || ''] ?? 0)
+          : 0,
+        recoveryReason: this.pendingBlockRecovery ? 'pendingBlockRecovery' : null,
+        nextTargetId: this.plan.target?.id ?? null,
+        nextTargetText: this.plan.target?.german ?? null,
+        evaluatedAgainst: expected,
+        truncatedExpectedAvoided: this.plan.target?.expected ?? null,
+      });
+    }
 
     const spontaneous = analyzeSpontaneousUse({
       teacherPrompt: this.ctx.lastTeacherUtterance,
@@ -2184,7 +2405,7 @@ export class ConversationOrchestrator {
       };
     }
 
-    if (this.plan.target?.id && verdict === 'CORRECT') {
+    if (this.plan.target?.id && effectiveVerdict === 'CORRECT') {
       const targetId = this.plan.target.id;
       if (isZeroLanguageMode(this.profile)) {
         this.l0PhrasePhase = 'CORRECT';
@@ -2229,7 +2450,24 @@ export class ConversationOrchestrator {
         eventsRecorded.push('SCAFFOLD_DECREASED');
       }
       this.justErrored = false;
-      this.refreshPlan();
+      if (isZeroLanguageMode(this.profile)) {
+        this.l0JustAcceptedId = targetId;
+        if (this.l0CorrectStreakTargetId === targetId) this.l0CorrectStreakOnTarget += 1;
+        else {
+          this.l0CorrectStreakTargetId = targetId;
+          this.l0CorrectStreakOnTarget = 1;
+        }
+        if (this.l0CorrectStreakOnTarget >= L0_MAX_IMMEDIATE_CORRECT_STREAK) {
+          this.logL0('TARGET_STUCK_STREAK', {
+            targetId,
+            streak: this.l0CorrectStreakOnTarget,
+            action: 'force_exclude_and_advance',
+          });
+        }
+        this.refreshPlan(targetId);
+      } else {
+        this.refreshPlan();
+      }
       this.persist();
       const nba = await this.applyNbaAfterEvidence(targetId);
       if (nba) {
@@ -2237,7 +2475,7 @@ export class ConversationOrchestrator {
       }
     } else if (
       this.plan.target?.id &&
-      (verdict === 'INCORRECT' || verdict === 'NEEDS_REPAIR')
+      (effectiveVerdict === 'INCORRECT' || effectiveVerdict === 'NEEDS_REPAIR')
     ) {
       const target = this.plan.target;
       const targetId = target.id;
@@ -2247,7 +2485,7 @@ export class ConversationOrchestrator {
         context: JSON.stringify({
           text: trimmed,
           expected: target.german,
-          errorType: diagnosis.errorType || (verdict === 'NEEDS_REPAIR' ? 'pronunciation_approx' : 'mismatch'),
+          errorType: diagnosis.errorType || (effectiveVerdict === 'NEEDS_REPAIR' ? 'pronunciation_approx' : 'mismatch'),
           hardPart: diagnosis.hardPart,
           attempt: 1,
         }),
@@ -2263,7 +2501,13 @@ export class ConversationOrchestrator {
       this.ctx.recentMistakes = [`${diagnosis.errorType || 'mismatch'}:${trimmed}`, ...this.ctx.recentMistakes].slice(0, 6);
       this.justErrored = true;
       const errorType: ProductionErrorType =
-        diagnosis.errorType || (verdict === 'NEEDS_REPAIR' ? 'pronunciation_approx' : 'mismatch');
+        diagnosis.errorType || (effectiveVerdict === 'NEEDS_REPAIR' ? 'pronunciation_approx' : 'mismatch');
+      if (isZeroLanguageMode(this.profile)) {
+        this.l0CorrectStreakOnTarget = 0;
+        this.l0CorrectStreakTargetId = null;
+        // Em retry, NÃO excluir o target atual
+        if (this.l0JustAcceptedId === targetId) this.l0JustAcceptedId = null;
+      }
       this.pendingCorrectionRetry = {
         phraseId: targetId,
         expected: target.german,
@@ -2273,9 +2517,9 @@ export class ConversationOrchestrator {
         hardPart: diagnosis.hardPart,
       };
       if (isZeroLanguageMode(this.profile)) {
-        this.l0PhrasePhase = verdict === 'NEEDS_REPAIR' ? 'NEAR_MISS' : 'INCORRECT';
+        this.l0PhrasePhase = effectiveVerdict === 'NEEDS_REPAIR' ? 'NEAR_MISS' : 'INCORRECT';
         const block = findZeroLanguageBlock(targetId);
-        if (block && verdict === 'INCORRECT' && errorType !== 'pronunciation_approx') {
+        if (block && effectiveVerdict === 'INCORRECT' && errorType !== 'pronunciation_approx') {
           this.l0BlockErrors[block.id] = (this.l0BlockErrors[block.id] ?? 0) + 1;
         }
         const blockErrors = block ? (this.l0BlockErrors[block.id] ?? 0) : 0;

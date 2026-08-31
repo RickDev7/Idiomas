@@ -240,12 +240,20 @@ export function zeroLanguageSessionUnits(dailyMinutes: number): number {
   return m;
 }
 
+/** Máximo de acertos seguidos no MESMO target sem erro antes de forçar rotação (anti-loop). */
+export const L0_MAX_IMMEDIATE_CORRECT_STREAK = 2;
+
 export function pickZeroLanguageTarget(
   learning: UserLearningProfile,
   phrases: Phrase[],
-  opts?: { blockReviewPhraseId?: string | null },
-): { conf: PhraseConfidence | undefined; phrase: Phrase | null; action: 'introduce' | 'practice' | 'recall' } {
+  opts?: {
+    blockReviewPhraseId?: string | null;
+    /** Frase acabada de acertar — não repetir imediatamente no recall. */
+    excludePhraseId?: string | null;
+  },
+): { conf: PhraseConfidence | undefined; phrase: Phrase | null; action: 'introduce' | 'practice' | 'recall' | 'converse' } {
   const pool = mergeZeroLanguagePhrases(phrases);
+  const exclude = opts?.excludePhraseId || null;
 
   // Modo BLOCK_REVIEW: reforço local do bloco atual (não volta à sessão inteira)
   if (opts?.blockReviewPhraseId) {
@@ -276,21 +284,60 @@ export function pickZeroLanguageTarget(
     return { conf, phrase, action: 'practice' };
   }
 
-  // Todas aceitas: recall da ÚLTIMA frase tocada (estável) — evita loop Hallo↔Ich heiße↔…
-  const lastTouched =
-    [...L0_PRIORITY_IDS].reverse().find((id) => isZeroLanguagePhraseAccepted(learning.phrases[id])) ||
-    null;
-  if (lastTouched) {
-    const phrase = pool.find((p) => p.id === lastTouched) || null;
+  // Todas aceitas.
+  // Sem exclude (abertura de plano): recall estável da última do currículo.
+  // Com exclude (após CORRECT): NUNCA repetir a frase que acabou de acertar.
+  const acceptedIds = L0_PRIORITY_IDS.filter((id) => isZeroLanguagePhraseAccepted(learning.phrases[id]));
+
+  if (!exclude) {
+    const lastTouched =
+      [...L0_PRIORITY_IDS].reverse().find((id) => isZeroLanguagePhraseAccepted(learning.phrases[id])) ||
+      null;
+    if (lastTouched) {
+      const phrase = pool.find((p) => p.id === lastTouched) || null;
+      return {
+        conf: learning.phrases[lastTouched],
+        phrase,
+        action: 'recall',
+      };
+    }
+  }
+
+  const spaced = acceptedIds.filter((id) => id !== exclude);
+  const pickSpaced = (ids: string[]) => {
+    let best: { id: string; score: number } | null = null;
+    for (const id of ids) {
+      const conf = learning.phrases[id];
+      if (!conf) continue;
+      const auto = typeof conf.automationScore === 'number' ? conf.automationScore : 50;
+      const last = conf.lastProduced ? Date.parse(conf.lastProduced) : 0;
+      const score = auto * 10 + (last ? last / 1e12 : 0);
+      if (!best || score < best.score) best = { id, score };
+    }
+    return best?.id || ids[0] || null;
+  };
+
+  const spacedId = pickSpaced(spaced);
+  if (spacedId) {
+    const phrase = pool.find((p) => p.id === spacedId) || null;
     return {
-      conf: learning.phrases[lastTouched],
+      conf: learning.phrases[spacedId],
       phrase,
       action: 'recall',
     };
   }
 
+  // Só restava a frase excluída — NÃO repetir imediatamente
+  if (exclude && acceptedIds.includes(exclude)) {
+    return {
+      conf: learning.phrases[exclude],
+      phrase: null,
+      action: 'converse',
+    };
+  }
+
   const fallback = pool[pool.length - 1] || null;
-  return { conf: fallback ? learning.phrases[fallback.id] : undefined, phrase: fallback, action: 'recall' };
+  return { conf: fallback ? learning.phrases[fallback.id] : undefined, phrase: fallback, action: 'converse' };
 }
 
 /**
@@ -316,6 +363,113 @@ export function l0PhrasesForLiveProfile(learning: UserLearningProfile): {
 /**
  * Diagnóstico de produção vs alvo — inclui near-miss de pronúncia (Morgem ≈ Morgen).
  */
+/**
+ * Snapshot de avaliação do turno L0 — “o que o professor pediu agora”
+ * vs o target do plano (podem divergir se o Live inventar variação).
+ */
+export interface L0TurnEvalSnapshot {
+  turnId: string;
+  targetId: string;
+  targetText: string;
+  previousTargetId: string | null;
+  previousTargetText: string | null;
+  expectedAnswer: string;
+  acceptedAnswers: string[];
+  teacherText: string;
+}
+
+function pushUnique(list: string[], value: string) {
+  const v = value.trim();
+  if (!v) return;
+  if (!list.some((x) => normalizeDe(x) === normalizeDe(v))) list.push(v);
+}
+
+/**
+ * Respostas aceitáveis para o target L0, incluindo respostas naturais
+ * quando o professor elicita com pergunta/variação (ex.: Arbeitest du? → Ja, ich arbeite.).
+ * Não aceita frases aleatórias só por overlap de palavras.
+ */
+export function buildL0AcceptedAnswers(targetGerman: string, teacherText = ''): string[] {
+  const primary = (targetGerman || '').trim();
+  const out: string[] = [];
+  if (!primary) return out;
+  pushUnique(out, primary);
+  pushUnique(out, primary.replace(/[.?!…]+$/u, ''));
+
+  const teacher = teacherText || '';
+  const stemArbeite = /ich\s+arbeite\b/i.test(primary);
+  const stemGeht = /wie\s+geht/i.test(primary) || /mir\s+geht/i.test(primary);
+  const teacherAsksArbeitest = /arbeitest\s+du\b/i.test(teacher);
+  const teacherAsksGeht = /wie\s+geht/i.test(teacher);
+
+  if (stemArbeite) {
+    pushUnique(out, 'Ja, ich arbeite.');
+    pushUnique(out, 'Ja ich arbeite.');
+    if (teacherAsksArbeitest) {
+      pushUnique(out, 'Arbeitest du?');
+      pushUnique(out, 'Arbeitest du.');
+      pushUnique(out, 'Ja.');
+      pushUnique(out, 'Ja');
+    }
+  }
+
+  if (stemGeht || teacherAsksGeht) {
+    pushUnique(out, 'Mir geht es gut.');
+    pushUnique(out, "Mir geht's gut.");
+    pushUnique(out, 'Mir gehts gut.');
+    pushUnique(out, 'Gut.');
+    if (/wie\s+geht/i.test(primary) || teacherAsksGeht) {
+      pushUnique(out, 'Mir geht es gut.');
+    }
+  }
+
+  return out;
+}
+
+export function buildL0TurnEvalSnapshot(opts: {
+  turnId: string;
+  targetId: string;
+  targetText: string;
+  previousTargetId?: string | null;
+  previousTargetText?: string | null;
+  teacherText: string;
+}): L0TurnEvalSnapshot {
+  const expectedAnswer = opts.targetText;
+  return {
+    turnId: opts.turnId,
+    targetId: opts.targetId,
+    targetText: opts.targetText,
+    previousTargetId: opts.previousTargetId ?? null,
+    previousTargetText: opts.previousTargetText ?? null,
+    expectedAnswer,
+    acceptedAnswers: buildL0AcceptedAnswers(opts.targetText, opts.teacherText),
+    teacherText: opts.teacherText,
+  };
+}
+
+/** Avalia contra a lista de respostas aceitas do turno (primeira CORRECT vence). */
+export function diagnoseAgainstAccepted(
+  text: string,
+  acceptedAnswers: string[],
+  fallbackExpected?: string | null,
+): ProductionDiagnosis & { matchedAnswer: string | null } {
+  const list = acceptedAnswers.filter(Boolean);
+  if (list.length === 0) {
+    const d = diagnoseProduction(text, fallbackExpected);
+    return { ...d, matchedAnswer: d.verdict === 'CORRECT' ? (fallbackExpected || null) : null };
+  }
+  let best: ProductionDiagnosis | null = null;
+  for (const a of list) {
+    const d = diagnoseProduction(text, a);
+    if (d.verdict === 'CORRECT') return { ...d, matchedAnswer: a };
+    if (!best) best = d;
+    else if (d.verdict === 'NEEDS_REPAIR' && best.verdict === 'INCORRECT') best = d;
+    else if (d.verdict === 'NEEDS_REPAIR' && best.verdict === 'UNKNOWN') best = d;
+  }
+  const fallback = best || diagnoseProduction(text, fallbackExpected || list[0]);
+  return { ...fallback, matchedAnswer: null };
+}
+
 export function diagnoseProduction(text: string, expected?: string | null): ProductionDiagnosis {
   const userSaid = text.trim();
   const user = normalizeDe(userSaid);
