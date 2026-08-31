@@ -133,8 +133,32 @@ export const ZERO_LANGUAGE_BLOCKS: Array<{ id: string; namePt: string; phraseIds
   },
 ];
 
+/**
+ * Ponte L0 → frases funcionais curtas (estilo A1) após esgotar o currículo core.
+ * Não muda o nível do perfil; só amplia o pool pedagógico L0.
+ */
+export const L0_BRIDGE_A1_SPECS: Array<{ id: string; german: string; portuguese: string }> = [
+  { id: 'l0-bridge-wo-arbeitest', german: 'Wo arbeitest du?', portuguese: 'Onde você trabalha?' },
+  { id: 'l0-bridge-ich-arbeite-in', german: 'Ich arbeite in...', portuguese: 'Eu trabalho em...' },
+  { id: 'l0-bridge-wann-arbeitest', german: 'Wann arbeitest du?', portuguese: 'Quando você trabalha?' },
+  { id: 'l0-bridge-ich-wohne-in', german: 'Ich wohne in Cuxhaven.', portuguese: 'Eu moro em Cuxhaven.' },
+  { id: 'l0-bridge-ich-komme-aus', german: 'Ich komme aus Brasilien.', portuguese: 'Eu venho do Brasil.' },
+  { id: 'l0-bridge-ich-heisse-name', german: 'Ich heiße Rick.', portuguese: 'Eu me chamo Rick.' },
+  { id: 'l0-bridge-was-machst', german: 'Was machst du?', portuguese: 'O que você faz?' },
+  { id: 'l0-bridge-ich-arbeite-heute', german: 'Ich arbeite heute.', portuguese: 'Eu trabalho hoje.' },
+];
+
+const L0_GREETING_IDS = new Set(
+  ZERO_LANGUAGE_BLOCKS.find((b) => b.id === 'greetings')?.phraseIds || [],
+);
+
+export function isL0GreetingPhraseId(phraseId: string): boolean {
+  return L0_GREETING_IDS.has(phraseId);
+}
+
 export function zeroLanguageSeedPhrases(): Phrase[] {
-  return ZERO_LANGUAGE_SEED_SPECS.map((s) => ({
+  const specs = [...ZERO_LANGUAGE_SEED_SPECS, ...L0_BRIDGE_A1_SPECS];
+  return specs.map((s) => ({
     id: s.id,
     german: s.german,
     portuguese: s.portuguese,
@@ -164,6 +188,16 @@ export function mergeZeroLanguagePhrases(phrases: Phrase[]): Phrase[] {
 }
 
 const L0_PRIORITY_IDS = ZERO_LANGUAGE_BLOCKS.flatMap((b) => b.phraseIds);
+const L0_BRIDGE_PRIORITY_IDS = L0_BRIDGE_A1_SPECS.map((s) => s.id);
+
+/** Currículo core L0 (cumprimentos → sobrevivência) esgotado = todas aceitas. */
+export function isL0CoreCurriculumComplete(learning: UserLearningProfile): boolean {
+  return L0_PRIORITY_IDS.every((id) => isZeroLanguagePhraseAccepted(learning.phrases[id]));
+}
+
+export function isL0BridgeCurriculumComplete(learning: UserLearningProfile): boolean {
+  return L0_BRIDGE_PRIORITY_IDS.every((id) => isZeroLanguagePhraseAccepted(learning.phrases[id]));
+}
 
 /**
  * Acertos necessários para AVANÇAR à próxima frase (aceitação).
@@ -273,8 +307,9 @@ export const L0_MAX_CORRECTION_ATTEMPTS = 2;
 /** Estimativa de frases novas exploráveis por orçamento de minutos (não é teto rígido). */
 export function l0ExpectedCoverageForMinutes(dailyMinutes: number): number {
   const m = Math.max(10, Math.min(90, dailyMinutes || 20));
-  // ~1 frase nova / 1.5–2 min no início; sessões longas exploram mais
-  return Math.max(6, Math.min(L0_PRIORITY_IDS.length, Math.round(m / 1.75)));
+  const poolLen = L0_PRIORITY_IDS.length + L0_BRIDGE_PRIORITY_IDS.length;
+  // ~1 frase nova / 1.5–2 min no início; sessões longas exploram mais (core + ponte)
+  return Math.max(6, Math.min(poolLen, Math.round(m / 1.75)));
 }
 
 export function pickZeroLanguageTarget(
@@ -323,26 +358,30 @@ export function pickZeroLanguageTarget(
     return { conf, phrase, action: 'practice' };
   }
 
-  // Todas aceitas.
-  // Sem exclude (abertura de plano): recall estável da última do currículo.
-  // Com exclude (após CORRECT): NUNCA repetir a frase que acabou de acertar.
-  const acceptedIds = L0_PRIORITY_IDS.filter((id) => isZeroLanguagePhraseAccepted(learning.phrases[id]));
-
-  if (!exclude) {
-    const lastTouched =
-      [...L0_PRIORITY_IDS].reverse().find((id) => isZeroLanguagePhraseAccepted(learning.phrases[id])) ||
-      null;
-    if (lastTouched) {
-      const phrase = pool.find((p) => p.id === lastTouched) || null;
-      return {
-        conf: learning.phrases[lastTouched],
-        phrase,
-        action: 'recall',
-      };
+  // Core completo → ponte funcional A1 (ainda em modo L0: uma frase por vez)
+  for (const id of L0_BRIDGE_PRIORITY_IDS) {
+    if (skip.has(id)) continue;
+    const phrase = pool.find((p) => p.id === id) || null;
+    if (!phrase) continue;
+    const conf = learning.phrases[id];
+    if (conf && isAutomated(conf)) continue;
+    if (isZeroLanguagePhraseAccepted(conf)) continue;
+    const times = conf?.timesCorrect ?? 0;
+    if (!conf || conf.state === 'new' || times === 0) {
+      return { conf, phrase, action: 'introduce' };
     }
+    return { conf, phrase, action: 'practice' };
   }
 
-  const spaced = acceptedIds.filter((id) => id !== exclude);
+  // Core + ponte aceitos.
+  // Recall: NUNCA priorizar greetings já aceitos (timesCorrect>=1) nesta sessão de planejamento.
+  const acceptedCore = L0_PRIORITY_IDS.filter((id) => isZeroLanguagePhraseAccepted(learning.phrases[id]));
+  const acceptedBridge = L0_BRIDGE_PRIORITY_IDS.filter((id) => isZeroLanguagePhraseAccepted(learning.phrases[id]));
+  const acceptedIds = [...acceptedCore, ...acceptedBridge];
+  const recallEligible = acceptedIds.filter(
+    (id) => id !== exclude && !isL0GreetingPhraseId(id),
+  );
+
   const pickSpaced = (ids: string[]) => {
     let best: { id: string; score: number } | null = null;
     for (const id of ids) {
@@ -356,7 +395,24 @@ export function pickZeroLanguageTarget(
     return best?.id || ids[0] || null;
   };
 
-  const spacedId = pickSpaced(spaced);
+  if (!exclude) {
+    const lastFunctional =
+      [...L0_BRIDGE_PRIORITY_IDS].reverse().find((id) => isZeroLanguagePhraseAccepted(learning.phrases[id])) ||
+      [...L0_PRIORITY_IDS].reverse().find(
+        (id) => isZeroLanguagePhraseAccepted(learning.phrases[id]) && !isL0GreetingPhraseId(id),
+      ) ||
+      null;
+    if (lastFunctional) {
+      const phrase = pool.find((p) => p.id === lastFunctional) || null;
+      return {
+        conf: learning.phrases[lastFunctional],
+        phrase,
+        action: 'recall',
+      };
+    }
+  }
+
+  const spacedId = pickSpaced(recallEligible);
   if (spacedId) {
     const phrase = pool.find((p) => p.id === spacedId) || null;
     return {
@@ -366,22 +422,29 @@ export function pickZeroLanguageTarget(
     };
   }
 
-  // Só restava a frase excluída — NÃO repetir imediatamente
-  if (exclude && acceptedIds.includes(exclude)) {
+  // Sem recall funcional elegível → converse (expansão no nudge; sem voltar a greetings)
+  const expandBase =
+    [...L0_BRIDGE_PRIORITY_IDS, ...L0_PRIORITY_IDS]
+      .reverse()
+      .find((id) => isZeroLanguagePhraseAccepted(learning.phrases[id]) && !isL0GreetingPhraseId(id)) ||
+    exclude ||
+    null;
+  if (expandBase) {
     return {
-      conf: learning.phrases[exclude],
+      conf: learning.phrases[expandBase],
       phrase: null,
       action: 'converse',
     };
   }
 
-  const fallback = pool[pool.length - 1] || null;
+  const fallback = pool.find((p) => L0_BRIDGE_PRIORITY_IDS.includes(p.id)) || pool[pool.length - 1] || null;
   return { conf: fallback ? learning.phrases[fallback.id] : undefined, phrase: fallback, action: 'converse' };
 }
 
 /**
  * L0 → Gemini Live: frases já ACEITAS não entram em "FRACAS (reforce)".
  * Caso contrário o model volta para Wie geht's / Morgen após erro em frase nova.
+ * Greetings aceitos não vão para known no topo (evita Gemini reiniciar em Morgen).
  */
 export function l0PhrasesForLiveProfile(learning: UserLearningProfile): {
   knownPhrases: string[];
@@ -389,14 +452,60 @@ export function l0PhrasesForLiveProfile(learning: UserLearningProfile): {
 } {
   const all = Object.values(learning.phrases);
   const knownPhrases = all
-    .filter((c) => isZeroLanguagePhraseAccepted(c))
+    .filter((c) => isZeroLanguagePhraseAccepted(c) && !isL0GreetingPhraseId(c.phraseId))
     .map((c) => c.phraseId)
     .slice(0, 16);
+  // Se só há greetings conhecidos, manter um mínimo sem priorizar o bloco inteiro
+  const knownFallback = knownPhrases.length
+    ? knownPhrases
+    : all.filter((c) => isZeroLanguagePhraseAccepted(c)).map((c) => c.phraseId).slice(0, 4);
   const weakPhrases = all
     .filter((c) => !isZeroLanguagePhraseAccepted(c) && c.confidence > 0 && c.confidence < 40)
     .map((c) => c.phraseId)
     .slice(0, 6);
-  return { knownPhrases, weakPhrases };
+  return { knownPhrases: knownFallback, weakPhrases };
+}
+
+/** Expansões funcionais curtas a partir do último target conhecido (L0). */
+export function l0FunctionalExpansionsFor(baseGerman: string | null | undefined): string[] {
+  const g = (baseGerman || '').toLowerCase();
+  if (/arbeite|arbeitest/.test(g)) {
+    return ['Wo arbeitest du?', 'Ich arbeite in...', 'Wann arbeitest du?', 'Ich arbeite heute.'];
+  }
+  if (/wohne|wohnst/.test(g)) {
+    return ['Ich wohne in Cuxhaven.', 'Ich wohne in...'];
+  }
+  if (/heiße|heisse/.test(g)) {
+    return ['Ich heiße Rick.', 'Ich heiße...'];
+  }
+  if (/komme|kommst/.test(g)) {
+    return ['Ich komme aus Brasilien.', 'Ich komme aus...'];
+  }
+  if (/bin\b/.test(g)) {
+    return ['Ich bin Student.', 'Ich bin...'];
+  }
+  return ['Wo arbeitest du?', 'Ich arbeite heute.', 'Was machst du?'];
+}
+
+/** Nudge: converse após currículo core — EXPANDIR, não recycle greetings. */
+export function l0ConverseExpandNudge(opts: {
+  lastGerman?: string | null;
+  nextBridgeGerman?: string | null;
+}): string {
+  const base = opts.lastGerman || 'Ich arbeite.';
+  const expansions = l0FunctionalExpansionsFor(base);
+  const next = opts.nextBridgeGerman || expansions[0];
+  return [
+    '[INSTRUÇÃO INTERNA — não leia isto em voz alta]',
+    'ZERO LANGUAGE MODE — CURRÍCULO INICIAL COMPLETO: EXPANDIR (não reiniciar).',
+    'Elogie curto ("Perfeito!").',
+    'PROIBIDO: Guten Morgen / Wie geht\'s / Hallo / Tschüss só por hábito.',
+    'PROIBIDO: repetir a mesma frase conhecida sem variação.',
+    `Base conhecida: "${base}".`,
+    `ENSINE UMA expansão funcional curta AGORA (ciclo PT→modelo→repita→AGUARDE): "${next}".`,
+    `Alternativas OK (uma só): ${expansions.slice(0, 3).map((e) => `"${e}"`).join(' | ')}.`,
+    'Continua L0: frases curtas, uma estrutura, português de suporte, correção local.',
+  ].join('\n');
 }
 
 /**

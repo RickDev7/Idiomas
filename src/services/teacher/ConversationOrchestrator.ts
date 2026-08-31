@@ -102,6 +102,10 @@ import {
   zeroLanguageKickoff,
   zeroLanguageWrapUpNudge,
   isZeroLanguagePhraseAccepted,
+  isL0CoreCurriculumComplete,
+  isL0GreetingPhraseId,
+  l0ConverseExpandNudge,
+  L0_BRIDGE_A1_SPECS,
   L0_MAX_IMMEDIATE_CORRECT_STREAK,
   L0_MAX_CORRECTION_ATTEMPTS,
   type L0PhrasePhase,
@@ -415,12 +419,10 @@ function buildActionKickoff(plan: Omit<ConversationPlan, 'teacherDirective' | 'a
   const target = plan.target;
   if (zeroMode) {
     if (plan.action === 'converse' || !target) {
-      return [
-        '[INSTRUÇÃO INTERNA — não leia isto em voz alta]',
-        'ZERO LANGUAGE MODE — microbloco concluído / sem repetição imediata.',
-        'Elogie curto. NÃO peça a mesma frase de novo.',
-        'Ou avance para OUTRA frase conhecida, ou encerre o microbloco.',
-      ].join('\n');
+      return l0ConverseExpandNudge({
+        lastGerman: target?.german || null,
+        nextBridgeGerman: L0_BRIDGE_A1_SPECS[0]?.german || 'Wo arbeitest du?',
+      });
     }
     return zeroLanguageKickoff({
       targetGerman: target.german,
@@ -542,7 +544,10 @@ export function buildConversationPlan(
     bottleneck: effectiveBottleneck?.type ?? null,
     actionReason: [
       zeroMode ? 'ZERO_LANGUAGE_MODE — aquisição guiada' : '',
-      zeroPick?.action === 'converse' ? 'L0_CURRICULUM_COMPLETE — sem repetição imediata' : '',
+      zeroMode && zeroPick?.action === 'introduce' && isL0CoreCurriculumComplete(learning)
+        ? 'L0_BRIDGE_A1 — conteúdo funcional após currículo inicial'
+        : '',
+      zeroPick?.action === 'converse' ? 'L0_CURRICULUM_COMPLETE — expandir (sem recycle greetings)' : '',
       nba.reason,
       !zeroMode && personal.teachingStrategy.reason ? `adaptação: ${personal.teachingStrategy.reason}` : '',
     ]
@@ -1249,22 +1254,37 @@ export class ConversationOrchestrator {
       });
 
       if (sameTarget || noTarget || this.plan.action === 'converse') {
+        const lastDe =
+          this.learning.phrases[phraseId]
+            ? (resolvePhrase(phraseId, this.phrases)?.german || this.ctx.targetItem)
+            : this.ctx.targetItem;
+        const nextBridge = L0_BRIDGE_A1_SPECS.find(
+          (s) => !isZeroLanguagePhraseAccepted(this.learning.phrases[s.id]),
+        );
+        const coreDone = isL0CoreCurriculumComplete(this.learning);
         return {
           flow: 'continueConversation',
           action: 'converse',
           mode: 'GUIDED_CONVERSATION',
-          reason: 'ZERO_LANGUAGE_MODE — TARGET_STUCK evitado; sem repetição imediata',
-          targetItem: next?.german ?? this.ctx.targetItem,
-          geminiNudge: [
-            '[INSTRUÇÃO INTERNA — não leia isto em voz alta]',
-            'ZERO LANGUAGE MODE — frase ACEITA. Elogie curto ("Perfeito!").',
-            'PROIBIDO: pedir a MESMA frase de novo ("fale de novo para fixar").',
-            'PROIBIDO: repetição imediata / drill da frase que acabou de acertar.',
-            next && next.id !== phraseId
-              ? `Se continuar, use outra frase já conhecida em RECALL leve: "${next.german}".`
-              : 'Varie: pergunta natural curta ligada ao tema, OU revise OUTRA frase já aprendida, OU encerre o microbloco com "Muito bem. Vamos seguir."',
-            'Domínio (automation) sobe em recall/transfer FUTUROS — não agora.',
-          ].join('\n'),
+          reason: coreDone
+            ? 'ZERO_LANGUAGE_MODE — L0_CURRICULUM_COMPLETE; expandir funcional'
+            : 'ZERO_LANGUAGE_MODE — TARGET_STUCK evitado; sem repetição imediata',
+          targetItem: next?.german ?? nextBridge?.german ?? this.ctx.targetItem,
+          geminiNudge: coreDone
+            ? l0ConverseExpandNudge({
+              lastGerman: lastDe,
+              nextBridgeGerman: nextBridge?.german || next?.german || null,
+            })
+            : [
+              '[INSTRUÇÃO INTERNA — não leia isto em voz alta]',
+              'ZERO LANGUAGE MODE — frase ACEITA. Elogie curto ("Perfeito!").',
+              'PROIBIDO: pedir a MESMA frase de novo ("fale de novo para fixar").',
+              'PROIBIDO: repetição imediata / drill da frase que acabou de acertar.',
+              'PROIBIDO: voltar a Guten Morgen / Wie geht\'s se já aceitos nesta sessão.',
+              next && next.id !== phraseId && !isL0GreetingPhraseId(next.id)
+                ? `Avance: Nova frase-alvo ÚNICA "${next.german}". Ciclo PT→modelo→repita→AGUARDE.`
+                : 'Continue com a PRÓXIMA estrutura do currículo (não greetings).',
+            ].join('\n'),
           eventsRecorded: [],
         };
       }

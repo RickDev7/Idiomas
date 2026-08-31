@@ -68,19 +68,24 @@ const phrases = mergeZeroLanguagePhrases([
   fakePhrase('survival-arbeite', 'Ich arbeite.', 'Eu trabalho.'),
 ]);
 
-// --- pick: currículo todo aceito → última estável; exclude → não repete ---
+// --- pick: core aceito → ponte A1; exclude não repete a ponte ---
 {
   const all: Record<string, PhraseConfidence> = Object.fromEntries(
     ALL_IDS.map((id) => [id, acceptConf(id)]),
   );
-  const lastId = ALL_IDS[ALL_IDS.length - 1];
   const stuck = pickZeroLanguageTarget(buildLearningProfile(zero, [], [], null, all), phrases);
-  assert(stuck.phrase?.id === lastId, `sem exclude = última (${stuck.phrase?.id})`);
-  const rotated = pickZeroLanguageTarget(buildLearningProfile(zero, [], [], null, all), phrases, {
-    excludePhraseId: lastId,
+  assert(stuck.phrase?.id === 'l0-bridge-wo-arbeitest', `core complete → ponte (${stuck.phrase?.id})`);
+  assert(stuck.action === 'introduce', `ponte introduce (${stuck.action})`);
+  const afterBridge = {
+    ...all,
+    'l0-bridge-wo-arbeitest': acceptConf('l0-bridge-wo-arbeitest'),
+  };
+  const rotated = pickZeroLanguageTarget(buildLearningProfile(zero, [], [], null, afterBridge), phrases, {
+    excludePhraseId: 'l0-bridge-wo-arbeitest',
   });
-  assert(rotated.phrase?.id !== lastId, `exclude → next != ${lastId} (got ${rotated.phrase?.id} action=${rotated.action})`);
-  console.log('  ✓ pickZeroLanguageTarget exclude evita última imediata →', rotated.phrase?.id || rotated.action);
+  assert(rotated.phrase?.id !== 'l0-bridge-wo-arbeitest', `exclude → next != bridge (got ${rotated.phrase?.id})`);
+  assert(rotated.phrase?.id !== 'l0-guten-morgen', 'exclude não volta a Morgen');
+  console.log('  ✓ pickZeroLanguageTarget ponte + exclude →', rotated.phrase?.id || rotated.action);
 }
 
 // --- TESTE: 1 CORRECT → ADVANCE (próximo ≠ mesmo) ---

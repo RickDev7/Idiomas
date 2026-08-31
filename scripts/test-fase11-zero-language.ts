@@ -655,7 +655,7 @@ assert(detectTargetLoop(['x', 'A', 'B', 'A', 'B', 'A', 'B']) === true, 'loop A-B
 assert(detectTargetLoop(['A', 'B', 'C', 'D', 'E', 'F']) === false, 'progressão sem loop');
 console.log('  ✓ LOOP_DETECTED helper');
 
-// All-accepted recall estável (última do currículo expandido)
+// All-accepted core → ponte A1 (não recall de Hallo / última core)
 const learnAll = buildLearningProfile(zero, [], [], null, {});
 const allIds = ZERO_LANGUAGE_BLOCKS.flatMap((b) => b.phraseIds);
 for (const id of allIds) {
@@ -668,9 +668,10 @@ for (const id of allIds) {
 }
 const p1 = pickZeroLanguageTarget(learnAll, mergeZeroLanguagePhrases([]));
 const p2 = pickZeroLanguageTarget(learnAll, mergeZeroLanguagePhrases([]));
-assert(p1.phrase?.id === p2.phrase?.id, `recall estável (${p1.phrase?.id})`);
-assert(p1.phrase?.id === allIds[allIds.length - 1], `recall = última (${p1.phrase?.id})`);
-console.log('  ✓ recall all-accepted estável (sem loop Hallo)');
+assert(p1.phrase?.id === p2.phrase?.id, `pick estável (${p1.phrase?.id})`);
+assert(p1.phrase?.id === 'l0-bridge-wo-arbeitest', `core complete → ponte (${p1.phrase?.id})`);
+assert(p1.action === 'introduce', `ponte introduce (${p1.action})`);
+console.log('  ✓ core complete → ponte A1 (sem loop Hallo)');
 
 // Regressão: plano A2 ainda sem ZERO e sem blocos L0 no directive
 const planA2b = buildConversationPlan(profileA2(), learning, phrases);
