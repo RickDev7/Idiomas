@@ -8,7 +8,7 @@ import { startingCourseLevel } from '@/services/onboarding/GermanLevelOptions';
 import { getCurrentLevel } from '@/services/course/LevelPresentation';
 import { getStoredCourseProgress } from '@/services/course/CourseProgressEngine';
 import type { SupportLevel } from '@/services/learning/ScaffoldingEngine';
-import { isAutomated, readAutomationScore } from '@/services/learning/AutomationScoreEngine';
+import { isAutomated } from '@/services/learning/AutomationScoreEngine';
 import type { PhraseConfidence, UserLearningProfile } from '@/services/learning/ConfidenceService';
 
 /**
@@ -276,30 +276,41 @@ export function pickZeroLanguageTarget(
     return { conf, phrase, action: 'practice' };
   }
 
-  // Todas aceitas: recall LEVE só no ÚLTIMO bloco tocado — nunca reinicia cumprimentos
+  // Todas aceitas: recall da ÚLTIMA frase tocada (estável) — evita loop Hallo↔Ich heiße↔…
   const lastTouched =
     [...L0_PRIORITY_IDS].reverse().find((id) => isZeroLanguagePhraseAccepted(learning.phrases[id])) ||
     null;
-  const lastBlock = lastTouched ? findZeroLanguageBlock(lastTouched) : ZERO_LANGUAGE_BLOCKS[ZERO_LANGUAGE_BLOCKS.length - 1];
-  if (lastBlock) {
-    let weakestInBlock: { conf: PhraseConfidence; phrase: Phrase; score: number } | null = null;
-    for (const id of lastBlock.phraseIds) {
-      const phrase = pool.find((p) => p.id === id);
-      if (!phrase) continue;
-      const conf = learning.phrases[id];
-      if (!conf || !isZeroLanguagePhraseAccepted(conf)) continue;
-      const score = readAutomationScore(conf);
-      if (!weakestInBlock || score < weakestInBlock.score) {
-        weakestInBlock = { conf, phrase, score };
-      }
-    }
-    if (weakestInBlock) {
-      return { conf: weakestInBlock.conf, phrase: weakestInBlock.phrase, action: 'recall' };
-    }
+  if (lastTouched) {
+    const phrase = pool.find((p) => p.id === lastTouched) || null;
+    return {
+      conf: learning.phrases[lastTouched],
+      phrase,
+      action: 'recall',
+    };
   }
 
-  const fallback = pool.find((p) => p.id === lastTouched) || pool[pool.length - 1] || null;
+  const fallback = pool[pool.length - 1] || null;
   return { conf: fallback ? learning.phrases[fallback.id] : undefined, phrase: fallback, action: 'recall' };
+}
+
+/**
+ * L0 → Gemini Live: frases já ACEITAS não entram em "FRACAS (reforce)".
+ * Caso contrário o model volta para Wie geht's / Morgen após erro em frase nova.
+ */
+export function l0PhrasesForLiveProfile(learning: UserLearningProfile): {
+  knownPhrases: string[];
+  weakPhrases: string[];
+} {
+  const all = Object.values(learning.phrases);
+  const knownPhrases = all
+    .filter((c) => isZeroLanguagePhraseAccepted(c))
+    .map((c) => c.phraseId)
+    .slice(0, 16);
+  const weakPhrases = all
+    .filter((c) => !isZeroLanguagePhraseAccepted(c) && c.confidence > 0 && c.confidence < 40)
+    .map((c) => c.phraseId)
+    .slice(0, 6);
+  return { knownPhrases, weakPhrases };
 }
 
 /**
@@ -516,6 +527,7 @@ export function teachFromErrorNudge(opts: {
     slow,
     'Peça NOVA TENTATIVA: "Agora você."',
     'AGUARDE. NÃO mude de assunto. NÃO avance para outra frase.',
+    `ALVO ÚNICO AGORA: "${opts.correction}". PROIBIDO voltar para Wie geht's / Guten Morgen / Hallo / frases anteriores.`,
     'Tom: encorajador. Nunca diga "errado" ou "você não sabe".',
   ].join('\n');
 }

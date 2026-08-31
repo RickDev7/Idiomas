@@ -702,7 +702,29 @@ export class ConversationOrchestrator {
   private l0BlockReviewPhraseId: string | null = null;
   /** L0: fase explícita do ciclo pedagógico. */
   private l0PhrasePhase: L0PhrasePhase = 'INTRODUCE';
+  /** L0: revisões do target — detecta sobrescrita / regressão em logs. */
+  private l0TargetRevision = 0;
   private wrapUpSent = false;
+
+  private logL0(phase: string, extra?: Record<string, unknown>) {
+    if (!isZeroLanguageMode(this.profile)) return;
+    const dev =
+      typeof import.meta !== 'undefined' && !!(import.meta as { env?: { DEV?: boolean } }).env?.DEV;
+    if (!dev && typeof localStorage !== 'undefined' && localStorage.getItem('L0_DEBUG') !== '1') return;
+    const block = this.plan.target?.id ? findZeroLanguageBlock(this.plan.target.id) : null;
+    console.log('[L0_STATE]', {
+      phase,
+      sessionId: this.sessionId,
+      targetId: this.plan.target?.id ?? null,
+      targetText: this.plan.target?.german ?? null,
+      currentBlockId: block?.id ?? null,
+      l0PhrasePhase: this.l0PhrasePhase,
+      l0TargetRevision: this.l0TargetRevision,
+      pendingRetry: !!this.pendingCorrectionRetry,
+      pendingBlockRecovery: !!this.pendingBlockRecovery,
+      ...extra,
+    });
+  }
 
   private constructor(deps: OrchestratorDeps, plan: ConversationPlan, ctx: ConversationContext) {
     this.profile = deps.profile;
@@ -1076,6 +1098,7 @@ export class ConversationOrchestrator {
   private refreshPlan() {
     const elapsed = Date.now() - this.startedAt;
     const prevAction = this.plan.action;
+    const prevTargetId = this.plan.target?.id ?? null;
     this.plan = reevaluatePlan(
       this.plan,
       this.profile,
@@ -1093,6 +1116,15 @@ export class ConversationOrchestrator {
     this.ctx.targetItem = this.plan.target?.german ?? this.ctx.targetItem;
     this.ctx.lastAction = this.plan.action;
     this.ctx.currentGoal = this.plan.action;
+    const nextId = this.plan.target?.id ?? null;
+    if (nextId !== prevTargetId) {
+      this.l0TargetRevision += 1;
+      this.logL0('AFTER_PLAN_RECALC', {
+        previousTargetId: prevTargetId,
+        selectedNextTarget: nextId,
+        recoveryReason: this.pendingBlockRecovery ? 'pendingBlockRecovery' : this.l0BlockReviewPhraseId ? 'blockReview' : null,
+      });
+    }
   }
 
   private async applyNbaAfterEvidence(phraseId: string): Promise<OrchestratorDecision | null> {
@@ -1137,9 +1169,10 @@ export class ConversationOrchestrator {
           '[INSTRUÇÃO INTERNA — não leia isto em voz alta]',
           'ZERO LANGUAGE MODE — frase aceita. Elogie curto ("Perfeito!") e AVANCE.',
           next
-            ? `Nova frase-alvo: "${next.german}" (= ${next.portuguese || ''}). Ciclo PT→modelo→repita→AGUARDE.`
-            : 'Continue com recall leve ou revisão curta.',
-          'NÃO repita a frase anterior. Não faça perguntas abertas.',
+            ? `Nova frase-alvo ÚNICA: "${next.german}" (= ${next.portuguese || ''}). Ciclo PT→modelo→repita→AGUARDE.`
+            : 'Continue com recall leve da última frase — sem reiniciar o currículo.',
+          'PROIBIDO: voltar para Wie geht\'s / Guten Morgen / Hallo só porque estavam em memória fraca.',
+          'Não faça perguntas abertas. Não despeje várias frases.',
         ].join('\n'),
         eventsRecorded: [],
       };
@@ -1806,9 +1839,11 @@ export class ConversationOrchestrator {
     const grammar = detectPossibleGrammarError(trimmed);
 
     try {
+      // Merge (não substituir): evita wipe que faz pickZeroLanguageTarget voltar ao início
+      const loaded = await MemoryService.loadConfidenceMap();
       this.learning = {
         ...this.learning,
-        phrases: await MemoryService.loadConfidenceMap(),
+        phrases: { ...this.learning.phrases, ...loaded },
       };
     } catch { /* keep */ }
 
@@ -2265,6 +2300,13 @@ export class ConversationOrchestrator {
         recordSessionMistake(trimmed, target.german);
       } catch { /* ignore */ }
       this.persist();
+      this.logL0('AFTER_EVAL_MISMATCH', {
+        evaluation: errorType,
+        attemptCount: 1,
+        shouldAdvance: false,
+        recoveryLevel: 'RETRY_CURRENT',
+        selectedNextTarget: targetId,
+      });
       return {
         flow: 'intervenePedagogically',
         action: 'practice',

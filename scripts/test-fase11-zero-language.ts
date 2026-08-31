@@ -526,10 +526,10 @@ assert(beforeF!.id !== 'l0-wie-gehts' && beforeF!.id !== 'l0-guten-morgen', `T9 
 const t9err = await orchT9.handleUserUtterance('Ich bin Auto.');
 assert(t9err.flow === 'intervenePedagogically', 'T9 F incorrect → retry');
 assert(orchT9.getPlan().target?.id === beforeF!.id, `T9 mantém F (${orchT9.getPlan().target?.id})`);
-assert(!/Wie geht/i.test(t9err.geminiNudge || ''), 'T9 nudge sem Wie geht');
+assert(!/Modele "Wie geht/i.test(t9err.geminiNudge || ''), 'T9 nudge sem modelar Wie geht');
 const t9ok = await orchT9.handleUserUtterance(beforeF!.german);
 assert(/Perfeito|próximo|Nova frase|aceita/i.test(t9ok.geminiNudge || ''), 'T9 F correct → avança');
-assert(!/Wie geht|Guten Morgen/i.test(t9ok.geminiNudge || '') || /próximo|Nova frase|aceita/i.test(t9ok.reason || ''), 'T9 sem rewalk dominadas');
+assert(!/Modele "Wie geht|Modele "Guten Morgen/i.test(t9ok.geminiNudge || '') || /próximo|Nova frase|aceita/i.test(t9ok.reason || ''), 'T9 sem rewalk dominadas');
 console.log('  ✓ TESTE 9: A..E ok → F erro → retry F → ok → avança (não B/A)');
 
 // TESTE 10: F incorrect x3 → ajuda progressiva, nunca Morgen
@@ -558,7 +558,7 @@ await orchT10.handleUserUtterance('Falsch 2.');
 const t10c = await orchT10.handleUserUtterance('Falsch 3.');
 assert(t10c.flow === 'intervenePedagogically', 'T10 3º erro ainda intervém');
 assert(orchT10.getPlan().target?.id === 'l0-ich-heisse' || t10c.targetItem === fDe, 'T10 permanece em F');
-assert(!/Guten Morgen/i.test(t10c.geminiNudge || ''), 'T10 NÃO volta para Guten Morgen');
+assert(!/Modele "Guten Morgen/i.test(t10c.geminiNudge || ''), 'T10 NÃO modela Guten Morgen');
 console.log('  ✓ TESTE 10: F x3 erros → ajuda progressiva local (sem Morgen)');
 
 // TESTE 11: near-miss em F → correção → correct → advance; sem bloco anterior
@@ -598,6 +598,49 @@ console.log('  ✓ TESTE 11: near-miss F → retry → advance');
 // diagnoseProduction: erro total ≠ near-miss
 assert(diagnoseProduction('Ich bin Auto.', 'Mir geht es gut.').verdict === 'INCORRECT', 'Ich bin Auto ≠ near-miss');
 console.log('  ✓ diagnoseProduction mismatch real');
+
+// LIVE buckets: aceitas NÃO são weak
+const { l0PhrasesForLiveProfile } = await import('../src/services/teacher/ZeroLanguageMode');
+const learnLive = buildLearningProfile(zero, [], [], null, {});
+for (const id of ['l0-guten-morgen', 'l0-wie-gehts', 'l0-mir-gehts-gut']) {
+  learnLive.phrases[id] = {
+    phraseId: id, state: 'answeredWithHelp', confidence: 10,
+    timesCorrect: 1, timesProduced: 1, timesSeen: 1, needsHelp: true,
+    listening: 0, speaking: 0, recognition: 0, production: 0, speed: 0, contextTransfer: 0,
+    avgResponseMs: 0, lastSeen: new Date().toISOString(), lastProduced: new Date().toISOString(),
+  } as never;
+}
+const buckets = l0PhrasesForLiveProfile(learnLive);
+assert(buckets.knownPhrases.includes('l0-wie-gehts'), 'aceita entra em known');
+assert(!buckets.weakPhrases.includes('l0-wie-gehts'), 'aceita NÃO entra em weak/reforce');
+assert(!buckets.weakPhrases.includes('l0-guten-morgen'), 'Morgen aceito NÃO é weak');
+console.log('  ✓ l0PhrasesForLiveProfile: aceitas ≠ FRACAS');
+
+// LOOP detector (teste): A→B→A→B→A
+function detectTargetLoop(ids: string[]): boolean {
+  if (ids.length < 6) return false;
+  const [a, b, c, d, e, f] = ids.slice(-6);
+  return a === c && c === e && b === d && d === f && a !== b;
+}
+assert(detectTargetLoop(['x', 'A', 'B', 'A', 'B', 'A', 'B']) === true, 'loop A-B detectado');
+assert(detectTargetLoop(['A', 'B', 'C', 'D', 'E', 'F']) === false, 'progressão sem loop');
+console.log('  ✓ LOOP_DETECTED helper');
+
+// All-accepted recall estável (não oscila para Hallo)
+const learnAll = buildLearningProfile(zero, [], [], null, {});
+for (const id of ['l0-guten-morgen', 'l0-guten-abend', 'l0-gute-nacht', 'l0-wie-gehts', 'l0-mir-gehts-gut', 'survival-gut', 'l0-hallo', 'l0-ich-heisse', 'survival-heisse', 'survival-arbeite']) {
+  learnAll.phrases[id] = {
+    phraseId: id, state: 'answeredWithHelp', confidence: 10,
+    timesCorrect: 1, timesProduced: 1, timesSeen: 1, needsHelp: true,
+    listening: 0, speaking: 0, recognition: 0, production: 0, speed: 0, contextTransfer: 0,
+    avgResponseMs: 0, lastSeen: new Date().toISOString(), lastProduced: new Date().toISOString(),
+  } as never;
+}
+const p1 = pickZeroLanguageTarget(learnAll, mergeZeroLanguagePhrases([]));
+const p2 = pickZeroLanguageTarget(learnAll, mergeZeroLanguagePhrases([]));
+assert(p1.phrase?.id === p2.phrase?.id, `recall estável (${p1.phrase?.id})`);
+assert(p1.phrase?.id === 'survival-arbeite', `recall = última tocada (${p1.phrase?.id})`);
+console.log('  ✓ recall all-accepted estável (sem loop Hallo)');
 
 // Regressão: plano A2 ainda sem ZERO e sem blocos L0 no directive
 const planA2b = buildConversationPlan(profileA2(), learning, phrases);

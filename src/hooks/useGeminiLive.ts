@@ -238,8 +238,15 @@ export function useGeminiLive(profile: UserProfile | null): GeminiLiveUI {
         returning: prepared.returning,
       };
       setReturning(prepared.returning);
-      const known = Object.values(learning.phrases).filter((c) => c.confidence >= 50).map((c) => c.phraseId).slice(0, 12);
-      const weak = Object.values(learning.phrases).filter((c) => c.confidence > 0 && c.confidence < 40).map((c) => c.phraseId).slice(0, 6);
+      let known = Object.values(learning.phrases).filter((c) => c.confidence >= 50).map((c) => c.phraseId).slice(0, 12);
+      let weak = Object.values(learning.phrases).filter((c) => c.confidence > 0 && c.confidence < 40).map((c) => c.phraseId).slice(0, 6);
+      // L0: aceitas NÃO vão para "FRACAS (reforce)" — senão Gemini volta para Wie geht's após erro novo
+      if (zeroMode) {
+        const { l0PhrasesForLiveProfile } = await import('@/services/teacher/ZeroLanguageMode');
+        const buckets = l0PhrasesForLiveProfile(learning);
+        known = buckets.knownPhrases;
+        weak = buckets.weakPhrases;
+      }
       const ctx = prepared.sessionContext;
       const openingGerman = zeroMode
         ? (plan.target?.german || prepared.opening.german)
