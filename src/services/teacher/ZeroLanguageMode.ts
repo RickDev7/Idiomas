@@ -145,8 +145,36 @@ export function mergeZeroLanguagePhrases(phrases: Phrase[]): Phrase[] {
 
 const L0_PRIORITY_IDS = ZERO_LANGUAGE_BLOCKS.flatMap((b) => b.phraseIds);
 
-/** Mínimo de acertos guiados antes de avançar à próxima frase no bloco. */
-export const L0_MIN_CORRECT_BEFORE_ADVANCE = 2;
+/**
+ * Acertos necessários para AVANÇAR à próxima frase (aceitação).
+ * Domínio longitudinal usa automationScore/memória — não bloqueia avanço.
+ */
+export const L0_MIN_CORRECT_BEFORE_ADVANCE = 1;
+
+/** Erros reais no mesmo bloco antes de ativar recuperação do bloco. */
+export const L0_BLOCK_RECOVERY_ERROR_THRESHOLD = 2;
+
+/** Máximo de recuperações de bloco por sessão (por bloco). */
+export const L0_MAX_BLOCK_RECOVERIES_PER_BLOCK = 1;
+
+/** Estados explícitos do ciclo L0 por frase. */
+export type L0PhrasePhase =
+  | 'INTRODUCE'
+  | 'MODEL'
+  | 'WAITING_FOR_USER'
+  | 'EVALUATING'
+  | 'CORRECT'
+  | 'NEAR_MISS'
+  | 'INCORRECT'
+  | 'RETRY'
+  | 'ADVANCE'
+  | 'BLOCK_REVIEW'
+  | 'COMPLETE';
+
+/** Frase aceita para avanço — 1 produção correta basta. */
+export function isZeroLanguagePhraseAccepted(conf: PhraseConfidence | undefined): boolean {
+  return (conf?.timesCorrect ?? 0) >= L0_MIN_CORRECT_BEFORE_ADVANCE;
+}
 
 export function findZeroLanguageBlock(phraseId: string) {
   return ZERO_LANGUAGE_BLOCKS.find((b) => b.phraseIds.includes(phraseId)) || null;
@@ -176,14 +204,21 @@ export function getBlockRecoverySequence(
     .filter((x): x is { id: string; german: string; portuguese: string } => !!x);
 }
 
-/** Erro relevante no meio do bloco → recuperação pedagógica (não near-miss isolado). */
+/**
+ * Recuperação de bloco — somente com evidência de perda de estrutura:
+ * erro real (não near-miss), não na 1ª frase do bloco, e após N erros no bloco.
+ */
 export function shouldRecoverZeroLanguageBlock(
   phraseId: string,
   verdict: ProductionDiagnosis['verdict'],
   errorType?: ProductionErrorType,
+  blockErrorCount = 0,
+  recoveriesUsed = 0,
 ): boolean {
   if (verdict !== 'INCORRECT') return false;
   if (errorType === 'pronunciation_approx') return false;
+  if (blockErrorCount < L0_BLOCK_RECOVERY_ERROR_THRESHOLD) return false;
+  if (recoveriesUsed >= L0_MAX_BLOCK_RECOVERIES_PER_BLOCK) return false;
   const block = findZeroLanguageBlock(phraseId);
   if (!block) return false;
   return block.phraseIds.indexOf(phraseId) > 0;
@@ -198,28 +233,57 @@ export function zeroLanguageSessionUnits(dailyMinutes: number): number {
 export function pickZeroLanguageTarget(
   learning: UserLearningProfile,
   phrases: Phrase[],
+  opts?: { blockReviewPhraseId?: string | null },
 ): { conf: PhraseConfidence | undefined; phrase: Phrase | null; action: 'introduce' | 'practice' | 'recall' } {
   const pool = mergeZeroLanguagePhrases(phrases);
+
+  // Modo BLOCK_REVIEW: reforço local do bloco atual (não volta à sessão inteira)
+  if (opts?.blockReviewPhraseId) {
+    const reviewBlock = findZeroLanguageBlock(opts.blockReviewPhraseId);
+    if (reviewBlock) {
+      for (const id of reviewBlock.phraseIds) {
+        const phrase = pool.find((p) => p.id === id) || null;
+        if (!phrase) continue;
+        const conf = learning.phrases[id];
+        if (!isZeroLanguagePhraseAccepted(conf)) {
+          return { conf, phrase, action: (conf?.timesCorrect ?? 0) > 0 ? 'practice' : 'introduce' };
+        }
+      }
+    }
+  }
+
+  // Avanço linear: primeira frase ainda não aceita na ordem pedagógica
   for (const id of L0_PRIORITY_IDS) {
     const phrase = pool.find((p) => p.id === id) || null;
     if (!phrase) continue;
     const conf = learning.phrases[id];
     if (conf && isAutomated(conf)) continue;
-    const score = conf ? readAutomationScore(conf) : 0;
+    if (isZeroLanguagePhraseAccepted(conf)) continue;
     const times = conf?.timesCorrect ?? 0;
-    // Domínio mínimo antes de avançar: ≥2 acertos e score decente
     if (!conf || conf.state === 'new' || times === 0) {
       return { conf, phrase, action: 'introduce' };
     }
-    if (times < L0_MIN_CORRECT_BEFORE_ADVANCE || score < 40 || (conf.needsHelp && times < 3)) {
-      return { conf, phrase, action: 'practice' };
-    }
-    if (score < 55 && times < 4) {
-      return { conf, phrase, action: 'recall' };
+    return { conf, phrase, action: 'practice' };
+  }
+
+  // Todas aceitas — recall leve da mais fraca (domínio longitudinal, sem bloquear sessão)
+  let weakest: { conf: PhraseConfidence; phrase: Phrase; score: number } | null = null;
+  for (const id of L0_PRIORITY_IDS) {
+    const phrase = pool.find((p) => p.id === id);
+    if (!phrase) continue;
+    const conf = learning.phrases[id];
+    if (!conf || !isZeroLanguagePhraseAccepted(conf)) continue;
+    const score = readAutomationScore(conf);
+    if (!weakest || score < weakest.score) {
+      weakest = { conf, phrase, score };
     }
   }
+  if (weakest && weakest.score < 70) {
+    return { conf: weakest.conf, phrase: weakest.phrase, action: 'recall' };
+  }
+
   const fallback = pool.find((p) => p.id === 'l0-guten-morgen') || pool[0] || null;
-  return { conf: fallback ? learning.phrases[fallback.id] : undefined, phrase: fallback, action: 'introduce' };
+  return { conf: fallback ? learning.phrases[fallback.id] : undefined, phrase: fallback, action: 'recall' };
 }
 
 /**
@@ -324,8 +388,8 @@ export function zeroLanguageDirective(opts: {
     '6) PT: "Agora repita." / "Agora você."',
     '7) PARE. AGUARDE o microfone. Silêncio ≠ erro.',
     '8) Se quase (pronúncia): "Quase!" → destaque a parte → modelo → "Agora você." AGUARDE.',
-    '9) Se erro claro no meio do bloco: corrija a frase → depois "Vamos fazer de novo" e recupere o bloco desde o início.',
-    '10) Só avance à PRÓXIMA frase após domínio (repetições corretas). UMA estrutura nova por vez.',
+    '9) Se erro claro: corrija a frase atual → "Agora você." → AGUARDE. Só após erros repetidos no MESMO bloco, revisão curta local.',
+    '10) Um acerto correto = aceitar e avançar à PRÓXIMA frase. UMA estrutura nova por vez.',
     'PROIBIDO em L0: Wo wohnst du? / Was machst du? / Was brauchst du? / perguntas abertas sem estrutura ensinado.',
     'PROIBIDO: aula teórica longa, despejar várias frases, falar enquanto o aluno deve responder.',
     `AÇÃO: ${opts.action}. SCAFFOLD: ${opts.scaffoldLevel}/5.`,
@@ -421,7 +485,7 @@ export function praiseGuidedRetryNudge(correction: string): string {
     `O aluno acertou após correção: "${correction}"`,
     'Elogie de forma curta: "Perfeito!"',
     'Isso foi produção GUIADA (havia modelo). NÃO declare fluência.',
-    'Não avance imediatamente para uma frase nova sem reforço se houver recuperação de bloco pendente.',
+    'Avance para a próxima frase se não houver recuperação de bloco pendente.',
   ].join('\n');
 }
 

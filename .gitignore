@@ -27,3 +27,6 @@ server/backend.log
 *.njsproj
 *.sln
 *.sw?
+
+.vercel
+.env*

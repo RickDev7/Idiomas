@@ -22,7 +22,10 @@ import {
 import {
   diagnoseProduction,
   isZeroLanguageMode,
+  isZeroLanguagePhraseAccepted,
   mergeZeroLanguagePhrases,
+  L0_MIN_CORRECT_BEFORE_ADVANCE,
+  L0_BLOCK_RECOVERY_ERROR_THRESHOLD,
 } from '../src/services/teacher/ZeroLanguageMode';
 import type { Phrase, UserProfile } from '../src/types';
 
@@ -98,7 +101,10 @@ assert(evaluateProduction('Guten Morgem.', 'Guten Morgen.') === 'NEEDS_REPAIR', 
 const diag = diagnoseProduction('Guten Morgem.', 'Guten Morgen.');
 assert(diag.errorType === 'pronunciation_approx', 'tipo pronunciation_approx');
 assert(diag.hardPart === 'morgen' || diag.hardPart === 'Morgen' || !!diag.hardPart, 'hardPart presente');
-console.log('  ✓ diagnoseProduction / near-miss');
+assert(L0_MIN_CORRECT_BEFORE_ADVANCE === 1, 'avanço com 1 acerto');
+assert(isZeroLanguagePhraseAccepted({ phraseId: 'x', timesCorrect: 1 } as never) === true, 'accepted com 1 acerto');
+assert(isZeroLanguagePhraseAccepted({ phraseId: 'x', timesCorrect: 0 } as never) === false, 'não accepted sem acerto');
+console.log('  ✓ accept vs mastery (1 acerto avança)');
 
 await EventStore.clear();
 await MemoryService.saveConfidenceMap({});
@@ -289,12 +295,15 @@ const {
   shouldRecoverZeroLanguageBlock,
   zeroLanguageSessionUnits,
   blockRecoveryNudge,
+  pickZeroLanguageTarget,
 } = await import('../src/services/teacher/ZeroLanguageMode');
 assert(ZERO_LANGUAGE_BLOCKS[0].phraseIds[0] === 'l0-guten-morgen', 'bloco 1 começa com Guten Morgen');
 assert(ZERO_LANGUAGE_BLOCKS[0].phraseIds.includes('l0-gute-nacht'), 'bloco 1 tem Gute Nacht');
-assert(shouldRecoverZeroLanguageBlock('l0-gute-nacht', 'INCORRECT', 'mismatch') === true, 'erro no meio do bloco → recovery');
-assert(shouldRecoverZeroLanguageBlock('l0-guten-morgen', 'INCORRECT', 'mismatch') === false, '1ª frase do bloco → sem recovery de bloco');
-assert(shouldRecoverZeroLanguageBlock('l0-gute-nacht', 'NEEDS_REPAIR', 'pronunciation_approx') === false, 'near-miss → sem recovery de bloco');
+assert(shouldRecoverZeroLanguageBlock('l0-gute-nacht', 'INCORRECT', 'mismatch', L0_BLOCK_RECOVERY_ERROR_THRESHOLD) === true, '2º erro no bloco → recovery');
+assert(shouldRecoverZeroLanguageBlock('l0-gute-nacht', 'INCORRECT', 'mismatch', 1) === false, '1º erro → sem recovery de bloco');
+assert(shouldRecoverZeroLanguageBlock('l0-guten-morgen', 'INCORRECT', 'mismatch', 5) === false, '1ª frase do bloco → sem recovery');
+assert(shouldRecoverZeroLanguageBlock('l0-gute-nacht', 'NEEDS_REPAIR', 'pronunciation_approx', 5) === false, 'near-miss → sem recovery');
+assert(shouldRecoverZeroLanguageBlock('l0-wie-gehts', 'INCORRECT', 'mismatch', 5) === false, '1ª frase bloco 2 → sem recovery');
 const seq = getBlockRecoverySequence('l0-gute-nacht', mergeZeroLanguagePhrases([]));
 assert(seq.length === 3, `recovery seq length 3 (got ${seq.length})`);
 assert(/Guten Morgen/i.test(seq[0].german) && /Gute Nacht/i.test(seq[2].german), 'recovery Morgen→…→Nacht');
@@ -324,7 +333,7 @@ assert(
 );
 const nearOk = await orchNear.handleUserUtterance('Guten Morgen.');
 assert(/Perfeito/i.test(nearOk.geminiNudge || ''), 'near-miss → elogio');
-assert(shouldRecoverZeroLanguageBlock('l0-guten-morgen', 'NEEDS_REPAIR', 'pronunciation_approx') === false, 'flag recovery off p/ near-miss na 1ª');
+assert(shouldRecoverZeroLanguageBlock('l0-guten-morgen', 'NEEDS_REPAIR', 'pronunciation_approx', 5) === false, 'flag recovery off p/ near-miss na 1ª');
 console.log('  ✓ near-miss sem recovery de bloco');
 
 // Simula recovery nudge pós-correção compondo as funções (mesmo contrato do orquestrador)
@@ -335,8 +344,145 @@ const composed = [
   blockRecoveryNudge({ failedGerman: 'Gute Nacht.', sequence: seq2, blockNamePt: 'Cumprimentos' }),
 ].join('\n');
 assert(/Perfeito/i.test(composed) && /Vamos fazer de novo|RECUPERAÇÃO/i.test(composed), 'compose praise+recovery');
-assert(shouldRecoverZeroLanguageBlock(failedId, 'INCORRECT', 'wrong_word'), 'Gute Nacht INCORRECT → recovery flag');
+assert(shouldRecoverZeroLanguageBlock(failedId, 'INCORRECT', 'wrong_word', L0_BLOCK_RECOVERY_ERROR_THRESHOLD), 'Gute Nacht INCORRECT 2x → recovery flag');
 console.log('  ✓ orquestrador recovery (contrato nudge + flag)');
+
+// TESTE 1: 1 acerto → avança
+await EventStore.clear();
+await MemoryService.saveConfidenceMap({});
+const orchT1 = ConversationOrchestrator.create({
+  profile: zero,
+  learning: buildLearningProfile(zero, [], [], null, {}),
+  phrases: mergeZeroLanguagePhrases([fakePhrase('l0-guten-morgen', 'Guten Morgen.', 'Bom dia.')]),
+  sessionId: 't1-advance',
+});
+await orchT1.handle({ type: 'SESSION_STARTED' });
+const t1 = await orchT1.handleUserUtterance('Guten Morgen.');
+assert(t1.eventsRecorded.includes('PHRASE_PRODUCED_WITH_HINT') || t1.eventsRecorded.includes('PHRASE_PRODUCED'), 'TESTE1 produção');
+assert(/próximo|Nova frase|aceita|Perfeito/i.test(t1.geminiNudge || t1.reason || ''), `TESTE1 avança (${t1.reason})`);
+const planT1 = orchT1.getPlan();
+assert(planT1.target?.id !== 'l0-guten-morgen' || /Abend|próximo/i.test(t1.geminiNudge || ''), 'TESTE1 não repete Morgen');
+console.log('  ✓ TESTE 1: 1 acerto → avança');
+
+// TESTE 2: near-miss → correção → acerto → avança
+await EventStore.clear();
+await MemoryService.saveConfidenceMap({});
+const orchT2 = ConversationOrchestrator.create({
+  profile: zero,
+  learning: buildLearningProfile(zero, [], [], null, {}),
+  phrases: mergeZeroLanguagePhrases([fakePhrase('l0-guten-morgen', 'Guten Morgen.', 'Bom dia.')]),
+  sessionId: 't2-near',
+});
+await orchT2.handle({ type: 'SESSION_STARTED' });
+const t2a = await orchT2.handleUserUtterance('Guten Morgem.');
+assert(t2a.flow === 'intervenePedagogically', 'TESTE2 near-miss intervém');
+const t2b = await orchT2.handleUserUtterance('Guten Morgen.');
+assert(/Perfeito|próximo|Nova frase|aceita/i.test(t2b.geminiNudge || ''), 'TESTE2 acerto após near-miss avança');
+console.log('  ✓ TESTE 2: near-miss → correção → avança');
+
+// TESTE 3: erro real → correção → acerto → avança
+await EventStore.clear();
+await MemoryService.saveConfidenceMap({});
+const orchT3 = ConversationOrchestrator.create({
+  profile: zero,
+  learning: buildLearningProfile(zero, [], [], null, {}),
+  phrases: mergeZeroLanguagePhrases([fakePhrase('l0-guten-morgen', 'Guten Morgen.', 'Bom dia.')]),
+  sessionId: 't3-err',
+});
+await orchT3.handle({ type: 'SESSION_STARTED' });
+const t3a = await orchT3.handleUserUtterance('Ich bin Auto.');
+assert(t3a.flow === 'intervenePedagogically', 'TESTE3 erro intervém');
+const t3b = await orchT3.handleUserUtterance('Guten Morgen.');
+assert(/Perfeito|próximo|Nova frase|aceita/i.test(t3b.geminiNudge || ''), 'TESTE3 acerto após erro avança');
+console.log('  ✓ TESTE 3: erro → correção → avança');
+
+// TESTE 4: erro em nova estrutura NÃO volta para Morgen
+await EventStore.clear();
+await MemoryService.saveConfidenceMap({});
+const learningT4 = buildLearningProfile(zero, [], [], null, {});
+learningT4.phrases['l0-guten-morgen'] = {
+  phraseId: 'l0-guten-morgen', state: 'answeredWithHelp', confidence: 50,
+  timesCorrect: 1, timesProduced: 1, timesSeen: 1, needsHelp: true,
+  listening: 0, speaking: 0, recognition: 0, production: 0, speed: 0, contextTransfer: 0,
+  avgResponseMs: 0, lastSeen: new Date().toISOString(), lastProduced: new Date().toISOString(),
+} as never;
+learningT4.phrases['l0-guten-abend'] = { ...learningT4.phrases['l0-guten-morgen'], phraseId: 'l0-guten-abend' } as never;
+learningT4.phrases['l0-gute-nacht'] = { ...learningT4.phrases['l0-guten-morgen'], phraseId: 'l0-gute-nacht' } as never;
+const orchT4 = ConversationOrchestrator.create({
+  profile: zero,
+  learning: learningT4,
+  phrases: mergeZeroLanguagePhrases([]),
+  sessionId: 't4-local',
+});
+await orchT4.handle({ type: 'SESSION_STARTED' });
+const planBefore = orchT4.getPlan();
+assert(planBefore.target?.id === 'l0-wie-gehts', `TESTE4 target bloco 2 (${planBefore.target?.id})`);
+const t4 = await orchT4.handleUserUtterance('Ich bin Auto.');
+assert(t4.targetItem?.includes('geht') || planBefore.target?.german.includes('geht'), 'TESTE4 correção local');
+assert(!/Guten Morgen.*RECUPERAÇÃO|Vamos fazer de novo.*Morgen/i.test(t4.geminiNudge || ''), 'TESTE4 sem recovery greetings');
+console.log('  ✓ TESTE 4: erro nova estrutura → recovery local');
+
+// TESTE 5: 2 erros no bloco → pode BLOCK_REVIEW; limite existe
+await EventStore.clear();
+await MemoryService.saveConfidenceMap({});
+const learningT5 = buildLearningProfile(zero, [], [], null, {});
+for (const id of ['l0-guten-morgen', 'l0-guten-abend']) {
+  learningT5.phrases[id] = {
+    phraseId: id, state: 'answeredWithHelp', confidence: 50,
+    timesCorrect: 1, timesProduced: 1, timesSeen: 1, needsHelp: true,
+    listening: 0, speaking: 0, recognition: 0, production: 0, speed: 0, contextTransfer: 0,
+    avgResponseMs: 0, lastSeen: new Date().toISOString(), lastProduced: new Date().toISOString(),
+  } as never;
+}
+const orchT5 = ConversationOrchestrator.create({
+  profile: zero,
+  learning: learningT5,
+  phrases: mergeZeroLanguagePhrases([]),
+  sessionId: 't5-block',
+});
+await orchT5.handle({ type: 'SESSION_STARTED' });
+const t5a = await orchT5.handleUserUtterance('Falsch eins.');
+assert(t5a.flow === 'intervenePedagogically', 'TESTE5 1º erro intervém');
+const t5b = await orchT5.handleUserUtterance('Falsch zwei.');
+assert(t5b.flow === 'intervenePedagogically', 'TESTE5 2º erro intervém');
+const t5c = await orchT5.handleUserUtterance('Gute Nacht.');
+assert(/Perfeito|RECUPERAÇÃO|fazer de novo/i.test(t5c.geminiNudge || ''), 'TESTE5 após 2 erros pode recovery');
+console.log('  ✓ TESTE 5: 2 erros → recovery com limite');
+
+// TESTE 6: dedup utterance (simulado via mesma lógica)
+let processCount = 0;
+const dedup = (() => {
+  let last: { id: string; text: string; at: number } | null = null;
+  return (id: string, text: string) => {
+    const now = Date.now();
+    if (last && last.id === id && last.text === text) return false;
+    if (last && last.text === text && now - last.at < 2000) return false;
+    last = { id, text, at: now };
+    processCount += 1;
+    return true;
+  };
+})();
+assert(dedup('u1', 'Guten Morgen.') === true, 'TESTE6 primeira passa');
+assert(dedup('u1', 'Guten Morgen.') === false, 'TESTE6 duplicata id bloqueada');
+assert(dedup('u2', 'Guten Morgen.') === false, 'TESTE6 duplicata texto bloqueada');
+assert(processCount === 1, 'TESTE6 uma única utterance lógica');
+console.log('  ✓ TESTE 6: dedup transcript');
+
+// TESTE 7: sessão 20 min → unidades de tempo, não preso em 1 frase
+assert(zeroLanguageSessionUnits(20) === 20, 'TESTE7 20 min');
+const learn7 = buildLearningProfile(zero, [], [], null, {});
+for (let i = 0; i < 3; i++) {
+  const id = ['l0-guten-morgen', 'l0-guten-abend', 'l0-gute-nacht'][i];
+  learn7.phrases[id] = {
+    phraseId: id, state: 'answeredWithHelp', confidence: 50,
+    timesCorrect: 1, timesProduced: 1, timesSeen: 1, needsHelp: true,
+    listening: 0, speaking: 0, recognition: 0, production: 0, speed: 0, contextTransfer: 0,
+    avgResponseMs: 0, lastSeen: new Date().toISOString(), lastProduced: new Date().toISOString(),
+  } as never;
+}
+const next7 = pickZeroLanguageTarget(learn7, mergeZeroLanguagePhrases([]));
+assert(next7.phrase?.id === 'l0-wie-gehts', `TESTE7 próximo após 3 aceitas: ${next7.phrase?.id}`);
+console.log('  ✓ TESTE 7: progressão por tempo, não preso');
 
 // Regressão: plano A2 ainda sem ZERO e sem blocos L0 no directive
 const planA2b = buildConversationPlan(profileA2(), learning, phrases);

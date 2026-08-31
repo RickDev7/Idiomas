@@ -113,6 +113,7 @@ export function useGeminiLive(profile: UserProfile | null): GeminiLiveUI {
   const orchRef = useRef<ConversationOrchestrator | null>(null);
   const userTurnsRef = useRef(0);
   const userTurnMetaRef = useRef<UserCurrentTurn | null>(null);
+  const lastProcessedUtteranceRef = useRef<{ id: string; text: string; at: number } | null>(null);
 
   const applyDecision = useCallback(async (decision: Awaited<ReturnType<ConversationOrchestrator['handle']>>) => {
     // Não sobrescrever a decisão pedagógica do aluno com o eco da fala do professor
@@ -159,8 +160,21 @@ export function useGeminiLive(profile: UserProfile | null): GeminiLiveUI {
   const processUserTurnComplete = useCallback(async (text: string) => {
     const trimmed = text.trim();
     if (!trimmed) return;
+    const turnId = userTurnMetaRef.current?.id || `user-${Date.now()}`;
+    const now = Date.now();
+    const last = lastProcessedUtteranceRef.current;
+    if (last && last.id === turnId && last.text === trimmed) {
+      if (DEV) console.debug('[USER TRANSCRIPT DEDUP]', turnId, trimmed);
+      return;
+    }
+    if (last && last.text === trimmed && now - last.at < 2000) {
+      if (DEV) console.debug('[USER TRANSCRIPT DEDUP text]', trimmed);
+      return;
+    }
+    lastProcessedUtteranceRef.current = { id: turnId, text: trimmed, at: now };
+
     const meta: UserCurrentTurn = {
-      id: userTurnMetaRef.current?.id || `user-${Date.now()}`,
+      id: turnId,
       text: trimmed,
       startedAt: userTurnMetaRef.current?.startedAt || new Date().toISOString(),
       endedAt: new Date().toISOString(),
@@ -169,7 +183,14 @@ export function useGeminiLive(profile: UserProfile | null): GeminiLiveUI {
     };
     userTurnMetaRef.current = meta;
     setUserCurrentTurn(meta);
-    if (DEV) console.log('[USER TRANSCRIPT COMPLETE]', trimmed);
+    if (DEV) {
+      console.log('[USER TRANSCRIPT COMPLETE]', {
+        utteranceId: turnId,
+        text: trimmed,
+        target: orchRef.current?.getPlan().target?.german,
+        at: meta.endedAt,
+      });
+    }
 
     if (!orchRef.current) return;
     userTurnsRef.current += 1;
@@ -348,6 +369,7 @@ export function useGeminiLive(profile: UserProfile | null): GeminiLiveUI {
     startedAtRef.current = Date.now();
     transcriptRef.current = { user: [], assistant: [] };
     accRef.current = new GeminiTurnAccumulator();
+    lastProcessedUtteranceRef.current = null;
     turnIdsRef.current = { assistant: '', user: '' };
     userTurnMetaRef.current = null;
     setAssistantText('');

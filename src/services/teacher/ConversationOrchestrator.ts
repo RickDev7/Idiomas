@@ -99,7 +99,8 @@ import {
   zeroLanguageDirective,
   zeroLanguageKickoff,
   zeroLanguageWrapUpNudge,
-  L0_MIN_CORRECT_BEFORE_ADVANCE,
+  isZeroLanguagePhraseAccepted,
+  type L0PhrasePhase,
   type ProductionErrorType,
 } from '@/services/teacher/ZeroLanguageMode';
 
@@ -438,6 +439,7 @@ export function buildConversationPlan(
   learning: UserLearningProfile,
   phrases: Phrase[],
   elapsedMs = 0,
+  opts?: { l0BlockReviewPhraseId?: string | null },
 ): ConversationPlan {
   const zeroMode = isZeroLanguageMode(profile);
   const phrasePool = zeroMode ? mergeZeroLanguagePhrases(phrases) : phrases;
@@ -461,7 +463,9 @@ export function buildConversationPlan(
       ? { type: personal.primaryBottleneck, confidence: personal.primaryBottleneckConfidence }
       : bottleneck;
 
-  const zeroPick = zeroMode ? pickZeroLanguageTarget(learning, phrasePool) : null;
+  const zeroPick = zeroMode
+    ? pickZeroLanguageTarget(learning, phrasePool, { blockReviewPhraseId: opts?.l0BlockReviewPhraseId })
+    : null;
   const picked = zeroPick
     ? { conf: zeroPick.conf, phrase: zeroPick.phrase, action: zeroPick.action as OrchestratorAction }
     : pickPrimaryTarget(learning, phrasePool);
@@ -535,21 +539,22 @@ export function reevaluatePlan(
   phrases: Phrase[],
   elapsedMs: number,
   userTurns: number,
+  opts?: { l0BlockReviewPhraseId?: string | null; l0StickPhraseId?: string | null },
 ): ConversationPlan {
-  const fresh = buildConversationPlan(profile, learning, phrases, elapsedMs);
+  const fresh = buildConversationPlan(profile, learning, phrases, elapsedMs, {
+    l0BlockReviewPhraseId: opts?.l0BlockReviewPhraseId,
+  });
   const zeroMode = isZeroLanguageMode(profile);
-  const prevConf = previous.target ? learning.phrases[previous.target.id] : undefined;
-  const prevTimes = prevConf?.timesCorrect ?? 0;
-  const prevScore = prevConf ? readAutomationScore(prevConf) : 0;
 
-  // L0: permanece na frase até domínio mínimo (não troca a cada 3 turnos)
-  if (zeroMode && previous.target && prevTimes < L0_MIN_CORRECT_BEFORE_ADVANCE && prevScore < 45) {
+  // L0: manter frase atual só durante correção/retry ativo (não por domínio/score)
+  if (zeroMode && opts?.l0StickPhraseId && previous.target?.id === opts.l0StickPhraseId) {
+    const prevConf = learning.phrases[opts.l0StickPhraseId];
     const action: OrchestratorAction =
-      prevTimes === 0 ? 'introduce' : prevScore < 40 ? 'practice' : 'recall';
+      !prevConf || (prevConf.timesCorrect ?? 0) === 0 ? 'introduce' : 'practice';
     const stageIdx = stageFromElapsed(elapsedMs, previous.training);
     const stageId = previous.training.stages[stageIdx]?.id ?? previous.stageId;
-    const resolved = resolvePhrase(previous.target.id, phrases);
-    const target = resolved ? phraseToTarget(resolved, prevConf) : { ...previous.target };
+    const resolved = resolvePhrase(opts.l0StickPhraseId, phrases);
+    const target = resolved ? phraseToTarget(resolved, prevConf) : { ...previous.target! };
     const partial = {
       topic: previous.topic,
       training: previous.training,
@@ -557,11 +562,11 @@ export function reevaluatePlan(
       action,
       target,
       scaffoldLevel: Math.max(
-        scaffoldFor(prevConf, action, previous.target?.id),
+        scaffoldFor(prevConf, action, opts.l0StickPhraseId),
         action === 'introduce' ? 4 : 3,
       ) as SupportLevel,
       bottleneck: fresh.bottleneck,
-      actionReason: 'ZERO_LANGUAGE_MODE — manter frase até domínio',
+      actionReason: 'ZERO_LANGUAGE_MODE — aguardando retry local',
       previousAction: previous.action,
     };
     return {
@@ -570,6 +575,10 @@ export function reevaluatePlan(
       actionKickoff: buildActionKickoff(partial, true),
     };
   }
+
+  const prevConf = previous.target ? learning.phrases[previous.target.id] : undefined;
+  const prevTimes = prevConf?.timesCorrect ?? 0;
+  const prevScore = prevConf ? readAutomationScore(prevConf) : 0;
 
   const stickTarget = !zeroMode && previous.target && userTurns % 3 !== 0;
   if (stickTarget && previous.target && prevConf) {
@@ -688,6 +697,14 @@ export class ConversationOrchestrator {
     phraseId: string;
     failedGerman: string;
   } | null = null;
+  /** L0: erros reais acumulados por bloco (para recovery com evidência). */
+  private l0BlockErrors: Record<string, number> = {};
+  /** L0: recuperações de bloco já usadas nesta sessão. */
+  private l0BlockRecoveries: Record<string, number> = {};
+  /** L0: frase que dispara BLOCK_REVIEW local (null = progressão normal). */
+  private l0BlockReviewPhraseId: string | null = null;
+  /** L0: fase explícita do ciclo pedagógico. */
+  private l0PhrasePhase: L0PhrasePhase = 'INTRODUCE';
   private wrapUpSent = false;
 
   private constructor(deps: OrchestratorDeps, plan: ConversationPlan, ctx: ConversationContext) {
@@ -1066,6 +1083,10 @@ export class ConversationOrchestrator {
       this.phrases,
       elapsed,
       this.userTurns,
+      {
+        l0BlockReviewPhraseId: this.l0BlockReviewPhraseId,
+        l0StickPhraseId: this.pendingCorrectionRetry?.phraseId ?? null,
+      },
     );
     this.plan = { ...this.plan, previousAction: prevAction };
     this.ctx.topic = this.plan.topic;
@@ -1080,45 +1101,45 @@ export class ConversationOrchestrator {
     if (this.micro && this.micro.phase !== 'done') return null;
     if (this.pendingTransfer) return null;
 
-    // L0: não saltar para transfer/conversa livre após um acerto — reforçar ou avançar 1 frase no bloco
+    // L0: 1 acerto = aceitar e avançar (domínio é longitudinal, não bloqueia)
     if (isZeroLanguageMode(this.profile)) {
-      const times = conf.timesCorrect ?? 0;
-      const score = readAutomationScore(conf);
-      if (times < L0_MIN_CORRECT_BEFORE_ADVANCE || score < 40) {
+      if (!isZeroLanguagePhraseAccepted(conf)) {
+        this.l0PhrasePhase = 'RETRY';
         this.refreshPlan();
         this.persist();
         return {
           flow: 'continueConversation',
           action: 'practice',
           mode: 'GUIDED_CONVERSATION',
-          reason: 'ZERO_LANGUAGE_MODE — reforçar mesma frase',
+          reason: 'ZERO_LANGUAGE_MODE — aguardando aceitação',
           targetItem: this.plan.target?.german ?? this.ctx.targetItem,
           geminiNudge: [
             '[INSTRUÇÃO INTERNA — não leia isto em voz alta]',
             'ZERO LANGUAGE MODE — ainda na mesma frase.',
-            'Elogie curto ("Perfeito!").',
-            `Peça de novo sem pressa: modele "${this.plan.target?.german || conf.phraseId}" e diga "Agora você."`,
-            'AGUARDE. Não avance para outra frase ainda.',
+            `Modele "${this.plan.target?.german || conf.phraseId}" e diga "Agora você."`,
+            'AGUARDE.',
           ].join('\n'),
           eventsRecorded: [],
         };
       }
+      this.l0PhrasePhase = 'ADVANCE';
+      this.l0BlockReviewPhraseId = null;
       this.refreshPlan();
       this.persist();
       const next = this.plan.target;
       return {
         flow: 'continueConversation',
-        action: this.plan.action === 'introduce' ? 'introduce' : 'practice',
+        action: next && (this.learning.phrases[next.id]?.timesCorrect ?? 0) === 0 ? 'introduce' : 'practice',
         mode: 'GUIDED_CONVERSATION',
-        reason: 'ZERO_LANGUAGE_MODE — próxima frase do bloco (só após domínio)',
+        reason: 'ZERO_LANGUAGE_MODE — frase aceita, próximo alvo',
         targetItem: next?.german ?? this.ctx.targetItem,
         geminiNudge: [
           '[INSTRUÇÃO INTERNA — não leia isto em voz alta]',
-          'ZERO LANGUAGE MODE — avance UMA frase (se houver nova).',
+          'ZERO LANGUAGE MODE — frase aceita. Elogie curto ("Perfeito!") e AVANCE.',
           next
             ? `Nova frase-alvo: "${next.german}" (= ${next.portuguese || ''}). Ciclo PT→modelo→repita→AGUARDE.`
-            : 'Continue reforçando o que já foi ensinado com variação mínima.',
-          'Não faça perguntas abertas. Não despeje várias frases.',
+            : 'Continue com recall leve ou revisão curta.',
+          'NÃO repita a frase anterior. Não faça perguntas abertas.',
         ].join('\n'),
         eventsRecorded: [],
       };
@@ -1600,15 +1621,19 @@ export class ConversationOrchestrator {
       if (isZeroLanguageMode(this.profile) && this.pendingBlockRecovery) {
         const recovery = this.pendingBlockRecovery;
         this.pendingBlockRecovery = null;
+        this.l0BlockReviewPhraseId = recovery.phraseId;
+        this.l0PhrasePhase = 'BLOCK_REVIEW';
         const sequence = getBlockRecoverySequence(recovery.phraseId, this.phrases);
         const block = findZeroLanguageBlock(recovery.phraseId);
+        this.refreshPlan();
+        this.persist();
         return {
           flow: 'continueConversation',
           action: 'practice',
           mode: this.ctx.mode,
           reason: `correction_retry_ok_block_recovery:attempt_${pending.attempt}`,
           correction: pending.expected,
-          targetItem: pending.expected,
+          targetItem: this.plan.target?.german ?? pending.expected,
           geminiNudge: [
             praiseGuidedRetryNudge(pending.expected),
             blockRecoveryNudge({
@@ -1618,6 +1643,19 @@ export class ConversationOrchestrator {
             }),
           ].join('\n'),
           eventsRecorded,
+        };
+      }
+
+      this.l0PhrasePhase = 'CORRECT';
+      const nbaAfterRetry = await this.applyNbaAfterEvidence(pending.phraseId);
+      if (nbaAfterRetry) {
+        return {
+          ...nbaAfterRetry,
+          eventsRecorded: [...eventsRecorded, ...nbaAfterRetry.eventsRecorded],
+          geminiNudge: [
+            praiseGuidedRetryNudge(pending.expected),
+            nbaAfterRetry.geminiNudge || '',
+          ].filter(Boolean).join('\n'),
         };
       }
 
@@ -1656,6 +1694,27 @@ export class ConversationOrchestrator {
     eventsRecorded.push('PHRASE_FAILED');
     await this.recordPhraseEvent(pending.phraseId, { type: 'produced', correct: false });
     recordHelpAttempt(pending.phraseId, this.sessionSupport, false, { helpRequested: true });
+    if (isZeroLanguageMode(this.profile)) {
+      this.l0PhrasePhase = 'RETRY';
+      const block = findZeroLanguageBlock(pending.phraseId);
+      if (block && diagnosis.verdict === 'INCORRECT' && diagnosis.errorType !== 'pronunciation_approx') {
+        this.l0BlockErrors[block.id] = (this.l0BlockErrors[block.id] ?? 0) + 1;
+      }
+      const blockErrors = block ? (this.l0BlockErrors[block.id] ?? 0) : 0;
+      const recoveriesUsed = block ? (this.l0BlockRecoveries[block.id] ?? 0) : 0;
+      if (
+        shouldRecoverZeroLanguageBlock(
+          pending.phraseId,
+          diagnosis.verdict,
+          diagnosis.errorType,
+          blockErrors,
+          recoveriesUsed,
+        )
+      ) {
+        this.pendingBlockRecovery = { phraseId: pending.phraseId, failedGerman: pending.expected };
+        if (block) this.l0BlockRecoveries[block.id] = recoveriesUsed + 1;
+      }
+    }
     this.ctx.mode = 'PEDAGOGICAL_INTERVENTION';
     this.ctx.targetItem = pending.expected;
     this.persist();
@@ -2113,6 +2172,9 @@ export class ConversationOrchestrator {
 
     if (this.plan.target?.id && verdict === 'CORRECT') {
       const targetId = this.plan.target.id;
+      if (isZeroLanguageMode(this.profile)) {
+        this.l0PhrasePhase = 'CORRECT';
+      }
       // Introduce/practice com scaffold alto = produção guiada (não independência automática)
       const guidedProduction =
         usedHelp ||
@@ -2196,8 +2258,23 @@ export class ConversationOrchestrator {
         errorType,
         hardPart: diagnosis.hardPart,
       };
-      if (
-        isZeroLanguageMode(this.profile) &&
+      if (isZeroLanguageMode(this.profile)) {
+        this.l0PhrasePhase = verdict === 'NEEDS_REPAIR' ? 'NEAR_MISS' : 'INCORRECT';
+        const block = findZeroLanguageBlock(targetId);
+        if (block && verdict === 'INCORRECT' && errorType !== 'pronunciation_approx') {
+          this.l0BlockErrors[block.id] = (this.l0BlockErrors[block.id] ?? 0) + 1;
+        }
+        const blockErrors = block ? (this.l0BlockErrors[block.id] ?? 0) : 0;
+        const recoveriesUsed = block ? (this.l0BlockRecoveries[block.id] ?? 0) : 0;
+        if (
+          shouldRecoverZeroLanguageBlock(targetId, verdict, errorType, blockErrors, recoveriesUsed)
+        ) {
+          this.pendingBlockRecovery = { phraseId: targetId, failedGerman: target.german };
+          if (block) this.l0BlockRecoveries[block.id] = recoveriesUsed + 1;
+        } else {
+          this.pendingBlockRecovery = null;
+        }
+      } else if (
         shouldRecoverZeroLanguageBlock(targetId, verdict, errorType)
       ) {
         this.pendingBlockRecovery = { phraseId: targetId, failedGerman: target.german };
