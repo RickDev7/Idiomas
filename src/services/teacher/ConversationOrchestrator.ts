@@ -105,6 +105,8 @@ import {
   isL0CoreCurriculumComplete,
   isL0GreetingPhraseId,
   l0ConverseExpandNudge,
+  l0SubstitutionAdvanceNudge,
+  l0VariationsForBase,
   L0_BRIDGE_A1_SPECS,
   L0_MAX_IMMEDIATE_CORRECT_STREAK,
   L0_MAX_CORRECTION_ATTEMPTS,
@@ -1289,20 +1291,34 @@ export class ConversationOrchestrator {
         };
       }
 
+      const acceptedDe = resolvePhrase(phraseId, this.phrases)?.german || phraseId;
+      const isVariationNext =
+        l0VariationsForBase(phraseId).includes(next.id) ||
+        next.id.startsWith('l0-bridge-') ||
+        next.id.startsWith('l0-var-') ||
+        next.id.startsWith('l0-hook-');
       return {
         flow: 'continueConversation',
         action: this.plan.action === 'recall' ? 'recall' : (this.learning.phrases[next.id]?.timesCorrect ?? 0) === 0 ? 'introduce' : 'practice',
         mode: 'GUIDED_CONVERSATION',
-        reason: 'ZERO_LANGUAGE_MODE — frase aceita, próximo alvo',
+        reason: isVariationNext
+          ? 'ZERO_LANGUAGE_MODE — CORRECT → substituição/variação'
+          : 'ZERO_LANGUAGE_MODE — frase aceita, próximo alvo',
         targetItem: next.german,
-        geminiNudge: [
-          '[INSTRUÇÃO INTERNA — não leia isto em voz alta]',
-          'ZERO LANGUAGE MODE — frase aceita. Elogie curto ("Perfeito!") e AVANCE.',
-          `Nova frase-alvo ÚNICA: "${next.german}" (= ${next.portuguese || ''}). Ciclo PT→modelo→repita→AGUARDE.`,
-          'PROIBIDO: voltar para a frase que acabou de acertar.',
-          'PROIBIDO: "fale de novo para fixar" na mesma frase.',
-          'Não faça perguntas abertas. Não despeje várias frases.',
-        ].join('\n'),
+        geminiNudge: isVariationNext
+          ? l0SubstitutionAdvanceNudge({
+            acceptedGerman: acceptedDe,
+            nextGerman: next.german,
+            nextPt: next.portuguese,
+          })
+          : [
+            '[INSTRUÇÃO INTERNA — não leia isto em voz alta]',
+            'ZERO LANGUAGE MODE — frase aceita. Elogie curto ("Perfeito!") e AVANCE.',
+            `Nova frase-alvo ÚNICA: "${next.german}" (= ${next.portuguese || ''}). Ciclo PT→modelo→repita→AGUARDE.`,
+            'PROIBIDO: voltar para a frase que acabou de acertar.',
+            'PROIBIDO: "fale de novo para fixar" na mesma frase.',
+            'Não faça perguntas abertas sem gancho. Não despeje várias frases.',
+          ].join('\n'),
         eventsRecorded: [],
       };
     }

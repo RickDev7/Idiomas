@@ -74,16 +74,16 @@ const phrases = mergeZeroLanguagePhrases([
     ALL_IDS.map((id) => [id, acceptConf(id)]),
   );
   const stuck = pickZeroLanguageTarget(buildLearningProfile(zero, [], [], null, all), phrases);
-  assert(stuck.phrase?.id === 'l0-bridge-wo-arbeitest', `core complete → ponte (${stuck.phrase?.id})`);
+  assert(stuck.phrase?.id === 'l0-bridge-ich-arbeite-in', `core complete → ponte (${stuck.phrase?.id})`);
   assert(stuck.action === 'introduce', `ponte introduce (${stuck.action})`);
   const afterBridge = {
     ...all,
-    'l0-bridge-wo-arbeitest': acceptConf('l0-bridge-wo-arbeitest'),
+    'l0-bridge-ich-arbeite-in': acceptConf('l0-bridge-ich-arbeite-in'),
   };
   const rotated = pickZeroLanguageTarget(buildLearningProfile(zero, [], [], null, afterBridge), phrases, {
-    excludePhraseId: 'l0-bridge-wo-arbeitest',
+    excludePhraseId: 'l0-bridge-ich-arbeite-in',
   });
-  assert(rotated.phrase?.id !== 'l0-bridge-wo-arbeitest', `exclude → next != bridge (got ${rotated.phrase?.id})`);
+  assert(rotated.phrase?.id !== 'l0-bridge-ich-arbeite-in', `exclude → next != bridge (got ${rotated.phrase?.id})`);
   assert(rotated.phrase?.id !== 'l0-guten-morgen', 'exclude não volta a Morgen');
   console.log('  ✓ pickZeroLanguageTarget ponte + exclude →', rotated.phrase?.id || rotated.action);
 }
@@ -102,12 +102,18 @@ const phrases = mergeZeroLanguagePhrases([
   const d = await orch.handle({ type: 'USER_UTTERANCE', text: 'Ich arbeite.' });
   assert(!d.reason.includes('aguardando aceitação'), `aceitou: ${d.reason}`);
   assert(
-    d.reason.includes('TARGET_STUCK') || d.reason.includes('próximo alvo') || d.action === 'converse' || d.action === 'recall',
+    d.reason.includes('TARGET_STUCK')
+      || d.reason.includes('próximo alvo')
+      || d.reason.includes('substituição/variação')
+      || d.action === 'converse'
+      || d.action === 'recall'
+      || d.action === 'introduce',
     `avançou: ${d.reason} action=${d.action}`,
   );
-  // Nudge NÃO pede a mesma frase
-  assert(!/Nova frase-alvo ÚNICA: "Ich arbeite/i.test(d.geminiNudge || ''), 'nudge não re-mira Ich arbeite');
-  assert(/PROIBIDO.*mesma frase|AVANCE|TARGET_STUCK|OUTRA frase/i.test(d.geminiNudge || ''), 'nudge anti-loop');
+  assert(orch.getPlan().target?.id === 'l0-bridge-ich-arbeite-in', `CORRECT → variação in... (got ${orch.getPlan().target?.id})`);
+  // Nudge NÃO re-mira o base exato; variação "Ich arbeite in..." é avanço esperado
+  assert(!/Nova frase-alvo ÚNICA: "Ich arbeite\."/i.test(d.geminiNudge || ''), 'nudge não re-mira Ich arbeite.');
+  assert(/PROIBIDO.*mesma frase|AVANCE|TARGET_STUCK|OUTRA frase|substitui/i.test(d.geminiNudge || ''), 'nudge anti-loop');
   const conf = (await MemoryService.loadConfidenceMap())['survival-arbeite'];
   assert(isZeroLanguagePhraseAccepted(conf), 'accepted após 1 correto');
   console.log('  ✓ 1 CORRECT → ADVANCE (sem “fale de novo”) reason=', d.reason);
@@ -157,7 +163,7 @@ const phrases = mergeZeroLanguagePhrases([
   await orch.handle({ type: 'TEACHER_UTTERANCE', text: 'Sag: Ich arbeite.' });
   const ok = await orch.handle({ type: 'USER_UTTERANCE', text: 'Ich arbeite.' });
   assert(!ok.reason.startsWith('target_mismatch'), `após retry advance: ${ok.reason}`);
-  assert(!/Nova frase-alvo ÚNICA: "Ich arbeite/i.test(ok.geminiNudge || ''), 'não re-drill após correção');
+  assert(!/Nova frase-alvo ÚNICA: "Ich arbeite\."/i.test(ok.geminiNudge || ''), 'não re-drill após correção');
   console.log('  ✓ erro → retry → CORRECT → advance');
 }
 

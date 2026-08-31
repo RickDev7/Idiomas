@@ -134,19 +134,69 @@ export const ZERO_LANGUAGE_BLOCKS: Array<{ id: string; namePt: string; phraseIds
 ];
 
 /**
- * Ponte L0 → frases funcionais curtas (estilo A1) após esgotar o currículo core.
- * Não muda o nível do perfil; só amplia o pool pedagógico L0.
+ * Ponte + ganchos L0 (chunks) + substituições funcionais.
+ * Objetivo: formar frases, não memorizar uma linha estática.
  */
 export const L0_BRIDGE_A1_SPECS: Array<{ id: string; german: string; portuguese: string }> = [
-  { id: 'l0-bridge-wo-arbeitest', german: 'Wo arbeitest du?', portuguese: 'Onde você trabalha?' },
+  // Expansões de "Ich arbeite."
   { id: 'l0-bridge-ich-arbeite-in', german: 'Ich arbeite in...', portuguese: 'Eu trabalho em...' },
+  { id: 'l0-bridge-ich-arbeite-heute', german: 'Ich arbeite heute.', portuguese: 'Eu trabalho hoje.' },
+  { id: 'l0-var-ich-arbeite-morgens', german: 'Ich arbeite morgens.', portuguese: 'Eu trabalho de manhã.' },
+  { id: 'l0-bridge-wo-arbeitest', german: 'Wo arbeitest du?', portuguese: 'Onde você trabalha?' },
   { id: 'l0-bridge-wann-arbeitest', german: 'Wann arbeitest du?', portuguese: 'Quando você trabalha?' },
+  // Expansões de identidade
   { id: 'l0-bridge-ich-wohne-in', german: 'Ich wohne in Cuxhaven.', portuguese: 'Eu moro em Cuxhaven.' },
   { id: 'l0-bridge-ich-komme-aus', german: 'Ich komme aus Brasilien.', portuguese: 'Eu venho do Brasil.' },
   { id: 'l0-bridge-ich-heisse-name', german: 'Ich heiße Rick.', portuguese: 'Eu me chamo Rick.' },
+  { id: 'l0-var-ich-bin-student', german: 'Ich bin Student.', portuguese: 'Eu sou estudante.' },
+  // Ganchos estruturantes (chunks) + substituições
+  { id: 'l0-hook-ich-muss', german: 'Ich muss...', portuguese: 'Eu preciso / tenho que...' },
+  { id: 'l0-var-ich-muss-arbeiten', german: 'Ich muss arbeiten.', portuguese: 'Eu preciso trabalhar.' },
+  { id: 'l0-var-ich-muss-gehen', german: 'Ich muss gehen.', portuguese: 'Eu preciso ir.' },
+  { id: 'l0-hook-ich-moechte', german: 'Ich möchte...', portuguese: 'Eu gostaria de...' },
+  { id: 'l0-var-ich-moechte-wasser', german: 'Ich möchte Wasser.', portuguese: 'Eu gostaria de água.' },
+  { id: 'l0-var-ich-moechte-pause', german: 'Ich möchte eine Pause.', portuguese: 'Eu gostaria de uma pausa.' },
+  { id: 'l0-hook-kannst-du', german: 'Kannst du...?', portuguese: 'Você pode...?' },
+  { id: 'l0-var-kannst-du-helfen', german: 'Kannst du helfen?', portuguese: 'Você pode ajudar?' },
+  { id: 'l0-hook-ich-brauche', german: 'Ich brauche...', portuguese: 'Eu preciso de...' },
+  { id: 'l0-var-ich-brauche-hilfe', german: 'Ich brauche Hilfe.', portuguese: 'Eu preciso de ajuda.' },
   { id: 'l0-bridge-was-machst', german: 'Was machst du?', portuguese: 'O que você faz?' },
-  { id: 'l0-bridge-ich-arbeite-heute', german: 'Ich arbeite heute.', portuguese: 'Eu trabalho hoje.' },
 ];
+
+/**
+ * Gancho base → variações/substituições (ordem pedagógica).
+ * Após CORRECT no base, o pick prioriza a próxima variação não aceita.
+ */
+export const L0_BASE_TO_VARIATIONS: Record<string, string[]> = {
+  'survival-arbeite': [
+    'l0-bridge-ich-arbeite-in',
+    'l0-bridge-ich-arbeite-heute',
+    'l0-var-ich-arbeite-morgens',
+    'l0-bridge-wo-arbeitest',
+    'l0-bridge-wann-arbeitest',
+  ],
+  'l0-ich-wohne': ['l0-bridge-ich-wohne-in'],
+  'l0-ich-komme': ['l0-bridge-ich-komme-aus'],
+  'l0-ich-heisse': ['l0-bridge-ich-heisse-name'],
+  'l0-ich-bin': ['l0-var-ich-bin-student'],
+  'l0-hook-ich-muss': ['l0-var-ich-muss-arbeiten', 'l0-var-ich-muss-gehen'],
+  'l0-hook-ich-moechte': ['l0-var-ich-moechte-wasser', 'l0-var-ich-moechte-pause'],
+  'l0-hook-kannst-du': ['l0-var-kannst-du-helfen'],
+  'l0-hook-ich-brauche': ['l0-var-ich-brauche-hilfe'],
+  'l0-hilfe': ['l0-var-ich-brauche-hilfe'],
+};
+
+/** Ganchos estruturantes introduzidos após o core inicial (ainda L0). */
+export const L0_CHUNK_HOOK_IDS = [
+  'l0-hook-ich-muss',
+  'l0-hook-ich-moechte',
+  'l0-hook-kannst-du',
+  'l0-hook-ich-brauche',
+] as const;
+
+export function l0VariationsForBase(baseId: string): string[] {
+  return L0_BASE_TO_VARIATIONS[baseId] || [];
+}
 
 const L0_GREETING_IDS = new Set(
   ZERO_LANGUAGE_BLOCKS.find((b) => b.id === 'greetings')?.phraseIds || [],
@@ -229,6 +279,47 @@ export type L0PhrasePhase =
 /** Frase aceita para avanço — 1 produção correta basta. */
 export function isZeroLanguagePhraseAccepted(conf: PhraseConfidence | undefined): boolean {
   return (conf?.timesCorrect ?? 0) >= L0_MIN_CORRECT_BEFORE_ADVANCE;
+}
+
+/** Próxima variação/substituição ainda não aceita para um gancho base. */
+export function l0NextUnacceptedVariation(
+  learning: UserLearningProfile,
+  baseId: string,
+  skip?: Set<string>,
+): string | null {
+  for (const id of l0VariationsForBase(baseId)) {
+    if (skip?.has(id)) continue;
+    if (!isZeroLanguagePhraseAccepted(learning.phrases[id])) return id;
+  }
+  return null;
+}
+
+/**
+ * Após CORRECT num base: prioriza variação do próprio base; senão de outros bases aceitos.
+ */
+export function l0PickPendingVariationId(
+  learning: UserLearningProfile,
+  opts?: { preferBaseId?: string | null; skip?: Set<string> },
+): string | null {
+  const skip = opts?.skip || new Set<string>();
+  if (opts?.preferBaseId) {
+    const hit = l0NextUnacceptedVariation(learning, opts.preferBaseId, skip);
+    if (hit) return hit;
+  }
+  const acceptedBases = Object.keys(L0_BASE_TO_VARIATIONS).filter((id) =>
+    isZeroLanguagePhraseAccepted(learning.phrases[id]),
+  );
+  // Preferir o base aceito mais recentemente (lastProduced)
+  acceptedBases.sort((a, b) => {
+    const ta = Date.parse(learning.phrases[a]?.lastProduced || '') || 0;
+    const tb = Date.parse(learning.phrases[b]?.lastProduced || '') || 0;
+    return tb - ta;
+  });
+  for (const baseId of acceptedBases) {
+    const hit = l0NextUnacceptedVariation(learning, baseId, skip);
+    if (hit) return hit;
+  }
+  return null;
 }
 
 export function findZeroLanguageBlock(phraseId: string) {
@@ -327,12 +418,23 @@ export function pickZeroLanguageTarget(
   const exclude = opts?.excludePhraseId || null;
   const skip = new Set((opts?.skipPhraseIds || []).filter(Boolean));
 
+  const resolveAction = (id: string, conf: PhraseConfidence | undefined) => {
+    const phrase = pool.find((p) => p.id === id) || null;
+    if (!phrase) return null;
+    const times = conf?.timesCorrect ?? 0;
+    if (!conf || conf.state === 'new' || times === 0) {
+      return { conf, phrase, action: 'introduce' as const };
+    }
+    return { conf, phrase, action: 'practice' as const };
+  };
+
   // Modo BLOCK_REVIEW: reforço local do bloco atual (não volta à sessão inteira)
   if (opts?.blockReviewPhraseId) {
     const reviewBlock = findZeroLanguageBlock(opts.blockReviewPhraseId);
     if (reviewBlock) {
       for (const id of reviewBlock.phraseIds) {
         if (skip.has(id)) continue;
+        if (id === exclude) continue;
         const phrase = pool.find((p) => p.id === id) || null;
         if (!phrase) continue;
         const conf = learning.phrases[id];
@@ -343,38 +445,68 @@ export function pickZeroLanguageTarget(
     }
   }
 
-  // Avanço linear: primeira frase ainda não aceita (e não postergada)
-  for (const id of L0_PRIORITY_IDS) {
-    if (skip.has(id)) continue;
-    const phrase = pool.find((p) => p.id === id) || null;
-    if (!phrase) continue;
-    const conf = learning.phrases[id];
-    if (conf && isAutomated(conf)) continue;
-    if (isZeroLanguagePhraseAccepted(conf)) continue;
-    const times = conf?.timesCorrect ?? 0;
-    if (!conf || conf.state === 'new' || times === 0) {
-      return { conf, phrase, action: 'introduce' };
+  // MODELO → SUBSTITUIÇÃO: só logo após CORRECT (exclude), avançar para variação do mesmo gancho
+  if (exclude) {
+    let pendingVar = l0NextUnacceptedVariation(learning, exclude, skip);
+    if (!pendingVar) {
+      const parentBase = Object.entries(L0_BASE_TO_VARIATIONS).find(([, vars]) =>
+        vars.includes(exclude),
+      )?.[0];
+      if (parentBase) pendingVar = l0NextUnacceptedVariation(learning, parentBase, skip);
     }
-    return { conf, phrase, action: 'practice' };
+    if (pendingVar && pendingVar !== exclude) {
+      const hit = resolveAction(pendingVar, learning.phrases[pendingVar]);
+      if (hit) return hit;
+    }
   }
 
-  // Core completo → ponte funcional A1 (ainda em modo L0: uma frase por vez)
-  for (const id of L0_BRIDGE_PRIORITY_IDS) {
+  // Avanço linear core (cumprimentos → sobrevivência)
+  for (const id of L0_PRIORITY_IDS) {
     if (skip.has(id)) continue;
+    if (id === exclude) continue;
     const phrase = pool.find((p) => p.id === id) || null;
     if (!phrase) continue;
     const conf = learning.phrases[id];
     if (conf && isAutomated(conf)) continue;
     if (isZeroLanguagePhraseAccepted(conf)) continue;
-    const times = conf?.timesCorrect ?? 0;
-    if (!conf || conf.state === 'new' || times === 0) {
-      return { conf, phrase, action: 'introduce' };
+    return resolveAction(id, conf)!;
+  }
+
+  // Core esgotado: completar variações pendentes de ganchos já aceitos, depois novos hooks
+  {
+    const pending = l0PickPendingVariationId(learning, { preferBaseId: exclude, skip });
+    if (pending && pending !== exclude) {
+      const hit = resolveAction(pending, learning.phrases[pending]);
+      if (hit) return hit;
     }
-    return { conf, phrase, action: 'practice' };
+  }
+
+  // Ganchos estruturantes (Ich muss / möchte / Kannst du / brauche)
+  for (const id of L0_CHUNK_HOOK_IDS) {
+    if (skip.has(id)) continue;
+    if (id === exclude) continue;
+    const conf = learning.phrases[id];
+    if (conf && isAutomated(conf)) continue;
+    if (isZeroLanguagePhraseAccepted(conf)) continue;
+    const hit = resolveAction(id, conf);
+    if (hit) return hit;
+  }
+
+  // Restante da ponte (ainda não coberta por variações de bases aceitos)
+  for (const id of L0_BRIDGE_PRIORITY_IDS) {
+    if (skip.has(id)) continue;
+    if (id === exclude) continue;
+    if ((L0_CHUNK_HOOK_IDS as readonly string[]).includes(id)) continue;
+    const phrase = pool.find((p) => p.id === id) || null;
+    if (!phrase) continue;
+    const conf = learning.phrases[id];
+    if (conf && isAutomated(conf)) continue;
+    if (isZeroLanguagePhraseAccepted(conf)) continue;
+    return resolveAction(id, conf)!;
   }
 
   // Core + ponte aceitos.
-  // Recall: NUNCA priorizar greetings já aceitos (timesCorrect>=1) nesta sessão de planejamento.
+  // Recall: NUNCA priorizar greetings já aceitos (timesCorrect>=1).
   const acceptedCore = L0_PRIORITY_IDS.filter((id) => isZeroLanguagePhraseAccepted(learning.phrases[id]));
   const acceptedBridge = L0_BRIDGE_PRIORITY_IDS.filter((id) => isZeroLanguagePhraseAccepted(learning.phrases[id]));
   const acceptedIds = [...acceptedCore, ...acceptedBridge];
@@ -422,7 +554,7 @@ export function pickZeroLanguageTarget(
     };
   }
 
-  // Sem recall funcional elegível → converse (expansão no nudge; sem voltar a greetings)
+  // Sem recall funcional → converse situacional (montagem de frases)
   const expandBase =
     [...L0_BRIDGE_PRIORITY_IDS, ...L0_PRIORITY_IDS]
       .reverse()
@@ -469,8 +601,20 @@ export function l0PhrasesForLiveProfile(learning: UserLearningProfile): {
 /** Expansões funcionais curtas a partir do último target conhecido (L0). */
 export function l0FunctionalExpansionsFor(baseGerman: string | null | undefined): string[] {
   const g = (baseGerman || '').toLowerCase();
+  if (/muss/.test(g)) {
+    return ['Ich muss arbeiten.', 'Ich muss gehen.', 'Ich muss...'];
+  }
+  if (/möchte|moechte/.test(g)) {
+    return ['Ich möchte Wasser.', 'Ich möchte eine Pause.', 'Ich möchte...'];
+  }
+  if (/kannst du/.test(g)) {
+    return ['Kannst du helfen?', 'Kannst du...?'];
+  }
+  if (/brauche/.test(g)) {
+    return ['Ich brauche Hilfe.', 'Ich brauche...'];
+  }
   if (/arbeite|arbeitest/.test(g)) {
-    return ['Wo arbeitest du?', 'Ich arbeite in...', 'Wann arbeitest du?', 'Ich arbeite heute.'];
+    return ['Ich arbeite in...', 'Ich arbeite heute.', 'Ich arbeite morgens.', 'Wo arbeitest du?'];
   }
   if (/wohne|wohnst/.test(g)) {
     return ['Ich wohne in Cuxhaven.', 'Ich wohne in...'];
@@ -484,10 +628,28 @@ export function l0FunctionalExpansionsFor(baseGerman: string | null | undefined)
   if (/bin\b/.test(g)) {
     return ['Ich bin Student.', 'Ich bin...'];
   }
-  return ['Wo arbeitest du?', 'Ich arbeite heute.', 'Was machst du?'];
+  return ['Ich muss...', 'Ich möchte...', 'Ich arbeite in...'];
 }
 
-/** Nudge: converse após currículo core — EXPANDIR, não recycle greetings. */
+/** Após CORRECT: avançar para SUBSTITUIÇÃO / montagem — não repetir o mesmo target. */
+export function l0SubstitutionAdvanceNudge(opts: {
+  acceptedGerman: string;
+  nextGerman: string;
+  nextPt?: string;
+}): string {
+  return [
+    '[INSTRUÇÃO INTERNA — não leia isto em voz alta]',
+    'ZERO LANGUAGE MODE — MODELO → SUBSTITUIÇÃO (tutor ativo).',
+    `Elogie curto: "Perfeito!" O aluno produziu: "${opts.acceptedGerman}".`,
+    'PROIBIDO: pedir a MESMA frase de novo / "fale de novo para fixar".',
+    'PROIBIDO: voltar a Guten Morgen / Wie geht\'s / Hallo.',
+    `Agora EXPANDIR o padrão. Nova frase-alvo ÚNICA: "${opts.nextGerman}"${opts.nextPt ? ` (= ${opts.nextPt})` : ''}.`,
+    'Ciclo CURTO: PT (gancho) → modelo DE → "Agora você monta / repete." → AGUARDE.',
+    'Explique que é o MESMO gancho com complemento novo (substituição), não uma frase isolada.',
+  ].join('\n');
+}
+
+/** Nudge: converse / produção — montar frases em situação real. */
 export function l0ConverseExpandNudge(opts: {
   lastGerman?: string | null;
   nextBridgeGerman?: string | null;
@@ -497,13 +659,17 @@ export function l0ConverseExpandNudge(opts: {
   const next = opts.nextBridgeGerman || expansions[0];
   return [
     '[INSTRUÇÃO INTERNA — não leia isto em voz alta]',
-    'ZERO LANGUAGE MODE — CURRÍCULO INICIAL COMPLETO: EXPANDIR (não reiniciar).',
-    'Elogie curto ("Perfeito!").',
+    'ZERO LANGUAGE MODE — PRODUÇÃO / CONVERSA SITUACIONAL (parceiro ativo).',
+    'Elogie curto se acabou de acertar. NÃO reinicie em cumprimentos.',
     'PROIBIDO: Guten Morgen / Wie geht\'s / Hallo / Tschüss só por hábito.',
-    'PROIBIDO: repetir a mesma frase conhecida sem variação.',
-    `Base conhecida: "${base}".`,
-    `ENSINE UMA expansão funcional curta AGORA (ciclo PT→modelo→repita→AGUARDE): "${next}".`,
-    `Alternativas OK (uma só): ${expansions.slice(0, 3).map((e) => `"${e}"`).join(' | ')}.`,
+    'PROIBIDO: só pedir eco da mesma frase estática.',
+    `Gancho/base: "${base}".`,
+    'Situação: conversa real sobre trabalho / necessidades / rotina.',
+    `Peça ao aluno MONTAR uma variação (uma só): "${next}".`,
+    `Outras substituições OK: ${expansions.slice(0, 3).map((e) => `"${e}"`).join(' | ')}.`,
+    'Se faltar PALAVRA: forneça só a palavra e peça de novo.',
+    'Se faltar ESTRUTURA: mostre modelo parcial (gancho + ...) e peça completar.',
+    'Se acertar com facilidade: reduza ajuda no próximo turno.',
     'Continua L0: frases curtas, uma estrutura, português de suporte, correção local.',
   ].join('\n');
 }
@@ -733,19 +899,20 @@ export function zeroLanguageDirective(opts: {
     'Português = suporte. Alemão = doses mínimas. Fale CURTO. Não monologue.',
     `DURAÇÃO DA SESSÃO: ~${minutes} minutos (~${l0ExpectedCoverageForMinutes(minutes)} frases exploráveis como meta, não teto rígido).`,
     'O tempo é ORÇAMENTO DE APRENDIZADO: maximize conteúdo apropriado (vocabulário, estruturas, produção, situações). NÃO maximize repetição da mesma frase.',
+    'MÉTODO: GANCHO (chunk) → SUBSTITUIÇÃO → PRODUÇÃO → CONVERSA. Ex.: Ich arbeite. → Ich arbeite in... → Wo arbeitest du?',
     'Ciclo OBRIGATÓRIO por frase nova (VOZ):',
-    '1) PT: "Vamos aprender uma frase nova."',
+    '1) PT: "Vamos aprender uma frase nova." / "Vamos montar uma frase."',
     `2) PT: "${pt} em alemão é ${de}"`,
     `3) DE (modelo claro): "${de}"`,
     `4) PT: "Significa ${pt}."`,
     `5) DE de novo: "${de}"`,
-    '6) PT: "Agora repita." / "Agora você."',
+    '6) PT: "Agora você." / "Agora monte."',
     '7) PARE. AGUARDE o microfone. Silêncio ≠ erro.',
     '8) Se quase (pronúncia): "Quase!" → destaque a parte → modelo → "Agora você." AGUARDE.',
     '9) Se erro: corrija → 1 nova tentativa. Se persistir: registre dificuldade e AVANCE (revisão depois). NÃO monopolize a sessão.',
-    '10) Um acerto correto = aceitar e avançar à PRÓXIMA frase. UMA estrutura nova por vez. Maximizar cobertura no tempo escolhido.',
-    'PROIBIDO em L0: Wo wohnst du? / Was machst du? / Was brauchst du? / perguntas abertas sem estrutura ensinado.',
-    'PROIBIDO: aula teórica longa, despejar várias frases, falar enquanto o aluno deve responder.',
+    '10) Um acerto correto = aceitar e avançar à PRÓXIMA variação/estrutura. NÃO repetir o mesmo target.',
+    'PROIBIDO: perguntas abertas sem ter ensinado o gancho; aula teórica longa; despejar várias frases.',
+    'Permitido: ganchos ensinado + substituição (Ich muss arbeiten / Ich möchte Wasser) com modelo.',
     `AÇÃO: ${opts.action}. SCAFFOLD: ${opts.scaffoldLevel}/5.`,
     `FRASE ATUAL: "${de}" = "${pt}"`,
     '=== FIM ZERO LANGUAGE MODE ===',
@@ -808,29 +975,36 @@ export function teachFromErrorNudge(opts: {
   errorType?: ProductionErrorType;
   attempt: number;
 }): string {
+  const words = opts.correction.trim().split(/\s+/).filter(Boolean);
+  const partialModel =
+    words.length >= 2 ? `${words.slice(0, Math.max(1, words.length - 1)).join(' ')}...` : opts.correction;
   const soft = opts.attempt <= 1 ? 'Quase!' : 'Vamos tentar de novo.';
   const focus = opts.hardPart
     ? opts.errorType === 'pronunciation_approx'
-      ? `É "${opts.hardPart}".`
-      : `A palavra/parte difícil é "${opts.hardPart}".`
+      ? `A palavra que falta/ajustar é "${opts.hardPart}". Forneça SÓ essa palavra e peça de novo.`
+      : `Palavra/parte: "${opts.hardPart}". Dê a palavra e peça montar a frase.`
     : opts.errorType === 'conjugation'
-      ? 'Só uma pequena correção na forma do verbo.'
-      : 'Só uma pequena correção.';
+      ? 'Corrija só a forma do verbo; mantenha o gancho.'
+      : opts.attempt >= 2
+        ? `Mostre modelo PARCIAL: "${partialModel}" e peça completar.`
+        : 'Só uma pequena correção — não reinicie a aula.';
   const slow = opts.errorType === 'pronunciation_approx'
-    ? `Diga: "Escute novamente." Depois pronuncie DEVAGAR: "${opts.correction}"`
-    : `Diga: "Escute novamente." Depois modele: "${opts.correction}"`;
+    ? `Diga: "Escute." Depois pronuncie DEVAGAR: "${opts.correction}"`
+    : opts.attempt >= 2
+      ? `Modele parcial "${partialModel}", depois completo: "${opts.correction}"`
+      : `Modele: "${opts.correction}"`;
   return [
     '[INSTRUÇÃO INTERNA — não leia isto em voz alta]',
-    'ENSINO A PARTIR DO ERRO — obrigatório (CURTO):',
+    'TUTOR ATIVO L0 — ensinar a MONTAR a frase (não só repetir):',
     `O aluno disse: "${opts.userSaid}"`,
-    `Forma correta: "${opts.correction}"`,
+    `Alvo: "${opts.correction}"`,
     soft,
     focus,
     slow,
-    'Peça NOVA TENTATIVA: "Agora você."',
-    'AGUARDE. NÃO mude de assunto. NÃO avance para outra frase.',
-    `ALVO ÚNICO AGORA: "${opts.correction}". PROIBIDO voltar para Wie geht's / Guten Morgen / Hallo / frases anteriores.`,
-    'Tom: encorajador. Nunca diga "errado" ou "você não sabe".',
+    'Peça NOVA TENTATIVA: "Agora você monta." / "Agora você."',
+    'AGUARDE. NÃO mude de assunto. NÃO avance. NÃO volte a cumprimentos.',
+    `ALVO ÚNICO: "${opts.correction}".`,
+    'Tom encorajador. Nunca diga "errado" ou "você não sabe".',
   ].join('\n');
 }
 
@@ -839,8 +1013,9 @@ export function praiseGuidedRetryNudge(correction: string): string {
     '[INSTRUÇÃO INTERNA — não leia isto em voz alta]',
     `O aluno acertou após correção: "${correction}"`,
     'Elogie de forma curta: "Perfeito!"',
-    'Isso foi produção GUIADA (havia modelo). NÃO declare fluência.',
-    'Avance para a próxima frase. NÃO volte a frases anteriores já aceitas.',
+    'Produção GUIADA. NÃO declare fluência.',
+    'AVANCE para SUBSTITUIÇÃO / próxima variação do gancho — NÃO repita a mesma frase.',
+    'PROIBIDO: voltar a Guten Morgen / Wie geht\'s / frases já aceitas.',
   ].join('\n');
 }
 

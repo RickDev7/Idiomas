@@ -669,7 +669,7 @@ for (const id of allIds) {
 const p1 = pickZeroLanguageTarget(learnAll, mergeZeroLanguagePhrases([]));
 const p2 = pickZeroLanguageTarget(learnAll, mergeZeroLanguagePhrases([]));
 assert(p1.phrase?.id === p2.phrase?.id, `pick estável (${p1.phrase?.id})`);
-assert(p1.phrase?.id === 'l0-bridge-wo-arbeitest', `core complete → ponte (${p1.phrase?.id})`);
+assert(p1.phrase?.id === 'l0-bridge-ich-arbeite-in', `core complete → ponte (${p1.phrase?.id})`);
 assert(p1.action === 'introduce', `ponte introduce (${p1.action})`);
 console.log('  ✓ core complete → ponte A1 (sem loop Hallo)');
 

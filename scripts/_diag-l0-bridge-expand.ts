@@ -79,7 +79,7 @@ console.log('DIAG — L0 bridge expand + anti-greetings\n');
   assert(isL0CoreCurriculumComplete(learning), 'T2 core complete');
   const picked = pickZeroLanguageTarget(learning, mergeZeroLanguagePhrases([]));
   assert(picked.phrase?.id !== 'l0-guten-morgen', 'T2 ≠ primeiro greeting');
-  assert(picked.phrase?.id === L0_BRIDGE_A1_SPECS[0].id, `T3 ponte (${picked.phrase?.id})`);
+  assert(picked.phrase?.id === 'l0-bridge-ich-arbeite-in', `T3 ponte (${picked.phrase?.id})`);
   assert(picked.action === 'introduce', `T3 introduce (${picked.action})`);
   console.log('  ✓ TESTE 2–3: L0_CURRICULUM_COMPLETE → ponte', picked.phrase?.id);
 }
