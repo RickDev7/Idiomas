@@ -77,39 +77,59 @@ function levenshtein(a: string, b: string): number {
   return row[b.length];
 }
 
-/** Progressão L0: frases curtas em ordem (uma por vez). */
+/** Progressão L0: frases curtas em ordem (uma por vez). Cobertura ampla = orçamento de tempo. */
 export const ZERO_LANGUAGE_SEED_SPECS: Array<{ id: string; german: string; portuguese: string }> = [
   // Bloco 1 — Cumprimentos
   { id: 'l0-guten-morgen', german: 'Guten Morgen.', portuguese: 'Bom dia.' },
+  { id: 'l0-guten-tag', german: 'Guten Tag.', portuguese: 'Boa tarde.' },
   { id: 'l0-guten-abend', german: 'Guten Abend.', portuguese: 'Boa tarde / boa noite (início da noite).' },
   { id: 'l0-gute-nacht', german: 'Gute Nacht.', portuguese: 'Boa noite (ao dormir).' },
+  { id: 'l0-hallo', german: 'Hallo.', portuguese: 'Oi.' },
+  { id: 'l0-tschuess', german: 'Tschüss!', portuguese: 'Tchau!' },
   // Bloco 2 — Como estou
   { id: 'l0-wie-gehts', german: "Wie geht's?", portuguese: 'Como você está?' },
   { id: 'l0-mir-gehts-gut', german: "Mir geht's gut.", portuguese: 'Estou bem.' },
+  // legado (merge/memória) — não entram na prioridade linear
   { id: 'survival-gut', german: 'Mir geht es gut.', portuguese: 'Estou bem.' },
-  // Bloco 3 — Apresentação
-  { id: 'l0-hallo', german: 'Hallo.', portuguese: 'Oi.' },
+  // Bloco 3 — Apresentação / vida
   { id: 'l0-ich-heisse', german: 'Ich heiße...', portuguese: 'Eu me chamo...' },
   { id: 'survival-heisse', german: 'Ich heiße...', portuguese: 'Me chamo...' },
+  { id: 'l0-ich-bin', german: 'Ich bin...', portuguese: 'Eu sou...' },
+  { id: 'l0-ich-wohne', german: 'Ich wohne in...', portuguese: 'Eu moro em...' },
+  { id: 'l0-ich-komme', german: 'Ich komme aus...', portuguese: 'Eu venho de...' },
   { id: 'survival-arbeite', german: 'Ich arbeite.', portuguese: 'Eu trabalho.' },
+  // Bloco 4 — Sobrevivência
+  { id: 'l0-ja', german: 'Ja.', portuguese: 'Sim.' },
+  { id: 'l0-nein', german: 'Nein.', portuguese: 'Não.' },
+  { id: 'l0-danke', german: 'Danke.', portuguese: 'Obrigado.' },
+  { id: 'l0-bitte', german: 'Bitte.', portuguese: 'Por favor. / De nada.' },
+  { id: 'l0-hilfe', german: 'Hilfe, bitte!', portuguese: 'Socorro, por favor!' },
+  { id: 'l0-pause', german: 'Ich brauche eine Pause.', portuguese: 'Preciso de uma pausa.' },
+  { id: 'l0-verstehe-nicht', german: 'Ich verstehe nicht.', portuguese: 'Eu não entendo.' },
+  { id: 'l0-noch-einmal', german: 'Noch einmal, bitte.', portuguese: 'Mais uma vez, por favor.' },
 ];
 
-/** Blocos pedagógicos L0 — recuperação volta ao início do bloco atual, não da sessão. */
+/** Blocos pedagógicos L0 — prioridade linear = cobertura da sessão (sem duplicatas). */
 export const ZERO_LANGUAGE_BLOCKS: Array<{ id: string; namePt: string; phraseIds: string[] }> = [
   {
     id: 'greetings',
     namePt: 'Cumprimentos',
-    phraseIds: ['l0-guten-morgen', 'l0-guten-abend', 'l0-gute-nacht'],
+    phraseIds: ['l0-guten-morgen', 'l0-guten-tag', 'l0-guten-abend', 'l0-gute-nacht', 'l0-hallo', 'l0-tschuess'],
   },
   {
     id: 'wellbeing',
     namePt: 'Como estou',
-    phraseIds: ['l0-wie-gehts', 'l0-mir-gehts-gut', 'survival-gut'],
+    phraseIds: ['l0-wie-gehts', 'l0-mir-gehts-gut'],
   },
   {
     id: 'identity',
     namePt: 'Apresentação',
-    phraseIds: ['l0-hallo', 'l0-ich-heisse', 'survival-heisse', 'survival-arbeite'],
+    phraseIds: ['l0-ich-heisse', 'l0-ich-bin', 'l0-ich-wohne', 'l0-ich-komme', 'survival-arbeite'],
+  },
+  {
+    id: 'survival',
+    namePt: 'Sobrevivência',
+    phraseIds: ['l0-ja', 'l0-nein', 'l0-danke', 'l0-bitte', 'l0-hilfe', 'l0-pause', 'l0-verstehe-nicht', 'l0-noch-einmal'],
   },
 ];
 
@@ -151,8 +171,9 @@ const L0_PRIORITY_IDS = ZERO_LANGUAGE_BLOCKS.flatMap((b) => b.phraseIds);
  */
 export const L0_MIN_CORRECT_BEFORE_ADVANCE = 1;
 
-/** Erros reais no mesmo bloco antes de ativar recuperação do bloco. */
-export const L0_BLOCK_RECOVERY_ERROR_THRESHOLD = 2;
+/** Erros reais no mesmo bloco antes de ativar recuperação do bloco.
+ * Alto de propósito: dificuldade vai para revisão futura; não monopoliza a sessão. */
+export const L0_BLOCK_RECOVERY_ERROR_THRESHOLD = 99;
 
 /** Máximo de recuperações de bloco por sessão (por bloco). */
 export const L0_MAX_BLOCK_RECOVERIES_PER_BLOCK = 1;
@@ -243,6 +264,19 @@ export function zeroLanguageSessionUnits(dailyMinutes: number): number {
 /** Máximo de acertos seguidos no MESMO target sem erro antes de forçar rotação (anti-loop). */
 export const L0_MAX_IMMEDIATE_CORRECT_STREAK = 2;
 
+/**
+ * Tentativas de correção (após o 1º erro) antes de postergar a dificuldade
+ * e CONTINUAR a sessão — não monopolizar o orçamento de tempo.
+ */
+export const L0_MAX_CORRECTION_ATTEMPTS = 2;
+
+/** Estimativa de frases novas exploráveis por orçamento de minutos (não é teto rígido). */
+export function l0ExpectedCoverageForMinutes(dailyMinutes: number): number {
+  const m = Math.max(10, Math.min(90, dailyMinutes || 20));
+  // ~1 frase nova / 1.5–2 min no início; sessões longas exploram mais
+  return Math.max(6, Math.min(L0_PRIORITY_IDS.length, Math.round(m / 1.75)));
+}
+
 export function pickZeroLanguageTarget(
   learning: UserLearningProfile,
   phrases: Phrase[],
@@ -250,16 +284,20 @@ export function pickZeroLanguageTarget(
     blockReviewPhraseId?: string | null;
     /** Frase acabada de acertar — não repetir imediatamente no recall. */
     excludePhraseId?: string | null;
+    /** Frases difíceis postergadas nesta sessão — pular para maximizar cobertura. */
+    skipPhraseIds?: string[] | null;
   },
 ): { conf: PhraseConfidence | undefined; phrase: Phrase | null; action: 'introduce' | 'practice' | 'recall' | 'converse' } {
   const pool = mergeZeroLanguagePhrases(phrases);
   const exclude = opts?.excludePhraseId || null;
+  const skip = new Set((opts?.skipPhraseIds || []).filter(Boolean));
 
   // Modo BLOCK_REVIEW: reforço local do bloco atual (não volta à sessão inteira)
   if (opts?.blockReviewPhraseId) {
     const reviewBlock = findZeroLanguageBlock(opts.blockReviewPhraseId);
     if (reviewBlock) {
       for (const id of reviewBlock.phraseIds) {
+        if (skip.has(id)) continue;
         const phrase = pool.find((p) => p.id === id) || null;
         if (!phrase) continue;
         const conf = learning.phrases[id];
@@ -270,8 +308,9 @@ export function pickZeroLanguageTarget(
     }
   }
 
-  // Avanço linear: primeira frase ainda não aceita na ordem pedagógica
+  // Avanço linear: primeira frase ainda não aceita (e não postergada)
   for (const id of L0_PRIORITY_IDS) {
+    if (skip.has(id)) continue;
     const phrase = pool.find((p) => p.id === id) || null;
     if (!phrase) continue;
     const conf = learning.phrases[id];
@@ -583,8 +622,8 @@ export function zeroLanguageDirective(opts: {
     '=== ZERO LANGUAGE MODE (nível 0) ===',
     'O aluno entende pouco ou NENHUM alemão — ensine como a uma criança pequena: UMA coisa por vez.',
     'Português = suporte. Alemão = doses mínimas. Fale CURTO. Não monologue.',
-    `DURAÇÃO DA SESSÃO: ~${minutes} minutos. NÃO encerre só porque ensinou poucas frases.`,
-    'Use o tempo: ensinar → repetir → corrigir → revisar → recuperar → só então avançar.',
+    `DURAÇÃO DA SESSÃO: ~${minutes} minutos (~${l0ExpectedCoverageForMinutes(minutes)} frases exploráveis como meta, não teto rígido).`,
+    'O tempo é ORÇAMENTO DE APRENDIZADO: maximize conteúdo apropriado (vocabulário, estruturas, produção, situações). NÃO maximize repetição da mesma frase.',
     'Ciclo OBRIGATÓRIO por frase nova (VOZ):',
     '1) PT: "Vamos aprender uma frase nova."',
     `2) PT: "${pt} em alemão é ${de}"`,
@@ -594,8 +633,8 @@ export function zeroLanguageDirective(opts: {
     '6) PT: "Agora repita." / "Agora você."',
     '7) PARE. AGUARDE o microfone. Silêncio ≠ erro.',
     '8) Se quase (pronúncia): "Quase!" → destaque a parte → modelo → "Agora você." AGUARDE.',
-    '9) Se erro claro: corrija a frase atual → "Agora você." → AGUARDE. Só após erros repetidos no MESMO bloco, revisão curta local.',
-    '10) Um acerto correto = aceitar e avançar à PRÓXIMA frase. UMA estrutura nova por vez.',
+    '9) Se erro: corrija → 1 nova tentativa. Se persistir: registre dificuldade e AVANCE (revisão depois). NÃO monopolize a sessão.',
+    '10) Um acerto correto = aceitar e avançar à PRÓXIMA frase. UMA estrutura nova por vez. Maximizar cobertura no tempo escolhido.',
     'PROIBIDO em L0: Wo wohnst du? / Was machst du? / Was brauchst du? / perguntas abertas sem estrutura ensinado.',
     'PROIBIDO: aula teórica longa, despejar várias frases, falar enquanto o aluno deve responder.',
     `AÇÃO: ${opts.action}. SCAFFOLD: ${opts.scaffoldLevel}/5.`,
@@ -693,6 +732,22 @@ export function praiseGuidedRetryNudge(correction: string): string {
     'Elogie de forma curta: "Perfeito!"',
     'Isso foi produção GUIADA (havia modelo). NÃO declare fluência.',
     'Avance para a próxima frase. NÃO volte a frases anteriores já aceitas.',
+  ].join('\n');
+}
+
+/** Após retries esgotados: postergar dificuldade e continuar a aula. */
+export function deferDifficultyAndContinueNudge(opts: {
+  hardPhrase: string;
+  nextGerman?: string | null;
+}): string {
+  return [
+    '[INSTRUÇÃO INTERNA — não leia isto em voz alta]',
+    'ZERO LANGUAGE MODE — dificuldade POSTERGADA (não monopolize o tempo).',
+    `Em português, curto: "Vamos continuar. Mais tarde voltamos a: ${opts.hardPhrase}"`,
+    opts.nextGerman
+      ? `Em seguida ensine a PRÓXIMA frase: "${opts.nextGerman}". Ciclo PT→modelo→repita→AGUARDE.`
+      : 'Continue com outro conteúdo apropriado. NÃO repita a frase difícil agora.',
+    'PROIBIDO: ficar vários minutos na mesma frase. A revisão virá depois (memória/review).',
   ].join('\n');
 }
 

@@ -114,6 +114,8 @@ export function useGeminiLive(profile: UserProfile | null): GeminiLiveUI {
   const userTurnsRef = useRef(0);
   const userTurnMetaRef = useRef<UserCurrentTurn | null>(null);
   const lastProcessedUtteranceRef = useRef<{ id: string; text: string; at: number } | null>(null);
+  /** Serializa TEACHER_UTTERANCE → USER_UTTERANCE para o snapshot do turno existir antes da avaliação. */
+  const orchQueueRef = useRef(Promise.resolve());
 
   const applyDecision = useCallback(async (decision: Awaited<ReturnType<ConversationOrchestrator['handle']>>) => {
     // Não sobrescrever a decisão pedagógica do aluno com o eco da fala do professor
@@ -349,7 +351,14 @@ export function useGeminiLive(profile: UserProfile | null): GeminiLiveUI {
         if (list.length) list[list.length - 1] = done.text;
         else if (done.text) list.push(done.text);
         if (done.text.trim() && orchRef.current) {
-          void orchRef.current.handle({ type: 'TEACHER_UTTERANCE', text: done.text }).then(applyDecision);
+          const text = done.text;
+          orchQueueRef.current = orchQueueRef.current
+            .then(async () => {
+              if (!orchRef.current) return;
+              const d = await orchRef.current.handle({ type: 'TEACHER_UTTERANCE', text });
+              await applyDecision(d);
+            })
+            .catch(() => { /* não quebrar a fila */ });
         }
       } else {
         setUserText(done.text);
@@ -357,7 +366,10 @@ export function useGeminiLive(profile: UserProfile | null): GeminiLiveUI {
         const list = transcriptRef.current.user;
         if (list.length) list[list.length - 1] = done.text;
         else if (done.text) list.push(done.text);
-        void processUserTurnComplete(done.text);
+        const userTextDone = done.text;
+        orchQueueRef.current = orchQueueRef.current
+          .then(() => processUserTurnComplete(userTextDone))
+          .catch(() => { /* não quebrar a fila */ });
       }
       void import('@/services/teacher/sessionContinuity').then(({ autosaveTurn }) => {
         if (done.text) autosaveTurn(r, done.text);
@@ -379,6 +391,7 @@ export function useGeminiLive(profile: UserProfile | null): GeminiLiveUI {
     lastProcessedUtteranceRef.current = null;
     turnIdsRef.current = { assistant: '', user: '' };
     userTurnMetaRef.current = null;
+    orchQueueRef.current = Promise.resolve();
     setAssistantText('');
     setUserText('');
     setTeacherTurnStatus('IDLE');

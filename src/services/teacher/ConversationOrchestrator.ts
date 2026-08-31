@@ -97,11 +97,13 @@ import {
   praiseGuidedRetryNudge,
   shouldRecoverZeroLanguageBlock,
   teachFromErrorNudge,
+  deferDifficultyAndContinueNudge,
   zeroLanguageDirective,
   zeroLanguageKickoff,
   zeroLanguageWrapUpNudge,
   isZeroLanguagePhraseAccepted,
   L0_MAX_IMMEDIATE_CORRECT_STREAK,
+  L0_MAX_CORRECTION_ATTEMPTS,
   type L0PhrasePhase,
   type L0TurnEvalSnapshot,
   type ProductionErrorType,
@@ -451,7 +453,7 @@ export function buildConversationPlan(
   learning: UserLearningProfile,
   phrases: Phrase[],
   elapsedMs = 0,
-  opts?: { l0BlockReviewPhraseId?: string | null; l0ExcludePhraseId?: string | null },
+  opts?: { l0BlockReviewPhraseId?: string | null; l0ExcludePhraseId?: string | null; l0SkipPhraseIds?: string[] | null },
 ): ConversationPlan {
   const zeroMode = isZeroLanguageMode(profile);
   const phrasePool = zeroMode ? mergeZeroLanguagePhrases(phrases) : phrases;
@@ -479,6 +481,7 @@ export function buildConversationPlan(
     ? pickZeroLanguageTarget(learning, phrasePool, {
       blockReviewPhraseId: opts?.l0BlockReviewPhraseId,
       excludePhraseId: opts?.l0ExcludePhraseId,
+      skipPhraseIds: opts?.l0SkipPhraseIds,
     })
     : null;
   const picked = zeroPick
@@ -564,11 +567,13 @@ export function reevaluatePlan(
     l0BlockReviewPhraseId?: string | null;
     l0StickPhraseId?: string | null;
     l0ExcludePhraseId?: string | null;
+    l0SkipPhraseIds?: string[] | null;
   },
 ): ConversationPlan {
   const fresh = buildConversationPlan(profile, learning, phrases, elapsedMs, {
     l0BlockReviewPhraseId: opts?.l0BlockReviewPhraseId,
     l0ExcludePhraseId: opts?.l0ExcludePhraseId,
+    l0SkipPhraseIds: opts?.l0SkipPhraseIds,
   });
   const zeroMode = isZeroLanguageMode(profile);
 
@@ -721,10 +726,8 @@ export class ConversationOrchestrator {
     phraseId: string;
     failedGerman: string;
   } | null = null;
-  /** L0: erros reais acumulados por bloco (para recovery com evidência). */
+  /** L0: erros reais acumulados por bloco (diagnóstico; recovery de bloco desativado na prática). */
   private l0BlockErrors: Record<string, number> = {};
-  /** L0: recuperações de bloco já usadas nesta sessão. */
-  private l0BlockRecoveries: Record<string, number> = {};
   /** L0: frase que dispara BLOCK_REVIEW local (null = progressão normal). */
   private l0BlockReviewPhraseId: string | null = null;
   /** L0: fase explícita do ciclo pedagógico. */
@@ -743,6 +746,11 @@ export class ConversationOrchestrator {
   /** Acertos seguidos no mesmo target sem erro (anti TARGET_STUCK). */
   private l0CorrectStreakOnTarget = 0;
   private l0CorrectStreakTargetId: string | null = null;
+  /** Frases difíceis postergadas nesta sessão (revisão futura, não monopolizam agora). */
+  private l0DeferredPhraseIds: string[] = [];
+  /** Cobertura da sessão (diagnóstico). */
+  private l0UniqueTargetsIntroduced = new Set<string>();
+  private l0DeferredReviewCount = 0;
 
   private logL0(phase: string, extra?: Record<string, unknown>) {
     if (!isZeroLanguageMode(this.profile)) return;
@@ -761,6 +769,31 @@ export class ConversationOrchestrator {
       pendingRetry: !!this.pendingCorrectionRetry,
       pendingBlockRecovery: !!this.pendingBlockRecovery,
       ...extra,
+    });
+  }
+
+  /** Log obrigatório por interação L0 — sequência independente do conteúdo escolhido pelo professor. */
+  private logL0Turn(opts: {
+    teacherUtterance: string;
+    targetAtQuestionTime: string | null;
+    userUtterance: string;
+    evaluatedTarget: string | null;
+    result: 'CORRECT' | 'NEAR_MISS' | 'INCORRECT' | 'UNKNOWN';
+    nextTarget: string | null;
+    decisionReason: string;
+  }) {
+    if (!isZeroLanguageMode(this.profile)) return;
+    const dev =
+      typeof import.meta !== 'undefined' && !!(import.meta as { env?: { DEV?: boolean } }).env?.DEV;
+    if (!dev && typeof localStorage !== 'undefined' && localStorage.getItem('L0_DEBUG') !== '1') return;
+    console.log('[L0_TURN]', {
+      teacherUtterance: opts.teacherUtterance.slice(0, 200),
+      targetAtQuestionTime: opts.targetAtQuestionTime,
+      userUtterance: opts.userUtterance.slice(0, 200),
+      evaluatedTarget: opts.evaluatedTarget,
+      result: opts.result,
+      nextTarget: opts.nextTarget,
+      decisionReason: opts.decisionReason,
     });
   }
 
@@ -1148,6 +1181,7 @@ export class ConversationOrchestrator {
         l0BlockReviewPhraseId: this.l0BlockReviewPhraseId,
         l0StickPhraseId: this.pendingCorrectionRetry?.phraseId ?? null,
         l0ExcludePhraseId: excludePhraseId ?? this.l0JustAcceptedId,
+        l0SkipPhraseIds: this.l0DeferredPhraseIds,
       },
     );
     this.plan = { ...this.plan, previousAction: prevAction };
@@ -1617,6 +1651,7 @@ export class ConversationOrchestrator {
         previousTargetText: this.l0PreviousTargetText,
         teacherText: text,
       });
+      this.l0UniqueTargetsIntroduced.add(tid);
       this.logL0('TEACHER_TURN_SNAPSHOT', {
         turnId: this.l0TurnEvalSnapshot.turnId,
         currentTargetId: tid,
@@ -1626,6 +1661,8 @@ export class ConversationOrchestrator {
         expectedAnswer: this.l0TurnEvalSnapshot.expectedAnswer,
         acceptedAnswers: this.l0TurnEvalSnapshot.acceptedAnswers,
         teacherText: text.slice(0, 160),
+        uniqueIntroduced: this.l0UniqueTargetsIntroduced.size,
+        deferredReviewItems: this.l0DeferredReviewCount,
       });
     }
     this.persist();
@@ -1799,22 +1836,14 @@ export class ConversationOrchestrator {
       };
     }
 
-    // Ainda incorreto — mais ajuda, mesma frase
-    this.sessionSupport = escalateSupport(this.sessionSupport);
-    this.plan = { ...this.plan, scaffoldLevel: this.sessionSupport };
-    this.pendingCorrectionRetry = {
-      ...pending,
-      attempt: pending.attempt + 1,
-      userSaid: trimmed,
-      errorType: diagnosis.errorType || pending.errorType,
-      hardPart: diagnosis.hardPart || pending.hardPart,
-    };
+    // Ainda incorreto — mais ajuda OU postergar (L0: não monopolizar a sessão)
+    const nextAttempt = pending.attempt + 1;
     await saveLearningEvent('PHRASE_FAILED', {
       phraseId: pending.phraseId,
       context: JSON.stringify({
         text: trimmed,
-        attempt: this.pendingCorrectionRetry.attempt,
-        errorType: this.pendingCorrectionRetry.errorType,
+        attempt: nextAttempt,
+        errorType: diagnosis.errorType || pending.errorType,
         expected: pending.expected,
       }),
       helpLevel: this.sessionSupport,
@@ -1822,26 +1851,28 @@ export class ConversationOrchestrator {
     eventsRecorded.push('PHRASE_FAILED');
     await this.recordPhraseEvent(pending.phraseId, { type: 'produced', correct: false });
     recordHelpAttempt(pending.phraseId, this.sessionSupport, false, { helpRequested: true });
+
+    if (isZeroLanguageMode(this.profile) && nextAttempt >= L0_MAX_CORRECTION_ATTEMPTS) {
+      return this.deferL0DifficultyAndAdvance({
+        phraseId: pending.phraseId,
+        expected: pending.expected,
+        userSaid: trimmed,
+        eventsRecorded,
+      });
+    }
+
+    this.sessionSupport = escalateSupport(this.sessionSupport);
+    this.plan = { ...this.plan, scaffoldLevel: this.sessionSupport };
+    this.pendingCorrectionRetry = {
+      ...pending,
+      attempt: nextAttempt,
+      userSaid: trimmed,
+      errorType: diagnosis.errorType || pending.errorType,
+      hardPart: diagnosis.hardPart || pending.hardPart,
+    };
     if (isZeroLanguageMode(this.profile)) {
       this.l0PhrasePhase = 'RETRY';
-      const block = findZeroLanguageBlock(pending.phraseId);
-      if (block && diagnosis.verdict === 'INCORRECT' && diagnosis.errorType !== 'pronunciation_approx') {
-        this.l0BlockErrors[block.id] = (this.l0BlockErrors[block.id] ?? 0) + 1;
-      }
-      const blockErrors = block ? (this.l0BlockErrors[block.id] ?? 0) : 0;
-      const recoveriesUsed = block ? (this.l0BlockRecoveries[block.id] ?? 0) : 0;
-      if (
-        shouldRecoverZeroLanguageBlock(
-          pending.phraseId,
-          diagnosis.verdict,
-          diagnosis.errorType,
-          blockErrors,
-          recoveriesUsed,
-        )
-      ) {
-        this.pendingBlockRecovery = { phraseId: pending.phraseId, failedGerman: pending.expected };
-        if (block) this.l0BlockRecoveries[block.id] = recoveriesUsed + 1;
-      }
+      // Sem block-recovery agressivo: dificuldade vai para revisão futura se persistir
     }
     this.ctx.mode = 'PEDAGOGICAL_INTERVENTION';
     this.ctx.targetItem = pending.expected;
@@ -1861,6 +1892,75 @@ export class ConversationOrchestrator {
         attempt: this.pendingCorrectionRetry.attempt,
       }),
       eventsRecorded,
+    };
+  }
+
+  /** L0: esgotou retries → registrar dificuldade e AVANÇAR (orçamento de tempo). */
+  private async deferL0DifficultyAndAdvance(opts: {
+    phraseId: string;
+    expected: string;
+    userSaid: string;
+    eventsRecorded: LearningEventType[];
+  }): Promise<OrchestratorDecision> {
+    this.pendingCorrectionRetry = null;
+    this.pendingBlockRecovery = null;
+    this.l0BlockReviewPhraseId = null;
+    if (!this.l0DeferredPhraseIds.includes(opts.phraseId)) {
+      this.l0DeferredPhraseIds.push(opts.phraseId);
+    }
+    this.l0DeferredReviewCount += 1;
+    this.justErrored = false;
+    this.l0PhrasePhase = 'ADVANCE';
+    this.l0JustAcceptedId = null;
+    this.sessionSupport = escalateSupport(this.sessionSupport);
+    this.plan = { ...this.plan, scaffoldLevel: this.sessionSupport };
+    this.refreshPlan(opts.phraseId);
+    this.persist();
+    const next = this.plan.target;
+    this.logL0('DEFER_DIFFICULTY_ADVANCE', {
+      deferredId: opts.phraseId,
+      deferredText: opts.expected,
+      userSaid: opts.userSaid,
+      nextTargetId: next?.id ?? null,
+      nextTargetText: next?.german ?? null,
+      deferredCount: this.l0DeferredReviewCount,
+      uniqueIntroduced: this.l0UniqueTargetsIntroduced.size,
+    });
+    await saveLearningEvent('PHRASE_FAILED', {
+      phraseId: opts.phraseId,
+      context: JSON.stringify({
+        deferred: true,
+        text: opts.userSaid,
+        expected: opts.expected,
+        reason: 'L0_MAX_CORRECTION_ATTEMPTS',
+      }),
+      helpLevel: this.sessionSupport,
+    });
+    opts.eventsRecorded.push('PHRASE_FAILED');
+    const deferReason = 'ZERO_LANGUAGE_MODE — dificuldade postergada; avançar cobertura';
+    this.logL0Turn({
+      teacherUtterance: this.ctx.lastTeacherUtterance || '',
+      targetAtQuestionTime: opts.expected,
+      userUtterance: opts.userSaid,
+      evaluatedTarget: opts.expected,
+      result: 'INCORRECT',
+      nextTarget: next?.german ?? null,
+      decisionReason: deferReason,
+    });
+    return {
+      flow: 'continueConversation',
+      action: next
+        ? ((this.learning.phrases[next.id]?.timesCorrect ?? 0) === 0 ? 'introduce' : 'practice')
+        : 'converse',
+      mode: 'GUIDED_CONVERSATION',
+      reason: deferReason,
+      targetItem: next?.german ?? this.ctx.targetItem,
+      correction: opts.expected,
+      geminiNudge: deferDifficultyAndContinueNudge({
+        hardPhrase: opts.expected,
+        nextGerman: next?.german ?? null,
+      }),
+      eventsRecorded: opts.eventsRecorded,
     };
   }
 
@@ -2013,7 +2113,27 @@ export class ConversationOrchestrator {
       };
     } catch { /* keep */ }
 
-    if (grammar) {
+    // L0: avaliar cedo contra o TARGET DO TURNO (snapshot) + lastTeacher fresco.
+    // Spontaneous/grammar NÃO podem interceptar resposta válida de variação (ex.: Arbeitest du?).
+    const l0Snap = zeroMode ? this.l0TurnEvalSnapshot : null;
+    const l0EvalTargetId = l0Snap?.targetId || this.plan.target?.id || null;
+    const l0EvalTargetText =
+      l0Snap?.targetText ||
+      this.plan.target?.german ||
+      expected ||
+      '';
+    const l0TeacherForAccept =
+      this.ctx.lastTeacherUtterance || l0Snap?.teacherText || '';
+    const l0AcceptedEarly = zeroMode
+      ? buildL0AcceptedAnswers(l0EvalTargetText, l0TeacherForAccept)
+      : [];
+    const l0DiagEarly = zeroMode
+      ? diagnoseAgainstAccepted(trimmed, l0AcceptedEarly, l0EvalTargetText)
+      : null;
+    const l0AnswerMatchesTurn =
+      zeroMode && (l0DiagEarly?.verdict === 'CORRECT' || l0DiagEarly?.verdict === 'NEEDS_REPAIR');
+
+    if (grammar && !(zeroMode && l0AnswerMatchesTurn)) {
       const recentlySame =
         this.ctx.mode === 'PEDAGOGICAL_INTERVENTION' &&
         this.ctx.turnsSinceIntervention < 2 &&
@@ -2241,16 +2361,14 @@ export class ConversationOrchestrator {
       });
     }
 
+    // Preferir avaliação precoce L0 (target do turno + teacher fresco)
     const l0Accepted = zeroMode
-      ? (snap?.acceptedAnswers?.length
-        ? snap.acceptedAnswers
-        : buildL0AcceptedAnswers(
-          this.plan.target?.german || expected || '',
-          this.ctx.lastTeacherUtterance || '',
-        ))
+      ? (l0AcceptedEarly.length
+        ? l0AcceptedEarly
+        : buildL0AcceptedAnswers(l0EvalTargetText || expected || '', l0TeacherForAccept))
       : [];
     const l0Diag = zeroMode
-      ? diagnoseAgainstAccepted(trimmed, l0Accepted, expected)
+      ? (l0DiagEarly || diagnoseAgainstAccepted(trimmed, l0Accepted, l0EvalTargetText || expected))
       : null;
     const verdict: ProductionVerdict = zeroMode
       ? (l0Diag!.verdict === 'CORRECT'
@@ -2259,12 +2377,12 @@ export class ConversationOrchestrator {
           ? 'NEEDS_REPAIR'
           : l0Diag!.verdict === 'INCORRECT'
             ? 'INCORRECT'
-            : evaluateProduction(trimmed, expected))
+            : evaluateProduction(trimmed, l0EvalTargetText || expected))
       : evaluateProduction(trimmed, expected);
 
     // L0: com target explícito, UNKNOWN não pode “passar” — trata como erro da frase atual
     const effectiveVerdict: ProductionVerdict =
-      zeroMode && verdict === 'UNKNOWN' && !!(this.plan.target?.german || expected)
+      zeroMode && verdict === 'UNKNOWN' && !!(l0EvalTargetText || this.plan.target?.german || expected)
         ? 'INCORRECT'
         : verdict;
 
@@ -2273,28 +2391,32 @@ export class ConversationOrchestrator {
         sessionId: this.sessionId,
         turnId: snap?.turnId ?? `user-${this.userTurns}`,
         utteranceId: utteranceKey,
+        turnTargetId: l0EvalTargetId,
+        turnTargetText: l0EvalTargetText,
         currentTargetId: this.plan.target?.id ?? null,
         currentTargetText: this.plan.target?.german ?? null,
+        evaluatedTargetId: l0EvalTargetId,
         previousTargetId: snap?.previousTargetId ?? this.l0PreviousTargetId,
         previousTargetText: snap?.previousTargetText ?? this.l0PreviousTargetText,
-        expectedAnswer: expected,
+        expectedAnswer: l0EvalTargetText || expected,
         acceptedAnswers: l0Accepted,
         userTranscript: trimmed,
         evaluationResult: effectiveVerdict,
         rawVerdict: verdict,
-        matchedTargetId: l0Diag?.matchedAnswer ? this.plan.target?.id ?? null : null,
+        matchedTargetId: l0Diag?.matchedAnswer ? l0EvalTargetId : null,
         matchedAnswer: l0Diag?.matchedAnswer ?? null,
         matchScore: effectiveVerdict === 'CORRECT' ? 1 : effectiveVerdict === 'NEEDS_REPAIR' ? 0.5 : 0,
         nearMiss: l0Diag?.errorType === 'pronunciation_approx' || effectiveVerdict === 'NEEDS_REPAIR',
         helpLevel: this.sessionSupport,
-        failureCount: this.plan.target?.id
-          ? (this.l0BlockErrors[findZeroLanguageBlock(this.plan.target.id)?.id || ''] ?? 0)
+        failureCount: l0EvalTargetId
+          ? (this.l0BlockErrors[findZeroLanguageBlock(l0EvalTargetId)?.id || ''] ?? 0)
           : 0,
         recoveryReason: this.pendingBlockRecovery ? 'pendingBlockRecovery' : null,
         nextTargetId: this.plan.target?.id ?? null,
         nextTargetText: this.plan.target?.german ?? null,
-        evaluatedAgainst: expected,
+        evaluatedAgainst: l0EvalTargetText || expected,
         truncatedExpectedAvoided: this.plan.target?.expected ?? null,
+        teacherForAccept: l0TeacherForAccept.slice(0, 120),
       });
     }
 
@@ -2317,8 +2439,13 @@ export class ConversationOrchestrator {
         : undefined,
     });
 
+    // L0 com target do turno: NÃO tratar como spontaneous (senão timesCorrect=0 → “aguardando aceitação”
+    // e o professor re-modela Ich arbeite = regressão UX).
+    const l0GuidedTurn = zeroMode && !!l0EvalTargetId;
+
     // Oportunidade aberta: resposta válida sem o target — NÃO punir, NÃO abrir micro
     if (
+      !l0GuidedTurn &&
       this.spontaneousOpportunity &&
       !spontaneous.confirmed &&
       spontaneous.classification !== 'GUIDED' &&
@@ -2338,7 +2465,7 @@ export class ConversationOrchestrator {
       });
     }
 
-    if (spontaneous.confirmed && spontaneous.phraseId) {
+    if (!l0GuidedTurn && spontaneous.confirmed && spontaneous.phraseId) {
       const eventId = makeSpontaneousEventId(this.sessionId, spontaneous.phraseId, trimmed);
       if (this.lastSpontaneousEventId === eventId) {
         return this.continueResult('spontaneous_idempotent', { eventsRecorded });
@@ -2405,8 +2532,8 @@ export class ConversationOrchestrator {
       };
     }
 
-    if (this.plan.target?.id && effectiveVerdict === 'CORRECT') {
-      const targetId = this.plan.target.id;
+    if (l0EvalTargetId && effectiveVerdict === 'CORRECT') {
+      const targetId = l0EvalTargetId;
       if (isZeroLanguageMode(this.profile)) {
         this.l0PhrasePhase = 'CORRECT';
       }
@@ -2471,23 +2598,38 @@ export class ConversationOrchestrator {
       this.persist();
       const nba = await this.applyNbaAfterEvidence(targetId);
       if (nba) {
+        if (zeroMode) {
+          this.logL0Turn({
+            teacherUtterance: this.ctx.lastTeacherUtterance || l0TeacherForAccept || '',
+            targetAtQuestionTime: l0EvalTargetText || null,
+            userUtterance: trimmed,
+            evaluatedTarget: l0EvalTargetText || null,
+            result: 'CORRECT',
+            nextTarget: this.plan.target?.german ?? nba.targetItem ?? null,
+            decisionReason: nba.reason,
+          });
+        }
         return { ...nba, eventsRecorded: [...eventsRecorded, ...nba.eventsRecorded] };
       }
     } else if (
-      this.plan.target?.id &&
+      l0EvalTargetId &&
       (effectiveVerdict === 'INCORRECT' || effectiveVerdict === 'NEEDS_REPAIR')
     ) {
-      const target = this.plan.target;
-      const targetId = target.id;
-      const diagnosis = diagnoseProduction(trimmed, target.german);
+      const targetId = l0EvalTargetId;
+      const targetGerman = l0EvalTargetText || this.plan.target?.german || '';
+      const diagnosis = zeroMode
+        ? (l0Diag || diagnoseProduction(trimmed, targetGerman))
+        : diagnoseProduction(trimmed, targetGerman);
       await saveLearningEvent('PHRASE_FAILED', {
         phraseId: targetId,
         context: JSON.stringify({
           text: trimmed,
-          expected: target.german,
+          expected: targetGerman,
           errorType: diagnosis.errorType || (effectiveVerdict === 'NEEDS_REPAIR' ? 'pronunciation_approx' : 'mismatch'),
           hardPart: diagnosis.hardPart,
           attempt: 1,
+          turnTargetId: l0EvalTargetId,
+          evaluatedTargetId: targetId,
         }),
         helpLevel: this.sessionSupport,
       });
@@ -2497,7 +2639,7 @@ export class ConversationOrchestrator {
       this.sessionSupport = escalateSupport(helpUpdate.nextInSession);
       this.plan = { ...this.plan, scaffoldLevel: this.sessionSupport };
       this.ctx.mode = 'PEDAGOGICAL_INTERVENTION';
-      this.ctx.targetItem = target.german;
+      this.ctx.targetItem = targetGerman;
       this.ctx.recentMistakes = [`${diagnosis.errorType || 'mismatch'}:${trimmed}`, ...this.ctx.recentMistakes].slice(0, 6);
       this.justErrored = true;
       const errorType: ProductionErrorType =
@@ -2510,7 +2652,7 @@ export class ConversationOrchestrator {
       }
       this.pendingCorrectionRetry = {
         phraseId: targetId,
-        expected: target.german,
+        expected: targetGerman,
         attempt: 1,
         userSaid: trimmed,
         errorType,
@@ -2518,30 +2660,18 @@ export class ConversationOrchestrator {
       };
       if (isZeroLanguageMode(this.profile)) {
         this.l0PhrasePhase = effectiveVerdict === 'NEEDS_REPAIR' ? 'NEAR_MISS' : 'INCORRECT';
-        const block = findZeroLanguageBlock(targetId);
-        if (block && effectiveVerdict === 'INCORRECT' && errorType !== 'pronunciation_approx') {
-          this.l0BlockErrors[block.id] = (this.l0BlockErrors[block.id] ?? 0) + 1;
-        }
-        const blockErrors = block ? (this.l0BlockErrors[block.id] ?? 0) : 0;
-        const recoveriesUsed = block ? (this.l0BlockRecoveries[block.id] ?? 0) : 0;
-        if (
-          shouldRecoverZeroLanguageBlock(targetId, verdict, errorType, blockErrors, recoveriesUsed)
-        ) {
-          this.pendingBlockRecovery = { phraseId: targetId, failedGerman: target.german };
-          if (block) this.l0BlockRecoveries[block.id] = recoveriesUsed + 1;
-        } else {
-          this.pendingBlockRecovery = null;
-        }
+        // Sem block-recovery que volta a cumprimentos: retries locais + defer depois
+        this.pendingBlockRecovery = null;
       } else if (
-        shouldRecoverZeroLanguageBlock(targetId, verdict, errorType)
+        shouldRecoverZeroLanguageBlock(targetId, effectiveVerdict, errorType)
       ) {
-        this.pendingBlockRecovery = { phraseId: targetId, failedGerman: target.german };
+        this.pendingBlockRecovery = { phraseId: targetId, failedGerman: targetGerman };
       } else {
         this.pendingBlockRecovery = null;
       }
       try {
         const { recordSessionMistake } = await import('@/services/teacher/sessionContinuity');
-        recordSessionMistake(trimmed, target.german);
+        recordSessionMistake(trimmed, targetGerman);
       } catch { /* ignore */ }
       this.persist();
       this.logL0('AFTER_EVAL_MISMATCH', {
@@ -2550,24 +2680,38 @@ export class ConversationOrchestrator {
         shouldAdvance: false,
         recoveryLevel: 'RETRY_CURRENT',
         selectedNextTarget: targetId,
+        evaluatedTargetId: targetId,
+        turnTargetId: l0EvalTargetId,
       });
+      const mismatchReason = `target_mismatch:${errorType}`;
+      if (zeroMode) {
+        this.logL0Turn({
+          teacherUtterance: this.ctx.lastTeacherUtterance || l0TeacherForAccept || '',
+          targetAtQuestionTime: l0EvalTargetText || null,
+          userUtterance: trimmed,
+          evaluatedTarget: l0EvalTargetText || null,
+          result: effectiveVerdict === 'NEEDS_REPAIR' ? 'NEAR_MISS' : 'INCORRECT',
+          nextTarget: targetGerman,
+          decisionReason: mismatchReason,
+        });
+      }
       return {
         flow: 'intervenePedagogically',
         action: 'practice',
         mode: 'PEDAGOGICAL_INTERVENTION',
-        reason: `target_mismatch:${errorType}`,
-        correction: target.german,
-        targetItem: target.german,
+        reason: mismatchReason,
+        correction: targetGerman,
+        targetItem: targetGerman,
         geminiNudge: teachFromErrorNudge({
           userSaid: trimmed,
-          correction: target.german,
+          correction: targetGerman,
           hardPart: diagnosis.hardPart,
           errorType,
           attempt: 1,
         }),
         eventsRecorded,
       };
-    } else if (spontaneous.productionOrigin === 'TRANSFER') {
+    } else if (!l0GuidedTurn && spontaneous.productionOrigin === 'TRANSFER') {
       // Elicitação de transfer sem pending — tratar como produção correta do target se match
       if (spontaneous.phraseId && spontaneous.confidence >= 0.72) {
         await saveLearningEvent('PHRASE_PRODUCED', {

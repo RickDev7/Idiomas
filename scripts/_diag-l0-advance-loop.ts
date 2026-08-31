@@ -18,6 +18,7 @@ import {
   pickZeroLanguageTarget,
   mergeZeroLanguagePhrases,
   isZeroLanguagePhraseAccepted,
+  ZERO_LANGUAGE_BLOCKS,
 } from '../src/services/teacher/ZeroLanguageMode';
 import type { Phrase, UserProfile } from '../src/types';
 
@@ -53,11 +54,9 @@ function acceptConf(id: string, n = 1): PhraseConfidence {
   } as PhraseConfidence;
 }
 
-const PRIOR = [
-  'l0-guten-morgen', 'l0-guten-abend', 'l0-gute-nacht',
-  'l0-wie-gehts', 'l0-mir-gehts-gut', 'survival-gut',
-  'l0-hallo', 'l0-ich-heisse', 'survival-heisse',
-];
+const ALL_IDS = ZERO_LANGUAGE_BLOCKS.flatMap((b) => b.phraseIds);
+const ARBEITE = 'survival-arbeite';
+const PRIOR = ALL_IDS.slice(0, ALL_IDS.indexOf(ARBEITE));
 
 console.log('DIAG — L0 advance loop\n');
 
@@ -69,19 +68,19 @@ const phrases = mergeZeroLanguagePhrases([
   fakePhrase('survival-arbeite', 'Ich arbeite.', 'Eu trabalho.'),
 ]);
 
-// --- pick: após aceitar última, exclude → NÃO devolve a mesma ---
+// --- pick: currículo todo aceito → última estável; exclude → não repete ---
 {
-  const all: Record<string, PhraseConfidence> = {
-    ...Object.fromEntries(PRIOR.map((id) => [id, acceptConf(id)])),
-    'survival-arbeite': acceptConf('survival-arbeite', 1),
-  };
+  const all: Record<string, PhraseConfidence> = Object.fromEntries(
+    ALL_IDS.map((id) => [id, acceptConf(id)]),
+  );
+  const lastId = ALL_IDS[ALL_IDS.length - 1];
   const stuck = pickZeroLanguageTarget(buildLearningProfile(zero, [], [], null, all), phrases);
-  assert(stuck.phrase?.id === 'survival-arbeite', `sem exclude = última (${stuck.phrase?.id})`);
+  assert(stuck.phrase?.id === lastId, `sem exclude = última (${stuck.phrase?.id})`);
   const rotated = pickZeroLanguageTarget(buildLearningProfile(zero, [], [], null, all), phrases, {
-    excludePhraseId: 'survival-arbeite',
+    excludePhraseId: lastId,
   });
-  assert(rotated.phrase?.id !== 'survival-arbeite', `exclude → next != Ich arbeite (got ${rotated.phrase?.id} action=${rotated.action})`);
-  console.log('  ✓ pickZeroLanguageTarget exclude evita Ich arbeite imediato →', rotated.phrase?.id || rotated.action);
+  assert(rotated.phrase?.id !== lastId, `exclude → next != ${lastId} (got ${rotated.phrase?.id} action=${rotated.action})`);
+  console.log('  ✓ pickZeroLanguageTarget exclude evita última imediata →', rotated.phrase?.id || rotated.action);
 }
 
 // --- TESTE: 1 CORRECT → ADVANCE (próximo ≠ mesmo) ---

@@ -24,6 +24,7 @@ import {
   buildL0AcceptedAnswers,
   mergeZeroLanguagePhrases,
   isZeroLanguagePhraseAccepted,
+  ZERO_LANGUAGE_BLOCKS,
 } from '../src/services/teacher/ZeroLanguageMode';
 import type { Phrase, UserProfile } from '../src/types';
 
@@ -87,11 +88,8 @@ function acceptConf(id: string, n = 1): PhraseConfidence {
   } as PhraseConfidence;
 }
 
-const PRIOR_IDS = [
-  'l0-guten-morgen', 'l0-guten-abend', 'l0-gute-nacht',
-  'l0-wie-gehts', 'l0-mir-gehts-gut', 'survival-gut',
-  'l0-hallo', 'l0-ich-heisse', 'survival-heisse',
-];
+const ALL_IDS = ZERO_LANGUAGE_BLOCKS.flatMap((b) => b.phraseIds);
+const PRIOR_IDS = ALL_IDS.slice(0, ALL_IDS.indexOf('survival-arbeite'));
 
 function priorAccepted(): Record<string, PhraseConfidence> {
   return Object.fromEntries(PRIOR_IDS.map((id) => [id, acceptConf(id)]));
@@ -204,13 +202,14 @@ const phrases = mergeZeroLanguagePhrases([
 
 // ---------- TESTE F ----------
 {
-  const prior = { ...priorAccepted(), 'survival-arbeite': acceptConf('survival-arbeite', 1) };
+  const prior = priorAccepted();
   await MemoryService.saveConfidenceMap(prior);
   const orch = ConversationOrchestrator.create({
     profile: zero,
     learning: buildLearningProfile(zero, [], [], null, prior),
     phrases,
   });
+  assert(orch.getPlan().target?.id === 'survival-arbeite', `TESTE F target=${orch.getPlan().target?.id}`);
   await orch.handle({ type: 'TEACHER_UTTERANCE', text: 'Ich arbeite.' });
   const force = await orch.handle({ type: 'USER_UTTERANCE', text: 'Completely wrong xyz.' });
   assert(force.flow === 'intervenePedagogically', 'F setup pending');

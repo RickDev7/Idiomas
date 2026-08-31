@@ -299,17 +299,18 @@ const {
 } = await import('../src/services/teacher/ZeroLanguageMode');
 assert(ZERO_LANGUAGE_BLOCKS[0].phraseIds[0] === 'l0-guten-morgen', 'bloco 1 começa com Guten Morgen');
 assert(ZERO_LANGUAGE_BLOCKS[0].phraseIds.includes('l0-gute-nacht'), 'bloco 1 tem Gute Nacht');
-assert(shouldRecoverZeroLanguageBlock('l0-gute-nacht', 'INCORRECT', 'mismatch', L0_BLOCK_RECOVERY_ERROR_THRESHOLD) === true, '2º erro no bloco → recovery');
+// Recovery de bloco só com muitos erros (threshold alto) — cobertura > monopolizar
+assert(shouldRecoverZeroLanguageBlock('l0-gute-nacht', 'INCORRECT', 'mismatch', L0_BLOCK_RECOVERY_ERROR_THRESHOLD) === true, 'threshold atingido → recovery flag ainda existe');
 assert(shouldRecoverZeroLanguageBlock('l0-gute-nacht', 'INCORRECT', 'mismatch', 1) === false, '1º erro → sem recovery de bloco');
 assert(shouldRecoverZeroLanguageBlock('l0-guten-morgen', 'INCORRECT', 'mismatch', 5) === false, '1ª frase do bloco → sem recovery');
 assert(shouldRecoverZeroLanguageBlock('l0-gute-nacht', 'NEEDS_REPAIR', 'pronunciation_approx', 5) === false, 'near-miss → sem recovery');
 assert(shouldRecoverZeroLanguageBlock('l0-wie-gehts', 'INCORRECT', 'mismatch', 5) === false, '1ª frase bloco 2 → sem recovery');
 const seq = getBlockRecoverySequence('l0-gute-nacht', mergeZeroLanguagePhrases([]));
-assert(seq.length === 3, `recovery seq sem memória length 3 (got ${seq.length})`);
-assert(/Guten Morgen/i.test(seq[0].german) && /Gute Nacht/i.test(seq[2].german), 'sem memória: Morgen→…→Nacht');
+assert(seq.length >= 3 && seq.length <= 6, `recovery seq length (got ${seq.length})`);
+assert(/Guten Morgen/i.test(seq[0].german) && /Gute Nacht/i.test(seq[seq.length - 1].german), 'sem memória: Morgen→…→Nacht');
 // Com frases aceitas: NÃO inclui dominadas
 const learningAccepted = buildLearningProfile(zero, [], [], null, {});
-for (const id of ['l0-guten-morgen', 'l0-guten-abend']) {
+for (const id of ['l0-guten-morgen', 'l0-guten-tag', 'l0-guten-abend']) {
   learningAccepted.phrases[id] = {
     phraseId: id, state: 'answeredWithHelp', confidence: 50,
     timesCorrect: 1, timesProduced: 1, timesSeen: 1, needsHelp: true,
@@ -422,6 +423,9 @@ learningT4.phrases['l0-guten-morgen'] = {
 } as never;
 learningT4.phrases['l0-guten-abend'] = { ...learningT4.phrases['l0-guten-morgen'], phraseId: 'l0-guten-abend' } as never;
 learningT4.phrases['l0-gute-nacht'] = { ...learningT4.phrases['l0-guten-morgen'], phraseId: 'l0-gute-nacht' } as never;
+learningT4.phrases['l0-guten-tag'] = { ...learningT4.phrases['l0-guten-morgen'], phraseId: 'l0-guten-tag' } as never;
+learningT4.phrases['l0-hallo'] = { ...learningT4.phrases['l0-guten-morgen'], phraseId: 'l0-hallo' } as never;
+learningT4.phrases['l0-tschuess'] = { ...learningT4.phrases['l0-guten-morgen'], phraseId: 'l0-tschuess' } as never;
 const orchT4 = ConversationOrchestrator.create({
   profile: zero,
   learning: learningT4,
@@ -436,11 +440,11 @@ assert(t4.targetItem?.includes('geht') || planBefore.target?.german.includes('ge
 assert(!/Guten Morgen.*RECUPERAÇÃO|Vamos fazer de novo.*Morgen/i.test(t4.geminiNudge || ''), 'TESTE4 sem recovery greetings');
 console.log('  ✓ TESTE 4: erro nova estrutura → recovery local');
 
-// TESTE 5: 2 erros no bloco → pode BLOCK_REVIEW; limite existe
+// TESTE 5: erros → retry → se persistir posterga; acerto avança (sem rewalk)
 await EventStore.clear();
 await MemoryService.saveConfidenceMap({});
 const learningT5 = buildLearningProfile(zero, [], [], null, {});
-for (const id of ['l0-guten-morgen', 'l0-guten-abend']) {
+for (const id of ['l0-guten-morgen', 'l0-guten-tag', 'l0-guten-abend', 'l0-gute-nacht', 'l0-hallo', 'l0-tschuess']) {
   learningT5.phrases[id] = {
     phraseId: id, state: 'answeredWithHelp', confidence: 50,
     timesCorrect: 1, timesProduced: 1, timesSeen: 1, needsHelp: true,
@@ -455,15 +459,27 @@ const orchT5 = ConversationOrchestrator.create({
   sessionId: 't5-block',
 });
 await orchT5.handle({ type: 'SESSION_STARTED' });
+assert(orchT5.getPlan().target?.id === 'l0-wie-gehts', `TESTE5 start (${orchT5.getPlan().target?.id})`);
 const t5a = await orchT5.handleUserUtterance('Falsch eins.');
 assert(t5a.flow === 'intervenePedagogically', 'TESTE5 1º erro intervém');
 const t5b = await orchT5.handleUserUtterance('Falsch zwei.');
-assert(t5b.flow === 'intervenePedagogically', 'TESTE5 2º erro intervém');
-const t5c = await orchT5.handleUserUtterance('Gute Nacht.');
-assert(/Perfeito|próximo|Nova frase|aceita/i.test(t5c.geminiNudge || ''), 'TESTE5 após erros+acerto avança');
-assert(!/Modele "Guten Morgen|correction_retry_ok_local_block|Vamos fazer de novo/i.test(`${t5c.reason}|${t5c.geminiNudge}`), 'TESTE5 sem rewalk Morgen');
-assert(/frase aceita|próximo|Nova frase|correction_retry_ok/i.test(t5c.reason || t5c.geminiNudge || ''), 'TESTE5 reason de avanço');
-console.log('  ✓ TESTE 5: 2 erros → ajuda local → acerto → avança (sem rewalk)');
+assert(
+  t5b.reason.includes('postergada') || t5b.flow === 'intervenePedagogically' || t5b.reason.includes('idempotent'),
+  `TESTE5 2º: ${t5b.reason}`,
+);
+let t5done = t5b;
+if (t5b.reason.includes('idempotent') || t5b.reason.includes('correction_retry_fail')) {
+  t5done = await orchT5.handleUserUtterance('Falsch drei unique.');
+}
+if (t5done.reason.includes('postergada')) {
+  assert(orchT5.getPlan().target?.id !== 'l0-wie-gehts', 'TESTE5 defer avançou');
+  console.log('  ✓ TESTE 5: erros → dificuldade postergada → avança (sem rewalk)');
+} else {
+  const t5c = await orchT5.handleUserUtterance("Wie geht's?");
+  assert(/Perfeito|próximo|Nova frase|aceita|postergada/i.test(`${t5c.reason}|${t5c.geminiNudge}`), 'TESTE5 após erros+acerto avança');
+  assert(!/Modele "Guten Morgen|Vamos fazer de novo/i.test(`${t5c.reason}|${t5c.geminiNudge}`), 'TESTE5 sem rewalk Morgen');
+  console.log('  ✓ TESTE 5: 2 erros → ajuda local → acerto → avança (sem rewalk)');
+}
 
 // TESTE 6: dedup utterance (simulado via mesma lógica)
 let processCount = 0;
@@ -487,8 +503,7 @@ console.log('  ✓ TESTE 6: dedup transcript');
 // TESTE 7: sessão 20 min → unidades de tempo, não preso em 1 frase
 assert(zeroLanguageSessionUnits(20) === 20, 'TESTE7 20 min');
 const learn7 = buildLearningProfile(zero, [], [], null, {});
-for (let i = 0; i < 3; i++) {
-  const id = ['l0-guten-morgen', 'l0-guten-abend', 'l0-gute-nacht'][i];
+for (const id of ['l0-guten-morgen', 'l0-guten-tag', 'l0-guten-abend', 'l0-gute-nacht', 'l0-hallo', 'l0-tschuess']) {
   learn7.phrases[id] = {
     phraseId: id, state: 'answeredWithHelp', confidence: 50,
     timesCorrect: 1, timesProduced: 1, timesSeen: 1, needsHelp: true,
@@ -497,7 +512,7 @@ for (let i = 0; i < 3; i++) {
   } as never;
 }
 const next7 = pickZeroLanguageTarget(learn7, mergeZeroLanguagePhrases([]));
-assert(next7.phrase?.id === 'l0-wie-gehts', `TESTE7 próximo após 3 aceitas: ${next7.phrase?.id}`);
+assert(next7.phrase?.id === 'l0-wie-gehts', `TESTE7 próximo após cumprimentos: ${next7.phrase?.id}`);
 console.log('  ✓ TESTE 7: progressão por tempo, não preso');
 
 // TESTE 9 (obrigatório): A..E correct → F incorrect → retry F, NÃO B/A
@@ -532,11 +547,14 @@ assert(/Perfeito|próximo|Nova frase|aceita/i.test(t9ok.geminiNudge || ''), 'T9 
 assert(!/Modele "Wie geht|Modele "Guten Morgen/i.test(t9ok.geminiNudge || '') || /próximo|Nova frase|aceita/i.test(t9ok.reason || ''), 'T9 sem rewalk dominadas');
 console.log('  ✓ TESTE 9: A..E ok → F erro → retry F → ok → avança (não B/A)');
 
-// TESTE 10: F incorrect x3 → ajuda progressiva, nunca Morgen
+// TESTE 10: F incorrect persistente → posterga + avança (sem Morgen)
 await EventStore.clear();
 await MemoryService.saveConfidenceMap({});
 const learnT10 = buildLearningProfile(zero, [], [], null, {});
-for (const id of ['l0-guten-morgen', 'l0-guten-abend', 'l0-gute-nacht', 'l0-wie-gehts', 'l0-mir-gehts-gut', 'survival-gut', 'l0-hallo']) {
+for (const id of [
+  'l0-guten-morgen', 'l0-guten-tag', 'l0-guten-abend', 'l0-gute-nacht', 'l0-hallo', 'l0-tschuess',
+  'l0-wie-gehts', 'l0-mir-gehts-gut',
+]) {
   learnT10.phrases[id] = {
     phraseId: id, state: 'answeredWithHelp', confidence: 50,
     timesCorrect: 1, timesProduced: 1, timesSeen: 1, needsHelp: true,
@@ -552,20 +570,31 @@ const orchT10 = ConversationOrchestrator.create({
 });
 await orchT10.handle({ type: 'SESSION_STARTED' });
 assert(orchT10.getPlan().target?.id === 'l0-ich-heisse', `T10 target Ich heiße (${orchT10.getPlan().target?.id})`);
-const fDe = orchT10.getPlan().target!.german;
+const fId = orchT10.getPlan().target!.id;
 await orchT10.handleUserUtterance('Falsch 1.');
-await orchT10.handleUserUtterance('Falsch 2.');
-const t10c = await orchT10.handleUserUtterance('Falsch 3.');
-assert(t10c.flow === 'intervenePedagogically', 'T10 3º erro ainda intervém');
-assert(orchT10.getPlan().target?.id === 'l0-ich-heisse' || t10c.targetItem === fDe, 'T10 permanece em F');
-assert(!/Modele "Guten Morgen/i.test(t10c.geminiNudge || ''), 'T10 NÃO modela Guten Morgen');
-console.log('  ✓ TESTE 10: F x3 erros → ajuda progressiva local (sem Morgen)');
+let t10b = await orchT10.handleUserUtterance('Falsch 2.');
+if (t10b.reason.includes('idempotent')) {
+  t10b = await orchT10.handleUserUtterance('Falsch 2b unique.');
+}
+let t10final = t10b;
+if (t10b.reason.includes('correction_retry_fail')) {
+  t10final = await orchT10.handleUserUtterance('Falsch 3 unique.');
+}
+assert(
+  t10final.reason.includes('postergada') || orchT10.getPlan().target?.id !== fId,
+  `T10 defer/avança (${t10final.reason}, target=${orchT10.getPlan().target?.id})`,
+);
+assert(!/Modele "Guten Morgen/i.test(t10final.geminiNudge || ''), 'T10 NÃO modela Guten Morgen');
+console.log('  ✓ TESTE 10: F erros → dificuldade postergada → avança (sem Morgen)');
 
 // TESTE 11: near-miss em F → correção → correct → advance; sem bloco anterior
 await EventStore.clear();
 await MemoryService.saveConfidenceMap({});
 const learnT11 = buildLearningProfile(zero, [], [], null, {});
-for (const id of ['l0-guten-morgen', 'l0-guten-abend', 'l0-gute-nacht', 'l0-wie-gehts', 'l0-mir-gehts-gut', 'survival-gut', 'l0-hallo']) {
+for (const id of [
+  'l0-guten-morgen', 'l0-guten-tag', 'l0-guten-abend', 'l0-gute-nacht', 'l0-hallo', 'l0-tschuess',
+  'l0-wie-gehts', 'l0-mir-gehts-gut',
+]) {
   learnT11.phrases[id] = {
     phraseId: id, state: 'answeredWithHelp', confidence: 50,
     timesCorrect: 1, timesProduced: 1, timesSeen: 1, needsHelp: true,
@@ -626,9 +655,10 @@ assert(detectTargetLoop(['x', 'A', 'B', 'A', 'B', 'A', 'B']) === true, 'loop A-B
 assert(detectTargetLoop(['A', 'B', 'C', 'D', 'E', 'F']) === false, 'progressão sem loop');
 console.log('  ✓ LOOP_DETECTED helper');
 
-// All-accepted recall estável (não oscila para Hallo)
+// All-accepted recall estável (última do currículo expandido)
 const learnAll = buildLearningProfile(zero, [], [], null, {});
-for (const id of ['l0-guten-morgen', 'l0-guten-abend', 'l0-gute-nacht', 'l0-wie-gehts', 'l0-mir-gehts-gut', 'survival-gut', 'l0-hallo', 'l0-ich-heisse', 'survival-heisse', 'survival-arbeite']) {
+const allIds = ZERO_LANGUAGE_BLOCKS.flatMap((b) => b.phraseIds);
+for (const id of allIds) {
   learnAll.phrases[id] = {
     phraseId: id, state: 'answeredWithHelp', confidence: 10,
     timesCorrect: 1, timesProduced: 1, timesSeen: 1, needsHelp: true,
@@ -639,7 +669,7 @@ for (const id of ['l0-guten-morgen', 'l0-guten-abend', 'l0-gute-nacht', 'l0-wie-
 const p1 = pickZeroLanguageTarget(learnAll, mergeZeroLanguagePhrases([]));
 const p2 = pickZeroLanguageTarget(learnAll, mergeZeroLanguagePhrases([]));
 assert(p1.phrase?.id === p2.phrase?.id, `recall estável (${p1.phrase?.id})`);
-assert(p1.phrase?.id === 'survival-arbeite', `recall = última tocada (${p1.phrase?.id})`);
+assert(p1.phrase?.id === allIds[allIds.length - 1], `recall = última (${p1.phrase?.id})`);
 console.log('  ✓ recall all-accepted estável (sem loop Hallo)');
 
 // Regressão: plano A2 ainda sem ZERO e sem blocos L0 no directive
