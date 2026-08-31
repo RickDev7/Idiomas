@@ -180,17 +180,18 @@ export function findZeroLanguageBlock(phraseId: string) {
   return ZERO_LANGUAGE_BLOCKS.find((b) => b.phraseIds.includes(phraseId)) || null;
 }
 
-/** Frases do bloco desde o início até a frase falhada (inclusive), para recuperação. */
+/** Frases do bloco para revisão — NUNCA inclui frases já aceitas/dominadas. */
 export function getBlockRecoverySequence(
   phraseId: string,
   phrases: Phrase[],
+  learning?: UserLearningProfile | null,
 ): Array<{ id: string; german: string; portuguese: string }> {
   const block = findZeroLanguageBlock(phraseId);
   if (!block) return [];
   const pool = mergeZeroLanguagePhrases(phrases);
   const idx = block.phraseIds.indexOf(phraseId);
   const slice = idx >= 0 ? block.phraseIds.slice(0, idx + 1) : block.phraseIds.slice(0, 1);
-  return slice
+  const mapped = slice
     .map((id) => {
       const p = pool.find((x) => x.id === id);
       const seed = ZERO_LANGUAGE_SEED_SPECS.find((s) => s.id === id);
@@ -202,6 +203,15 @@ export function getBlockRecoverySequence(
       };
     })
     .filter((x): x is { id: string; german: string; portuguese: string } => !!x);
+
+  // Preserva progresso: frases já aceitas não entram no recovery
+  const filtered = mapped.filter((item) => {
+    if (item.id === phraseId) return true; // sempre a frase atual falhada
+    if (!learning) return true;
+    return !isZeroLanguagePhraseAccepted(learning.phrases[item.id]);
+  });
+  // Se só sobrou a falhada (ou nada), recovery = local na frase atual
+  return filtered.length > 0 ? filtered : mapped.filter((item) => item.id === phraseId);
 }
 
 /**
@@ -266,23 +276,29 @@ export function pickZeroLanguageTarget(
     return { conf, phrase, action: 'practice' };
   }
 
-  // Todas aceitas — recall leve da mais fraca (domínio longitudinal, sem bloquear sessão)
-  let weakest: { conf: PhraseConfidence; phrase: Phrase; score: number } | null = null;
-  for (const id of L0_PRIORITY_IDS) {
-    const phrase = pool.find((p) => p.id === id);
-    if (!phrase) continue;
-    const conf = learning.phrases[id];
-    if (!conf || !isZeroLanguagePhraseAccepted(conf)) continue;
-    const score = readAutomationScore(conf);
-    if (!weakest || score < weakest.score) {
-      weakest = { conf, phrase, score };
+  // Todas aceitas: recall LEVE só no ÚLTIMO bloco tocado — nunca reinicia cumprimentos
+  const lastTouched =
+    [...L0_PRIORITY_IDS].reverse().find((id) => isZeroLanguagePhraseAccepted(learning.phrases[id])) ||
+    null;
+  const lastBlock = lastTouched ? findZeroLanguageBlock(lastTouched) : ZERO_LANGUAGE_BLOCKS[ZERO_LANGUAGE_BLOCKS.length - 1];
+  if (lastBlock) {
+    let weakestInBlock: { conf: PhraseConfidence; phrase: Phrase; score: number } | null = null;
+    for (const id of lastBlock.phraseIds) {
+      const phrase = pool.find((p) => p.id === id);
+      if (!phrase) continue;
+      const conf = learning.phrases[id];
+      if (!conf || !isZeroLanguagePhraseAccepted(conf)) continue;
+      const score = readAutomationScore(conf);
+      if (!weakestInBlock || score < weakestInBlock.score) {
+        weakestInBlock = { conf, phrase, score };
+      }
+    }
+    if (weakestInBlock) {
+      return { conf: weakestInBlock.conf, phrase: weakestInBlock.phrase, action: 'recall' };
     }
   }
-  if (weakest && weakest.score < 70) {
-    return { conf: weakest.conf, phrase: weakest.phrase, action: 'recall' };
-  }
 
-  const fallback = pool.find((p) => p.id === 'l0-guten-morgen') || pool[0] || null;
+  const fallback = pool.find((p) => p.id === lastTouched) || pool[pool.length - 1] || null;
   return { conf: fallback ? learning.phrases[fallback.id] : undefined, phrase: fallback, action: 'recall' };
 }
 
@@ -311,11 +327,37 @@ export function diagnoseProduction(text: string, expected?: string | null): Prod
   const stop = new Set(['der', 'die', 'das', 'ein', 'eine', 'und', 'oder', 'mit', 'auf', 'fur', 'zu', 'in', 'am', 'im']);
   const expTokens = exp.split(' ').filter((w) => w.length > 0);
   const userTokens = user.split(' ').filter((w) => w.length > 0);
+  const contentExp = expTokens.filter((w) => w.length > 1 && !stop.has(w));
+  let closeHits = 0;
+  for (let i = 0; i < contentExp.length; i++) {
+    const t = contentExp[i];
+    const aligned = userTokens[i];
+    if (aligned && (aligned === t || levenshtein(aligned, t) <= 2)) {
+      closeHits += 1;
+      continue;
+    }
+    // Match não alinhado: só exato ou distância 1 (evita mir≈bin, gut≈auto)
+    if (userTokens.some((u) => u === t || levenshtein(u, t) <= 1)) closeHits += 1;
+  }
+  // Erro total (ex.: "Ich bin Auto" vs "Mir geht es gut") NÃO é near-miss
+  if (contentExp.length >= 2 && closeHits / contentExp.length < 0.5) {
+    return {
+      verdict: 'INCORRECT',
+      errorType: userTokens.length < contentExp.length ? 'omission' : 'mismatch',
+      expected: correction,
+      userSaid,
+      correction,
+    };
+  }
 
   for (let i = 0; i < expTokens.length; i++) {
     const et = expTokens[i];
     if (stop.has(et) || et.length < 3) continue;
-    const ut = userTokens[i] ?? userTokens.find((u) => levenshtein(u, et) <= 2);
+    // Preferir token alinhado; senão só vizinho com d<=1 para não cruzar palavras não relacionadas
+    const ut =
+      userTokens[i] && levenshtein(userTokens[i], et) <= 2
+        ? userTokens[i]
+        : userTokens.find((u) => u === et || levenshtein(u, et) <= 1);
     if (!ut) continue;
     const d = levenshtein(ut, et);
     if (d >= 1 && d <= 2) {
@@ -334,7 +376,6 @@ export function diagnoseProduction(text: string, expected?: string | null): Prod
     return { verdict: 'CORRECT', expected: correction, userSaid, correction };
   }
 
-  const contentExp = expTokens.filter((w) => w.length > 1 && !stop.has(w));
   let hit = 0;
   for (const t of contentExp) {
     if (userTokens.some((u) => u === t)) hit += 1;
@@ -485,28 +526,33 @@ export function praiseGuidedRetryNudge(correction: string): string {
     `O aluno acertou após correção: "${correction}"`,
     'Elogie de forma curta: "Perfeito!"',
     'Isso foi produção GUIADA (havia modelo). NÃO declare fluência.',
-    'Avance para a próxima frase se não houver recuperação de bloco pendente.',
+    'Avance para a próxima frase. NÃO volte a frases anteriores já aceitas.',
   ].join('\n');
 }
 
-/** Recuperação do bloco atual (sem apagar memória / sem reiniciar a sessão). */
+/** Recuperação LOCAL do bloco atual — só frases ainda não aceitas (+ a falhada). */
 export function blockRecoveryNudge(opts: {
   failedGerman: string;
   sequence: Array<{ german: string; portuguese?: string }>;
   blockNamePt?: string;
 }): string {
+  const onlyCurrent = opts.sequence.length <= 1;
   const lines = opts.sequence
     .map((p, i) => `${i + 1}. Modele "${p.german}" → "Agora você." → AGUARDE → confirme com "Perfeito!" se ok.`)
     .join('\n');
   return [
     '[INSTRUÇÃO INTERNA — não leia isto em voz alta]',
-    'RECUPERAÇÃO DE BLOCO L0 — obrigatória (não reinicie a sessão inteira):',
-    `O aluno errou em "${opts.failedGerman}" após avançar no bloco${opts.blockNamePt ? ` "${opts.blockNamePt}"` : ''}.`,
-    'Em português, curto: "Vamos fazer de novo."',
+    onlyCurrent
+      ? 'RECUPERAÇÃO LOCAL L0 — só a frase atual (NÃO volte a frases já dominadas):'
+      : 'RECUPERAÇÃO DO BLOCO ATUAL L0 — só itens ainda fracos deste bloco (NÃO volte a blocos anteriores):',
+    `Foque em: "${opts.failedGerman}"${opts.blockNamePt ? ` (bloco "${opts.blockNamePt}")` : ''}.`,
+    onlyCurrent
+      ? 'Em português, curto: "Vamos tentar de novo esta frase."'
+      : 'Em português, curto: "Vamos reforçar esta parte."',
     'Percorra EM ORDEM, UMA de cada vez, com AGUARDA após cada pedido:',
     lines,
-    'Só depois de recuperar o bloco, continue a progressão normal.',
-    'NÃO apague progresso. NÃO volte ao nível zero da jornada. Só reforce este bloco.',
+    'PROIBIDO: voltar para Guten Morgen / Wie geht\'s / frases de blocos anteriores já aceitas.',
+    'NÃO apague progresso. NÃO reinicie a sessão.',
   ].join('\n');
 }
 

@@ -87,13 +87,11 @@ import { selectRelevantCoachContext } from '@/services/coach/MemoryRelevanceEngi
 import { seedFromUserProfile, loadCoachMemory, saveCoachMemory } from '@/services/coach/CoachMemory';
 import {
   diagnoseProduction,
-  getBlockRecoverySequence,
   findZeroLanguageBlock,
   isZeroLanguageMode,
   mergeZeroLanguagePhrases,
   pickZeroLanguageTarget,
   praiseGuidedRetryNudge,
-  blockRecoveryNudge,
   shouldRecoverZeroLanguageBlock,
   teachFromErrorNudge,
   zeroLanguageDirective,
@@ -872,6 +870,8 @@ export class ConversationOrchestrator {
   }
 
   private tryBeginReviewOpportunity(reason: string, force = false): OrchestratorDecision | null {
+    // L0: revisão natural A1+ não deve puxar frases antigas (ex.: Wie geht's) no meio do ensino
+    if (isZeroLanguageMode(this.profile) && !force) return null;
     if (this.micro && this.micro.phase !== 'done') return null;
     if (this.pendingTransfer || this.spontaneousOpportunity) return null;
     if (this.pendingReview) return null;
@@ -1618,32 +1618,11 @@ export class ConversationOrchestrator {
       this.refreshPlan();
       this.persist();
 
-      if (isZeroLanguageMode(this.profile) && this.pendingBlockRecovery) {
-        const recovery = this.pendingBlockRecovery;
+      // L0: acerto após correção = AVANÇAR. Nunca rewalk frases anteriores
+      // (erro em F → "Perfeito!" → próxima; NÃO voltar para Wie geht's / Morgen).
+      if (isZeroLanguageMode(this.profile)) {
         this.pendingBlockRecovery = null;
-        this.l0BlockReviewPhraseId = recovery.phraseId;
-        this.l0PhrasePhase = 'BLOCK_REVIEW';
-        const sequence = getBlockRecoverySequence(recovery.phraseId, this.phrases);
-        const block = findZeroLanguageBlock(recovery.phraseId);
-        this.refreshPlan();
-        this.persist();
-        return {
-          flow: 'continueConversation',
-          action: 'practice',
-          mode: this.ctx.mode,
-          reason: `correction_retry_ok_block_recovery:attempt_${pending.attempt}`,
-          correction: pending.expected,
-          targetItem: this.plan.target?.german ?? pending.expected,
-          geminiNudge: [
-            praiseGuidedRetryNudge(pending.expected),
-            blockRecoveryNudge({
-              failedGerman: recovery.failedGerman,
-              sequence,
-              blockNamePt: block?.namePt,
-            }),
-          ].join('\n'),
-          eventsRecorded,
-        };
+        this.l0BlockReviewPhraseId = null;
       }
 
       this.l0PhrasePhase = 'CORRECT';
