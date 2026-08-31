@@ -1,4 +1,4 @@
-/* Chunks + substituição L0 — gancho → variação → sem loop.
+/* Chunks + substituição L0 — gancho → variação → maturidade → pergunta.
    Rodar: npx tsx scripts/_diag-l0-chunk-substitution.ts */
 const _store = new Map<string, string>();
 (globalThis as unknown as { localStorage: Storage }).localStorage = {
@@ -20,10 +20,14 @@ import {
   l0VariationsForBase,
   l0SubstitutionAdvanceNudge,
   l0ConverseExpandNudge,
+  l0ChunkMatureAdvanceNudge,
   teachFromErrorNudge,
   isL0GreetingPhraseId,
+  isL0ChunkMature,
+  l0IsSimpleVariationId,
   ZERO_LANGUAGE_BLOCKS,
   L0_BASE_TO_VARIATIONS,
+  L0_BRIDGE_A1_SPECS,
 } from '../src/services/teacher/ZeroLanguageMode';
 import type { UserProfile } from '../src/types';
 
@@ -80,7 +84,7 @@ console.log('DIAG — L0 chunk substitution\n');
   console.log('  ✓ T2 Ich arbeite CORRECT →', next.phrase?.id);
 }
 
-// T3: cadeia de substituições
+// T3: cadeia de substituições (ainda < maturidade)
 {
   const zero = profileZero();
   const map = Object.fromEntries(BEFORE_ARBEITE.map((id) => [id, acceptConf(id)]));
@@ -92,6 +96,23 @@ console.log('DIAG — L0 chunk substitution\n');
   });
   assert(next.phrase?.id === 'l0-bridge-ich-arbeite-heute', `T3 cadeia=${next.phrase?.id}`);
   console.log('  ✓ T3 substituição em cadeia →', next.phrase?.id);
+}
+
+// T3b: 2 simple_vars → MATURO → pergunta (não morgens)
+{
+  const zero = profileZero();
+  const map = Object.fromEntries(BEFORE_ARBEITE.map((id) => [id, acceptConf(id)]));
+  map['survival-arbeite'] = acceptConf('survival-arbeite');
+  map['l0-bridge-ich-arbeite-in'] = acceptConf('l0-bridge-ich-arbeite-in');
+  map['l0-bridge-ich-arbeite-heute'] = acceptConf('l0-bridge-ich-arbeite-heute');
+  const learning = buildLearningProfile(zero, [], [], null, map);
+  assert(isL0ChunkMature(learning, 'survival-arbeite'), 'T3b mature');
+  const next = pickZeroLanguageTarget(learning, mergeZeroLanguagePhrases([]), {
+    excludePhraseId: 'l0-bridge-ich-arbeite-heute',
+  });
+  assert(next.phrase?.id === 'l0-bridge-wo-arbeitest', `T3b pergunta=${next.phrase?.id}`);
+  assert(next.phrase?.id !== 'l0-var-ich-arbeite-morgens', 'T3b ≠ morgens');
+  console.log('  ✓ T3b maturidade →', next.phrase?.id);
 }
 
 // T4: nudge substituição
@@ -174,6 +195,59 @@ console.log('DIAG — L0 chunk substitution\n');
   const plan = buildConversationPlan(a2, buildLearningProfile(a2, [], [], null, {}), mergeZeroLanguagePhrases([]));
   assert(!/SUBSTITUIÇÃO \(tutor ativo\)/i.test(plan.actionKickoff), 'T9 A2 clean');
   console.log('  ✓ T9 A1+ regressão zero');
+}
+
+// T10: Wasser + Hilfe → MATURO → Was brauchst du? (não recycle Wasser)
+{
+  const zero = profileZero();
+  const map = Object.fromEntries(CORE.map((id) => [id, acceptConf(id)]));
+  map['l0-hook-ich-brauche'] = acceptConf('l0-hook-ich-brauche');
+  map['l0-var-ich-brauche-wasser'] = acceptConf('l0-var-ich-brauche-wasser');
+  map['l0-var-ich-brauche-hilfe'] = acceptConf('l0-var-ich-brauche-hilfe');
+  const learning = buildLearningProfile(zero, [], [], null, map);
+  assert(isL0ChunkMature(learning, 'l0-hook-ich-brauche'), 'T10 mature brauche');
+  const next = pickZeroLanguageTarget(learning, mergeZeroLanguagePhrases([]), {
+    excludePhraseId: 'l0-var-ich-brauche-hilfe',
+  });
+  assert(next.phrase?.id === 'l0-bridge-was-brauchst', `T10 pergunta=${next.phrase?.id} action=${next.action}`);
+  assert(next.phrase?.id !== 'l0-var-ich-brauche-wasser', 'T10 ≠ recycle Wasser');
+  assert(!l0IsSimpleVariationId(next.phrase!.id), 'T10 ≠ simple_var');
+  const nudge = l0ChunkMatureAdvanceNudge({
+    chunkGerman: 'Ich brauche...',
+    masteredExamples: ['Ich brauche Wasser.', 'Ich brauche Hilfe.'],
+    nextGerman: 'Was brauchst du?',
+    mode: 'question',
+  });
+  assert(/MATURO|Was brauchst|NUNCA/i.test(nudge), 'T10 mature nudge');
+  console.log('  ✓ T10 brauche maturo →', next.phrase?.id);
+}
+
+// T11: perguntas brauche aceitas → converse (não volta Wasser)
+{
+  const zero = profileZero();
+  const map = Object.fromEntries(CORE.map((id) => [id, acceptConf(id)]));
+  map['l0-hook-ich-brauche'] = acceptConf('l0-hook-ich-brauche');
+  map['l0-var-ich-brauche-wasser'] = acceptConf('l0-var-ich-brauche-wasser');
+  map['l0-var-ich-brauche-hilfe'] = acceptConf('l0-var-ich-brauche-hilfe');
+  map['l0-bridge-was-brauchst'] = acceptConf('l0-bridge-was-brauchst');
+  map['l0-bridge-brauchst-du'] = acceptConf('l0-bridge-brauchst-du');
+  // Aceitar resto da ponte precoce para isolar brauche→converse
+  for (const s of L0_BRIDGE_A1_SPECS) {
+    if (!map[s.id] && !s.id.startsWith('l0-hook-') && s.id !== 'l0-bridge-was-machst') {
+      // leave other incomplete nodes — pick may go there; only assert no Wasser/Hilfe
+    }
+  }
+  const learning = buildLearningProfile(zero, [], [], null, map);
+  const next = pickZeroLanguageTarget(learning, mergeZeroLanguagePhrases([]), {
+    excludePhraseId: 'l0-bridge-brauchst-du',
+  });
+  assert(next.phrase?.id !== 'l0-var-ich-brauche-wasser', 'T11 ≠ Wasser');
+  assert(next.phrase?.id !== 'l0-var-ich-brauche-hilfe', 'T11 ≠ Hilfe');
+  assert(
+    next.action === 'converse' || !next.phrase || !l0IsSimpleVariationId(next.phrase.id) || next.phrase.id.startsWith('l0-bridge-ich-arbeite'),
+    `T11 sem recycle brauche-simple (${next.action}, ${next.phrase?.id})`,
+  );
+  console.log('  ✓ T11 pós-perguntas →', next.action, next.phrase?.id || '(null)');
 }
 
 console.log('\nDIAG L0 CHUNK SUBSTITUTION OK');

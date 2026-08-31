@@ -136,6 +136,10 @@ export const ZERO_LANGUAGE_BLOCKS: Array<{ id: string; namePt: string; phraseIds
 /**
  * Ponte + ganchos L0 (chunks) + substituições funcionais.
  * Objetivo: formar frases, não memorizar uma linha estática.
+ *
+ * Estágios por chunk: BASE → simple_var → question → converse.
+ * Após L0_CHUNK_MATURITY_SIMPLE_CORRECT simple_vars aceitas, o chunk fica MATURO:
+ * bloqueia novo vocabulário do mesmo gancho e força pergunta / conversa.
  */
 export const L0_BRIDGE_A1_SPECS: Array<{ id: string; german: string; portuguese: string }> = [
   // Expansões de "Ich arbeite."
@@ -153,38 +157,87 @@ export const L0_BRIDGE_A1_SPECS: Array<{ id: string; german: string; portuguese:
   { id: 'l0-hook-ich-muss', german: 'Ich muss...', portuguese: 'Eu preciso / tenho que...' },
   { id: 'l0-var-ich-muss-arbeiten', german: 'Ich muss arbeiten.', portuguese: 'Eu preciso trabalhar.' },
   { id: 'l0-var-ich-muss-gehen', german: 'Ich muss gehen.', portuguese: 'Eu preciso ir.' },
+  { id: 'l0-bridge-was-musst', german: 'Was musst du?', portuguese: 'O que você precisa fazer?' },
   { id: 'l0-hook-ich-moechte', german: 'Ich möchte...', portuguese: 'Eu gostaria de...' },
   { id: 'l0-var-ich-moechte-wasser', german: 'Ich möchte Wasser.', portuguese: 'Eu gostaria de água.' },
   { id: 'l0-var-ich-moechte-pause', german: 'Ich möchte eine Pause.', portuguese: 'Eu gostaria de uma pausa.' },
+  { id: 'l0-bridge-was-moechtest', german: 'Was möchtest du?', portuguese: 'O que você gostaria?' },
   { id: 'l0-hook-kannst-du', german: 'Kannst du...?', portuguese: 'Você pode...?' },
   { id: 'l0-var-kannst-du-helfen', german: 'Kannst du helfen?', portuguese: 'Você pode ajudar?' },
   { id: 'l0-hook-ich-brauche', german: 'Ich brauche...', portuguese: 'Eu preciso de...' },
+  { id: 'l0-var-ich-brauche-wasser', german: 'Ich brauche Wasser.', portuguese: 'Eu preciso de água.' },
   { id: 'l0-var-ich-brauche-hilfe', german: 'Ich brauche Hilfe.', portuguese: 'Eu preciso de ajuda.' },
+  { id: 'l0-bridge-was-brauchst', german: 'Was brauchst du?', portuguese: 'Do que você precisa?' },
+  { id: 'l0-bridge-brauchst-du', german: 'Brauchst du Hilfe?', portuguese: 'Você precisa de ajuda?' },
   { id: 'l0-bridge-was-machst', german: 'Was machst du?', portuguese: 'O que você faz?' },
 ];
 
-/**
- * Gancho base → variações/substituições (ordem pedagógica).
- * Após CORRECT no base, o pick prioriza a próxima variação não aceita.
- */
-export const L0_BASE_TO_VARIATIONS: Record<string, string[]> = {
-  'survival-arbeite': [
-    'l0-bridge-ich-arbeite-in',
-    'l0-bridge-ich-arbeite-heute',
-    'l0-var-ich-arbeite-morgens',
-    'l0-bridge-wo-arbeitest',
-    'l0-bridge-wann-arbeitest',
-  ],
-  'l0-ich-wohne': ['l0-bridge-ich-wohne-in'],
-  'l0-ich-komme': ['l0-bridge-ich-komme-aus'],
-  'l0-ich-heisse': ['l0-bridge-ich-heisse-name'],
-  'l0-ich-bin': ['l0-var-ich-bin-student'],
-  'l0-hook-ich-muss': ['l0-var-ich-muss-arbeiten', 'l0-var-ich-muss-gehen'],
-  'l0-hook-ich-moechte': ['l0-var-ich-moechte-wasser', 'l0-var-ich-moechte-pause'],
-  'l0-hook-kannst-du': ['l0-var-kannst-du-helfen'],
-  'l0-hook-ich-brauche': ['l0-var-ich-brauche-hilfe'],
-  'l0-hilfe': ['l0-var-ich-brauche-hilfe'],
+/** Acertos de variação simples no mesmo chunk → MATURO (força pergunta/conversa). */
+export const L0_CHUNK_MATURITY_SIMPLE_CORRECT = 2;
+
+export type L0ChunkGraphNode = {
+  simpleVars: string[];
+  questions: string[];
 };
+
+/**
+ * Grafo tipado por chunk. simple_var ≠ question.
+ * Maturidade bloqueia simpleVars restantes e exige questions → converse.
+ */
+export const L0_CHUNK_GRAPH: Record<string, L0ChunkGraphNode> = {
+  'survival-arbeite': {
+    simpleVars: [
+      'l0-bridge-ich-arbeite-in',
+      'l0-bridge-ich-arbeite-heute',
+      'l0-var-ich-arbeite-morgens',
+    ],
+    questions: ['l0-bridge-wo-arbeitest', 'l0-bridge-wann-arbeitest'],
+  },
+  'l0-ich-wohne': {
+    simpleVars: ['l0-bridge-ich-wohne-in'],
+    questions: [],
+  },
+  'l0-ich-komme': {
+    simpleVars: ['l0-bridge-ich-komme-aus'],
+    questions: [],
+  },
+  'l0-ich-heisse': {
+    simpleVars: ['l0-bridge-ich-heisse-name'],
+    questions: [],
+  },
+  'l0-ich-bin': {
+    simpleVars: ['l0-var-ich-bin-student'],
+    questions: [],
+  },
+  'l0-hook-ich-muss': {
+    simpleVars: ['l0-var-ich-muss-arbeiten', 'l0-var-ich-muss-gehen'],
+    questions: ['l0-bridge-was-musst'],
+  },
+  'l0-hook-ich-moechte': {
+    simpleVars: ['l0-var-ich-moechte-wasser', 'l0-var-ich-moechte-pause'],
+    questions: ['l0-bridge-was-moechtest'],
+  },
+  'l0-hook-kannst-du': {
+    simpleVars: ['l0-var-kannst-du-helfen'],
+    questions: [],
+  },
+  'l0-hook-ich-brauche': {
+    simpleVars: ['l0-var-ich-brauche-wasser', 'l0-var-ich-brauche-hilfe'],
+    questions: ['l0-bridge-was-brauchst', 'l0-bridge-brauchst-du'],
+  },
+  'l0-hilfe': {
+    simpleVars: ['l0-var-ich-brauche-hilfe'],
+    questions: ['l0-bridge-was-brauchst'],
+  },
+};
+
+/** Flat list (compat): simpleVars + questions na ordem pedagógica. */
+export const L0_BASE_TO_VARIATIONS: Record<string, string[]> = Object.fromEntries(
+  Object.entries(L0_CHUNK_GRAPH).map(([baseId, node]) => [
+    baseId,
+    [...node.simpleVars, ...node.questions],
+  ]),
+);
 
 /** Ganchos estruturantes introduzidos após o core inicial (ainda L0). */
 export const L0_CHUNK_HOOK_IDS = [
@@ -194,8 +247,111 @@ export const L0_CHUNK_HOOK_IDS = [
   'l0-hook-ich-brauche',
 ] as const;
 
+const L0_SIMPLE_VAR_IDS = new Set(
+  Object.values(L0_CHUNK_GRAPH).flatMap((n) => n.simpleVars),
+);
+const L0_QUESTION_NODE_IDS = new Set(
+  Object.values(L0_CHUNK_GRAPH).flatMap((n) => n.questions),
+);
+
 export function l0VariationsForBase(baseId: string): string[] {
   return L0_BASE_TO_VARIATIONS[baseId] || [];
+}
+
+export function l0IsSimpleVariationId(phraseId: string): boolean {
+  return L0_SIMPLE_VAR_IDS.has(phraseId);
+}
+
+export function l0IsQuestionNodeId(phraseId: string): boolean {
+  return L0_QUESTION_NODE_IDS.has(phraseId);
+}
+
+/** Chunk base dono deste id (gancho ou nó do grafo). */
+export function l0ChunkBaseForPhraseId(phraseId: string): string | null {
+  if (L0_CHUNK_GRAPH[phraseId]) return phraseId;
+  for (const [baseId, node] of Object.entries(L0_CHUNK_GRAPH)) {
+    if (node.simpleVars.includes(phraseId) || node.questions.includes(phraseId)) return baseId;
+  }
+  return null;
+}
+
+export function l0AcceptedSimpleVarCount(
+  learning: UserLearningProfile,
+  baseId: string,
+): number {
+  const node = L0_CHUNK_GRAPH[baseId];
+  if (!node) return 0;
+  return node.simpleVars.filter((id) => isZeroLanguagePhraseAccepted(learning.phrases[id])).length;
+}
+
+export function l0MasteredSimpleExamples(
+  learning: UserLearningProfile,
+  baseId: string,
+  phrases: Phrase[],
+): string[] {
+  const node = L0_CHUNK_GRAPH[baseId];
+  if (!node) return [];
+  const pool = mergeZeroLanguagePhrases(phrases);
+  return node.simpleVars
+    .filter((id) => isZeroLanguagePhraseAccepted(learning.phrases[id]))
+    .map((id) => pool.find((p) => p.id === id)?.german || id)
+    .slice(0, 4);
+}
+
+/**
+ * Chunk MATURO: ≥2 simple_vars aceitas, OU todas as simple_vars esgotadas.
+ * Quando maturo: PROIBIDO novo vocabulário simples do mesmo gancho.
+ */
+export function isL0ChunkMature(
+  learning: UserLearningProfile,
+  baseId: string,
+): boolean {
+  const node = L0_CHUNK_GRAPH[baseId];
+  if (!node || node.simpleVars.length === 0) return false;
+  const accepted = l0AcceptedSimpleVarCount(learning, baseId);
+  if (accepted >= L0_CHUNK_MATURITY_SIMPLE_CORRECT) return true;
+  return node.simpleVars.every((id) => isZeroLanguagePhraseAccepted(learning.phrases[id]));
+}
+
+export type L0ChunkAdvance =
+  | { kind: 'simple_var' | 'question'; phraseId: string }
+  | { kind: 'converse'; baseId: string };
+
+/**
+ * Próximo nó obrigatório do chunk (respeita maturidade).
+ * Nunca reabre simple_var de chunk maturo / lista esgotada.
+ */
+export function l0NextChunkAdvance(
+  learning: UserLearningProfile,
+  baseId: string,
+  skip?: Set<string>,
+): L0ChunkAdvance | null {
+  const node = L0_CHUNK_GRAPH[baseId];
+  if (!node) return null;
+  const skipSet = skip || new Set<string>();
+  const mature = isL0ChunkMature(learning, baseId);
+
+  if (!mature) {
+    for (const id of node.simpleVars) {
+      if (skipSet.has(id)) continue;
+      if (!isZeroLanguagePhraseAccepted(learning.phrases[id])) {
+        return { kind: 'simple_var', phraseId: id };
+      }
+    }
+  }
+
+  for (const id of node.questions) {
+    if (skipSet.has(id)) continue;
+    if (!isZeroLanguagePhraseAccepted(learning.phrases[id])) {
+      return { kind: 'question', phraseId: id };
+    }
+  }
+
+  // simple esgotado + questions esgotadas (ou sem questions) → conversa situacional
+  if (mature || node.simpleVars.every((id) => isZeroLanguagePhraseAccepted(learning.phrases[id]))) {
+    return { kind: 'converse', baseId };
+  }
+  return null;
 }
 
 const L0_GREETING_IDS = new Set(
@@ -281,45 +437,59 @@ export function isZeroLanguagePhraseAccepted(conf: PhraseConfidence | undefined)
   return (conf?.timesCorrect ?? 0) >= L0_MIN_CORRECT_BEFORE_ADVANCE;
 }
 
-/** Próxima variação/substituição ainda não aceita para um gancho base. */
+/** Próxima variação/substituição ainda não aceita para um gancho base (respeita maturidade). */
 export function l0NextUnacceptedVariation(
   learning: UserLearningProfile,
   baseId: string,
   skip?: Set<string>,
 ): string | null {
-  for (const id of l0VariationsForBase(baseId)) {
-    if (skip?.has(id)) continue;
-    if (!isZeroLanguagePhraseAccepted(learning.phrases[id])) return id;
-  }
-  return null;
+  const adv = l0NextChunkAdvance(learning, baseId, skip);
+  if (!adv) return null;
+  if (adv.kind === 'converse') return null;
+  return adv.phraseId;
 }
 
 /**
- * Após CORRECT num base: prioriza variação do próprio base; senão de outros bases aceitos.
+ * Após CORRECT: prioriza avanço tipado do próprio chunk; senão de outros bases aceitos.
+ * Chunks maturos NÃO devolvem simple_var.
  */
 export function l0PickPendingVariationId(
   learning: UserLearningProfile,
   opts?: { preferBaseId?: string | null; skip?: Set<string> },
 ): string | null {
   const skip = opts?.skip || new Set<string>();
-  if (opts?.preferBaseId) {
-    const hit = l0NextUnacceptedVariation(learning, opts.preferBaseId, skip);
+  const preferBase = opts?.preferBaseId
+    ? (l0ChunkBaseForPhraseId(opts.preferBaseId) || opts.preferBaseId)
+    : null;
+  if (preferBase) {
+    const hit = l0NextUnacceptedVariation(learning, preferBase, skip);
     if (hit) return hit;
   }
-  const acceptedBases = Object.keys(L0_BASE_TO_VARIATIONS).filter((id) =>
-    isZeroLanguagePhraseAccepted(learning.phrases[id]),
+  const acceptedBases = Object.keys(L0_CHUNK_GRAPH).filter((id) =>
+    isZeroLanguagePhraseAccepted(learning.phrases[id])
+      || l0AcceptedSimpleVarCount(learning, id) > 0,
   );
-  // Preferir o base aceito mais recentemente (lastProduced)
   acceptedBases.sort((a, b) => {
     const ta = Date.parse(learning.phrases[a]?.lastProduced || '') || 0;
     const tb = Date.parse(learning.phrases[b]?.lastProduced || '') || 0;
     return tb - ta;
   });
   for (const baseId of acceptedBases) {
+    if (preferBase && baseId === preferBase) continue;
     const hit = l0NextUnacceptedVariation(learning, baseId, skip);
     if (hit) return hit;
   }
   return null;
+}
+
+/** True se recall de simple_var está bloqueado (chunk maturo — sem recycle Wasser/Hilfe). */
+export function l0IsSimpleVarRecallBlocked(
+  learning: UserLearningProfile,
+  phraseId: string,
+): boolean {
+  if (!l0IsSimpleVariationId(phraseId)) return false;
+  const base = l0ChunkBaseForPhraseId(phraseId);
+  return !!base && isL0ChunkMature(learning, base);
 }
 
 export function findZeroLanguageBlock(phraseId: string) {
@@ -428,6 +598,15 @@ export function pickZeroLanguageTarget(
     return { conf, phrase, action: 'practice' as const };
   };
 
+  const resolveConverse = (baseId: string | null) => {
+    const id = baseId && learning.phrases[baseId] ? baseId : exclude;
+    return {
+      conf: id ? learning.phrases[id] : undefined,
+      phrase: null as Phrase | null,
+      action: 'converse' as const,
+    };
+  };
+
   // Modo BLOCK_REVIEW: reforço local do bloco atual (não volta à sessão inteira)
   if (opts?.blockReviewPhraseId) {
     const reviewBlock = findZeroLanguageBlock(opts.blockReviewPhraseId);
@@ -445,18 +624,19 @@ export function pickZeroLanguageTarget(
     }
   }
 
-  // MODELO → SUBSTITUIÇÃO: só logo após CORRECT (exclude), avançar para variação do mesmo gancho
+  // MODELO → SUBSTITUIÇÃO → PERGUNTA → CONVERSA (grafo tipado + maturidade)
   if (exclude) {
-    let pendingVar = l0NextUnacceptedVariation(learning, exclude, skip);
-    if (!pendingVar) {
-      const parentBase = Object.entries(L0_BASE_TO_VARIATIONS).find(([, vars]) =>
-        vars.includes(exclude),
-      )?.[0];
-      if (parentBase) pendingVar = l0NextUnacceptedVariation(learning, parentBase, skip);
-    }
-    if (pendingVar && pendingVar !== exclude) {
-      const hit = resolveAction(pendingVar, learning.phrases[pendingVar]);
-      if (hit) return hit;
+    const baseId = l0ChunkBaseForPhraseId(exclude);
+    if (baseId) {
+      const adv = l0NextChunkAdvance(learning, baseId, skip);
+      if (adv && (adv.kind === 'simple_var' || adv.kind === 'question') && adv.phraseId !== exclude) {
+        const hit = resolveAction(adv.phraseId, learning.phrases[adv.phraseId]);
+        if (hit) return hit;
+      }
+      // Converse só quando o core já fechou — senão um chunk de 1 simple_var abortava o currículo
+      if (adv?.kind === 'converse' && isL0CoreCurriculumComplete(learning)) {
+        return resolveConverse(baseId);
+      }
     }
   }
 
@@ -472,12 +652,26 @@ export function pickZeroLanguageTarget(
     return resolveAction(id, conf)!;
   }
 
-  // Core esgotado: completar variações pendentes de ganchos já aceitos, depois novos hooks
+  // Core esgotado: avanço tipado de chunks (simple → question; maturo pula simple)
   {
-    const pending = l0PickPendingVariationId(learning, { preferBaseId: exclude, skip });
+    const prefer = exclude ? l0ChunkBaseForPhraseId(exclude) : null;
+    const pending = l0PickPendingVariationId(learning, { preferBaseId: prefer || exclude, skip });
     if (pending && pending !== exclude) {
-      const hit = resolveAction(pending, learning.phrases[pending]);
-      if (hit) return hit;
+      // Guarda: nunca reabrir simple_var de chunk maturo
+      if (!(l0IsSimpleVariationId(pending) && l0IsSimpleVarRecallBlocked(learning, pending))) {
+        const hit = resolveAction(pending, learning.phrases[pending]);
+        if (hit) return hit;
+      }
+    }
+    // Algum chunk maturo sem pergunta pendente → converse (não recycle vocab) — só pós-core
+    if (isL0CoreCurriculumComplete(learning)) {
+      const matureBases = Object.keys(L0_CHUNK_GRAPH).filter((id) => isL0ChunkMature(learning, id));
+      for (const baseId of matureBases) {
+        const adv = l0NextChunkAdvance(learning, baseId, skip);
+        if (adv?.kind === 'converse') {
+          return resolveConverse(baseId);
+        }
+      }
     }
   }
 
@@ -497,6 +691,8 @@ export function pickZeroLanguageTarget(
     if (skip.has(id)) continue;
     if (id === exclude) continue;
     if ((L0_CHUNK_HOOK_IDS as readonly string[]).includes(id)) continue;
+    // Não introduzir simple_var órfã se o chunk dono já está maturo
+    if (l0IsSimpleVarRecallBlocked(learning, id)) continue;
     const phrase = pool.find((p) => p.id === id) || null;
     if (!phrase) continue;
     const conf = learning.phrases[id];
@@ -506,12 +702,15 @@ export function pickZeroLanguageTarget(
   }
 
   // Core + ponte aceitos.
-  // Recall: NUNCA priorizar greetings já aceitos (timesCorrect>=1).
+  // Recall: NUNCA greetings; NUNCA simple_var de chunk maturo (anti-loop Wasser/Hilfe).
   const acceptedCore = L0_PRIORITY_IDS.filter((id) => isZeroLanguagePhraseAccepted(learning.phrases[id]));
   const acceptedBridge = L0_BRIDGE_PRIORITY_IDS.filter((id) => isZeroLanguagePhraseAccepted(learning.phrases[id]));
   const acceptedIds = [...acceptedCore, ...acceptedBridge];
   const recallEligible = acceptedIds.filter(
-    (id) => id !== exclude && !isL0GreetingPhraseId(id),
+    (id) =>
+      id !== exclude
+      && !isL0GreetingPhraseId(id)
+      && !l0IsSimpleVarRecallBlocked(learning, id),
   );
 
   const pickSpaced = (ids: string[]) => {
@@ -529,18 +728,25 @@ export function pickZeroLanguageTarget(
 
   if (!exclude) {
     const lastFunctional =
-      [...L0_BRIDGE_PRIORITY_IDS].reverse().find((id) => isZeroLanguagePhraseAccepted(learning.phrases[id])) ||
+      [...L0_BRIDGE_PRIORITY_IDS].reverse().find(
+        (id) =>
+          isZeroLanguagePhraseAccepted(learning.phrases[id])
+          && !l0IsSimpleVarRecallBlocked(learning, id),
+      ) ||
       [...L0_PRIORITY_IDS].reverse().find(
         (id) => isZeroLanguagePhraseAccepted(learning.phrases[id]) && !isL0GreetingPhraseId(id),
       ) ||
       null;
     if (lastFunctional) {
-      const phrase = pool.find((p) => p.id === lastFunctional) || null;
-      return {
-        conf: learning.phrases[lastFunctional],
-        phrase,
-        action: 'recall',
-      };
+      // Se só restam perguntas/hooks — ok; se nada elegível além de converse:
+      if (l0IsQuestionNodeId(lastFunctional) || !l0IsSimpleVariationId(lastFunctional)) {
+        const phrase = pool.find((p) => p.id === lastFunctional) || null;
+        return {
+          conf: learning.phrases[lastFunctional],
+          phrase,
+          action: 'recall',
+        };
+      }
     }
   }
 
@@ -556,17 +762,14 @@ export function pickZeroLanguageTarget(
 
   // Sem recall funcional → converse situacional (montagem de frases)
   const expandBase =
+    Object.keys(L0_CHUNK_GRAPH).find((id) => isL0ChunkMature(learning, id)) ||
     [...L0_BRIDGE_PRIORITY_IDS, ...L0_PRIORITY_IDS]
       .reverse()
       .find((id) => isZeroLanguagePhraseAccepted(learning.phrases[id]) && !isL0GreetingPhraseId(id)) ||
     exclude ||
     null;
   if (expandBase) {
-    return {
-      conf: learning.phrases[expandBase],
-      phrase: null,
-      action: 'converse',
-    };
+    return resolveConverse(expandBase);
   }
 
   const fallback = pool.find((p) => L0_BRIDGE_PRIORITY_IDS.includes(p.id)) || pool[pool.length - 1] || null;
@@ -601,20 +804,20 @@ export function l0PhrasesForLiveProfile(learning: UserLearningProfile): {
 /** Expansões funcionais curtas a partir do último target conhecido (L0). */
 export function l0FunctionalExpansionsFor(baseGerman: string | null | undefined): string[] {
   const g = (baseGerman || '').toLowerCase();
-  if (/muss/.test(g)) {
-    return ['Ich muss arbeiten.', 'Ich muss gehen.', 'Ich muss...'];
+  if (/brauche|brauchst/.test(g)) {
+    return ['Was brauchst du?', 'Brauchst du Hilfe?', 'Ich brauche...'];
   }
-  if (/möchte|moechte/.test(g)) {
-    return ['Ich möchte Wasser.', 'Ich möchte eine Pause.', 'Ich möchte...'];
+  if (/möchte|moechte|möchtest/.test(g)) {
+    return ['Was möchtest du?', 'Ich möchte Wasser.', 'Ich möchte eine Pause.'];
+  }
+  if (/muss|musst/.test(g)) {
+    return ['Was musst du?', 'Ich muss arbeiten.', 'Ich muss gehen.'];
   }
   if (/kannst du/.test(g)) {
     return ['Kannst du helfen?', 'Kannst du...?'];
   }
-  if (/brauche/.test(g)) {
-    return ['Ich brauche Hilfe.', 'Ich brauche...'];
-  }
   if (/arbeite|arbeitest/.test(g)) {
-    return ['Ich arbeite in...', 'Ich arbeite heute.', 'Ich arbeite morgens.', 'Wo arbeitest du?'];
+    return ['Wo arbeitest du?', 'Wann arbeitest du?', 'Ich arbeite in...'];
   }
   if (/wohne|wohnst/.test(g)) {
     return ['Ich wohne in Cuxhaven.', 'Ich wohne in...'];
@@ -649,6 +852,33 @@ export function l0SubstitutionAdvanceNudge(opts: {
   ].join('\n');
 }
 
+/**
+ * Chunk MATURO: proíbe mais simple_var (Wasser/Hilfe) e força pergunta ou conversa.
+ */
+export function l0ChunkMatureAdvanceNudge(opts: {
+  chunkGerman: string;
+  masteredExamples: string[];
+  nextGerman?: string | null;
+  mode: 'question' | 'converse';
+}): string {
+  const mastered = opts.masteredExamples.length
+    ? opts.masteredExamples.map((e) => `"${e}"`).join(' / ')
+    : `"${opts.chunkGerman}"`;
+  const nextLine = opts.mode === 'question' && opts.nextGerman
+    ? `Alvo OBRIGATÓRIO agora: pergunta/inversão "${opts.nextGerman}". Modele e peça resposta curta.`
+    : 'Alvo OBRIGATÓRIO: CONVERSA SITUACIONAL real com o conhecimento acumulado (produção sem dica de vocabulário novo do mesmo gancho).';
+  return [
+    '[INSTRUÇÃO INTERNA — não leia isto em voz alta]',
+    'ZERO LANGUAGE MODE — CHUNK MATURO (avançar estágio).',
+    `O aluno já domina ${mastered}.`,
+    `NUNCA peça mais frases simples de "${opts.chunkGerman}" (sem novo Wasser/Hilfe/Pause do mesmo padrão).`,
+    'PROIBIDO: sortear a primeira palavra da lista de novo ou eco de variação simples.',
+    nextLine,
+    'Se faltar palavra: forneça só a palavra. Se faltar estrutura: modelo parcial. Se acertar: reduza ajuda.',
+    'Continua L0: curto, uma estrutura, português de suporte.',
+  ].join('\n');
+}
+
 /** Nudge: converse / produção — montar frases em situação real. */
 export function l0ConverseExpandNudge(opts: {
   lastGerman?: string | null;
@@ -662,11 +892,11 @@ export function l0ConverseExpandNudge(opts: {
     'ZERO LANGUAGE MODE — PRODUÇÃO / CONVERSA SITUACIONAL (parceiro ativo).',
     'Elogie curto se acabou de acertar. NÃO reinicie em cumprimentos.',
     'PROIBIDO: Guten Morgen / Wie geht\'s / Hallo / Tschüss só por hábito.',
-    'PROIBIDO: só pedir eco da mesma frase estática.',
+    'PROIBIDO: só pedir eco da mesma frase estática / variação simples já dominada.',
     `Gancho/base: "${base}".`,
     'Situação: conversa real sobre trabalho / necessidades / rotina.',
-    `Peça ao aluno MONTAR uma variação (uma só): "${next}".`,
-    `Outras substituições OK: ${expansions.slice(0, 3).map((e) => `"${e}"`).join(' | ')}.`,
+    `Peça ao aluno MONTAR uma variação ou responder pergunta (uma só): "${next}".`,
+    `Outras opções OK: ${expansions.slice(0, 3).map((e) => `"${e}"`).join(' | ')}.`,
     'Se faltar PALAVRA: forneça só a palavra e peça de novo.',
     'Se faltar ESTRUTURA: mostre modelo parcial (gancho + ...) e peça completar.',
     'Se acertar com facilidade: reduza ajuda no próximo turno.',

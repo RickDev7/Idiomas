@@ -106,7 +106,12 @@ import {
   isL0GreetingPhraseId,
   l0ConverseExpandNudge,
   l0SubstitutionAdvanceNudge,
+  l0ChunkMatureAdvanceNudge,
   l0VariationsForBase,
+  l0ChunkBaseForPhraseId,
+  l0IsQuestionNodeId,
+  isL0ChunkMature,
+  l0MasteredSimpleExamples,
   L0_BRIDGE_A1_SPECS,
   L0_MAX_IMMEDIATE_CORRECT_STREAK,
   L0_MAX_CORRECTION_ATTEMPTS,
@@ -1260,43 +1265,89 @@ export class ConversationOrchestrator {
           this.learning.phrases[phraseId]
             ? (resolvePhrase(phraseId, this.phrases)?.german || this.ctx.targetItem)
             : this.ctx.targetItem;
+        const chunkBase = l0ChunkBaseForPhraseId(phraseId);
+        const chunkMature = chunkBase ? isL0ChunkMature(this.learning, chunkBase) : false;
         const nextBridge = L0_BRIDGE_A1_SPECS.find(
           (s) => !isZeroLanguagePhraseAccepted(this.learning.phrases[s.id]),
         );
         const coreDone = isL0CoreCurriculumComplete(this.learning);
+        const chunkLabel = chunkBase
+          ? (resolvePhrase(chunkBase, this.phrases)?.german
+            || mergeZeroLanguagePhrases(this.phrases).find((p) => p.id === chunkBase)?.german
+            || chunkBase)
+          : lastDe;
+        const mastered = chunkBase
+          ? l0MasteredSimpleExamples(this.learning, chunkBase, this.phrases)
+          : [];
+        const matureNudge = chunkMature
+          ? l0ChunkMatureAdvanceNudge({
+            chunkGerman: chunkLabel || 'Ich brauche...',
+            masteredExamples: mastered,
+            nextGerman: next?.german || nextBridge?.german || null,
+            mode: next && l0IsQuestionNodeId(next.id) ? 'question' : 'converse',
+          })
+          : null;
         return {
           flow: 'continueConversation',
           action: 'converse',
           mode: 'GUIDED_CONVERSATION',
-          reason: coreDone
-            ? 'ZERO_LANGUAGE_MODE — L0_CURRICULUM_COMPLETE; expandir funcional'
-            : 'ZERO_LANGUAGE_MODE — TARGET_STUCK evitado; sem repetição imediata',
+          reason: chunkMature
+            ? 'ZERO_LANGUAGE_MODE — CHUNK_MATURE → pergunta/conversa'
+            : coreDone
+              ? 'ZERO_LANGUAGE_MODE — L0_CURRICULUM_COMPLETE; expandir funcional'
+              : 'ZERO_LANGUAGE_MODE — TARGET_STUCK evitado; sem repetição imediata',
           targetItem: next?.german ?? nextBridge?.german ?? this.ctx.targetItem,
-          geminiNudge: coreDone
-            ? l0ConverseExpandNudge({
-              lastGerman: lastDe,
-              nextBridgeGerman: nextBridge?.german || next?.german || null,
-            })
-            : [
-              '[INSTRUÇÃO INTERNA — não leia isto em voz alta]',
-              'ZERO LANGUAGE MODE — frase ACEITA. Elogie curto ("Perfeito!").',
-              'PROIBIDO: pedir a MESMA frase de novo ("fale de novo para fixar").',
-              'PROIBIDO: repetição imediata / drill da frase que acabou de acertar.',
-              'PROIBIDO: voltar a Guten Morgen / Wie geht\'s se já aceitos nesta sessão.',
-              next && next.id !== phraseId && !isL0GreetingPhraseId(next.id)
-                ? `Avance: Nova frase-alvo ÚNICA "${next.german}". Ciclo PT→modelo→repita→AGUARDE.`
-                : 'Continue com a PRÓXIMA estrutura do currículo (não greetings).',
-            ].join('\n'),
+          geminiNudge: matureNudge
+            || (coreDone
+              ? l0ConverseExpandNudge({
+                lastGerman: lastDe,
+                nextBridgeGerman: nextBridge?.german || next?.german || null,
+              })
+              : [
+                '[INSTRUÇÃO INTERNA — não leia isto em voz alta]',
+                'ZERO LANGUAGE MODE — frase ACEITA. Elogie curto ("Perfeito!").',
+                'PROIBIDO: pedir a MESMA frase de novo ("fale de novo para fixar").',
+                'PROIBIDO: repetição imediata / drill da frase que acabou de acertar.',
+                'PROIBIDO: voltar a Guten Morgen / Wie geht\'s se já aceitos nesta sessão.',
+                next && next.id !== phraseId && !isL0GreetingPhraseId(next.id)
+                  ? `Avance: Nova frase-alvo ÚNICA "${next.german}". Ciclo PT→modelo→repita→AGUARDE.`
+                  : 'Continue com a PRÓXIMA estrutura do currículo (não greetings).',
+              ].join('\n')),
           eventsRecorded: [],
         };
       }
 
       const acceptedDe = resolvePhrase(phraseId, this.phrases)?.german || phraseId;
+      const chunkBase = l0ChunkBaseForPhraseId(phraseId);
+      const chunkMature = chunkBase ? isL0ChunkMature(this.learning, chunkBase) : false;
       const isVariationNext =
         l0VariationsForBase(phraseId).includes(next.id) ||
+        (chunkBase ? l0VariationsForBase(chunkBase).includes(next.id) : false) ||
         next.id.startsWith('l0-bridge-') ||
         next.id.startsWith('l0-var-') ||
         next.id.startsWith('l0-hook-');
+      const isQuestionNext = l0IsQuestionNodeId(next.id);
+      if (chunkMature && isQuestionNext) {
+        const chunkLabel =
+          resolvePhrase(chunkBase!, this.phrases)?.german
+          || mergeZeroLanguagePhrases(this.phrases).find((p) => p.id === chunkBase)?.german
+          || chunkBase!
+          || 'Ich brauche...';
+        return {
+          flow: 'continueConversation',
+          action: (this.learning.phrases[next.id]?.timesCorrect ?? 0) === 0 ? 'introduce' : 'practice',
+          mode: 'GUIDED_CONVERSATION',
+          reason: 'ZERO_LANGUAGE_MODE — CHUNK_MATURE → pergunta/conversa',
+          targetItem: next.german,
+          geminiNudge: l0ChunkMatureAdvanceNudge({
+            chunkGerman: chunkLabel,
+            masteredExamples: l0MasteredSimpleExamples(this.learning, chunkBase!, this.phrases),
+            nextGerman: next.german,
+            mode: 'question',
+          }),
+          eventsRecorded: [],
+        };
+      }
       return {
         flow: 'continueConversation',
         action: this.plan.action === 'recall' ? 'recall' : (this.learning.phrases[next.id]?.timesCorrect ?? 0) === 0 ? 'introduce' : 'practice',

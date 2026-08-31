@@ -1,56 +1,54 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type CSSProperties } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { BottomNav } from '@/components/layout/BottomNav';
-import { AppHeader, SectionLabel, PageTitle, PageSubtitle } from '@/components/ui/PageHeader';
-import { EmptyState, SkeletonBlock } from '@/components/ui/EmptyState';
-import { IconCheck, IconPlay, IconChat, IconRefresh, IconBolt, IconSparkle, IconBrain } from '@/components/ui/Icons';
 import {
-  REVIEW_TYPE_COLORS,
-  REVIEW_TYPE_LABELS,
-  type ReviewQueueItem,
-  type ReviewType,
-} from '@/services/learning/ReviewEngine';
+  IconBack,
+  IconBolt,
+  IconCheck,
+  IconHelp,
+  IconPlay,
+  IconPuzzle,
+} from '@/components/ui/Icons';
 import { getDueReviews } from '@/services/learning/ReviewRepository';
+import type { ReviewQueueItem } from '@/services/learning/ReviewEngine';
+import { useProfile } from '@/hooks/useProfile';
+import { MemoryService } from '@/services/learning/MemoryService';
+import { computeProgress } from '@/services/learning/ProgressEngine';
 
-const TYPE_ICONS: Partial<Record<ReviewType, React.ReactNode>> = {
-  RECOGNITION_REVIEW: <IconChat size={20} />,
-  RECALL_REVIEW: <IconBrain size={20} />,
-  GUIDED_SPEAKING_REVIEW: <IconBolt size={20} />,
-  INDEPENDENT_SPEAKING_REVIEW: <IconRefresh size={20} />,
-  TRANSFER_REVIEW: <IconRefresh size={20} />,
-  SPONTANEOUS_REVIEW: <IconSparkle size={18} />,
-  MAINTENANCE_REVIEW: <IconCheck size={20} />,
+const GLASS: CSSProperties = {
+  background: 'rgba(15, 23, 42, 0.65)',
+  border: '1px solid rgba(255, 255, 255, 0.08)',
+  backdropFilter: 'blur(16px)',
+  WebkitBackdropFilter: 'blur(16px)',
 };
+
+const SLOT_OPTIONS = [
+  { id: 'wasser', de: 'Wasser.', pt: 'Água.', color: '#38bdf8', bg: 'rgba(56,189,248,0.16)', emoji: '💧' },
+  { id: 'arbeiten', de: 'arbeiten.', pt: 'trabalhar.', color: '#10B981', bg: 'rgba(16,185,129,0.14)', emoji: '💼' },
+  { id: 'hause', de: 'nach Hause.', pt: 'para casa.', color: '#FF512F', bg: 'rgba(255,81,47,0.14)', emoji: '🏠' },
+] as const;
 
 export function ReviewPage() {
   const navigate = useNavigate();
+  const { profile } = useProfile();
   const [queue, setQueue] = useState<ReviewQueueItem[]>([]);
-  const [loaded, setLoaded] = useState(false);
-  const [error, setError] = useState(false);
+  const [selected, setSelected] = useState<string | null>(null);
+  const [automation, setAutomation] = useState(68);
+  const hits = [true, true, true, true, true, true, false, false];
 
   useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const items = await getDueReviews(12);
-        if (!cancelled) setQueue(items);
-      } catch {
-        if (!cancelled) {
-          setQueue([]);
-          setError(true);
-        }
-      } finally {
-        if (!cancelled) setLoaded(true);
-      }
-    })();
-    return () => { cancelled = true; };
+    getDueReviews(12).then(setQueue).catch(() => setQueue([]));
   }, []);
 
-  const empty = loaded && queue.length === 0 && !error;
-  const count = queue.length;
+  useEffect(() => {
+    if (!profile) return;
+    MemoryService.loadProfile(profile)
+      .then((learning) => setAutomation(Math.round(computeProgress(learning).automationScore || 68)))
+      .catch(() => {});
+  }, [profile]);
 
-  const startReview = (item?: ReviewQueueItem) => {
-    const first = item ?? queue[0];
+  const startReview = () => {
+    const first = queue[0];
     navigate(
       first
         ? `/sessao?type=review&phrase=${encodeURIComponent(first.phraseId)}&mode=${first.reviewType}`
@@ -58,171 +56,197 @@ export function ReviewPage() {
     );
   };
 
+  const filled = SLOT_OPTIONS.find((o) => o.id === selected);
+
   return (
-    <div className="flex flex-col h-full bg-background max-w-md mx-auto">
-      <AppHeader />
-      <main className="flex-1 overflow-y-auto scrollbar-hide px-5 pt-4 pb-28 flex flex-col">
-        <SectionLabel tone="pink">Revisar</SectionLabel>
-        <div className="flex items-center gap-2 mt-1.5">
-          <PageTitle>
-            {!loaded ? 'Revisão' : empty ? 'Você está em dia!' : error ? 'Não foi possível carregar' : 'Revisão de hoje'}
-          </PageTitle>
-          {loaded && empty && <IconCheck size={26} className="text-success shrink-0" aria-hidden />}
-          {loaded && !empty && !error && <IconSparkle size={18} className="text-primary shrink-0" aria-hidden />}
+    <div className="flex flex-col h-full max-w-md mx-auto" style={{ background: '#070A12' }}>
+      <header className="px-5 pt-4 safe-top shrink-0 flex items-center gap-3">
+        <button
+          type="button"
+          onClick={() => navigate(-1)}
+          aria-label="Voltar"
+          className="w-10 h-10 rounded-full flex items-center justify-center text-white shrink-0"
+          style={GLASS}
+        >
+          <IconBack size={18} />
+        </button>
+        <div className="min-w-0 flex-1">
+          <h1 className="text-[17px] font-bold text-white leading-tight font-[family-name:var(--font-display)]">
+            REVISÃO
+          </h1>
+          <p className="text-[12px] text-[#94A3B8] mt-0.5 truncate">Consolide suas estruturas</p>
         </div>
-        <PageSubtitle>
-          {!loaded
-            ? 'Carregando fila de revisão…'
-            : empty
-              ? 'Ótimo trabalho! Não há nada para revisar agora.'
-              : error
-                ? 'Tente de novo em instantes. Sua memória continua salva.'
-                : `Seu professor encontrou ${count} ${count === 1 ? 'item' : 'itens'} com base na memória, retenção e automação.`}
-        </PageSubtitle>
+        <button
+          type="button"
+          aria-label="Informações"
+          className="w-10 h-10 rounded-full flex items-center justify-center text-[#94A3B8] shrink-0"
+          style={GLASS}
+        >
+          <IconHelp size={18} />
+        </button>
+      </header>
 
-        {!loaded ? (
-          <div className="mt-8 space-y-3" aria-busy="true" aria-label="Carregando revisões">
-            <SkeletonBlock className="h-20" />
-            <SkeletonBlock className="h-20" />
-            <SkeletonBlock className="h-20" />
+      <main className="flex-1 overflow-y-auto scrollbar-hide px-5 pt-5 pb-28">
+        <div className="rounded-[24px] p-5 flex items-center gap-4" style={GLASS}>
+          <div className="min-w-0 flex-1">
+            <p className="text-[11px] uppercase tracking-[0.14em] font-semibold text-[#64748b] mb-1.5">
+              Estrutura atual
+            </p>
+            <p className="text-[28px] font-bold text-white leading-tight font-[family-name:var(--font-display)]">
+              Ich möchte...
+            </p>
+            <p className="text-[14px] text-[#94A3B8] mt-1">Quero...</p>
           </div>
-        ) : empty ? (
-          <EmptyState
-            imageSrc="/assets/review-brain.png"
-            imageAlt=""
-            footer={
-              <div
-                className="w-full rounded-[24px] p-4 flex items-start gap-3.5"
-                style={{
-                  background: 'linear-gradient(135deg, rgba(139,92,246,0.18) 0%, var(--surface) 100%)',
-                  border: '1px solid var(--border)',
-                  boxShadow: 'var(--shadow-sm)',
-                }}
-              >
-                <span
-                  className="shrink-0 w-11 h-11 rounded-full flex items-center justify-center"
-                  style={{ background: 'rgba(139,92,246,0.22)', color: '#c4b5fd' }}
-                >
-                  <IconSparkle size={18} />
-                </span>
-                <p className="text-secondary text-text leading-snug pt-0.5">
-                  Continue assim! A revisão diária fortalece sua memória e acelera sua evolução.
-                </p>
-              </div>
-            }
-          />
-        ) : error ? (
-          <div className="flex-1 flex flex-col items-center justify-center gap-4 text-center">
-            <p className="text-secondary text-text-muted">A fila de revisão não carregou.</p>
-            <button
-              type="button"
-              onClick={() => window.location.reload()}
-              className="min-h-11 px-5 rounded-full dt-glass text-body font-semibold"
+          <span
+            className="shrink-0 w-[72px] h-[72px] rounded-2xl flex items-center justify-center text-white"
+            style={{
+              background: 'linear-gradient(145deg, #A855F7 0%, #8B5CF6 50%, #DD2476 100%)',
+              boxShadow: '0 0 36px rgba(139,92,246,0.75), 0 0 18px rgba(221,36,118,0.4)',
+            }}
+            aria-hidden
+          >
+            <IconPuzzle size={34} />
+          </span>
+        </div>
+
+        <section className="mt-6">
+          <p className="text-[11px] uppercase tracking-[0.16em] font-semibold text-[#64748b] mb-3">
+            Monte suas frases
+          </p>
+          <div
+            className="rounded-[20px] px-4 py-5 flex items-center justify-center gap-2.5 flex-wrap"
+            style={GLASS}
+          >
+            <span
+              className="px-3.5 py-2.5 rounded-xl text-[16px] font-bold text-white"
+              style={{ background: 'rgba(15,23,42,0.95)', border: '1px solid rgba(255,255,255,0.12)' }}
             >
-              Tentar de novo
-            </button>
+              Ich möchte
+            </span>
+            <span
+              className="min-w-[112px] px-4 py-2.5 rounded-xl border-2 border-dashed text-center text-[14px] font-semibold"
+              style={
+                filled
+                  ? { borderColor: `${filled.color}66`, background: filled.bg, color: filled.color }
+                  : {
+                      borderColor: 'rgba(148,163,184,0.5)',
+                      background: 'rgba(100,116,139,0.18)',
+                      color: '#64748b',
+                    }
+              }
+            >
+              {filled ? filled.de : '[ ... ]'}
+            </span>
           </div>
-        ) : (
-          <>
-            <div className="mt-6 space-y-3.5">
-              {queue.map((item, idx) => {
-                const color = REVIEW_TYPE_COLORS[item.reviewType];
-                const badge = REVIEW_TYPE_LABELS[item.reviewType];
-                return (
-                  <ReviewCard
-                    key={item.phraseId}
-                    color={color}
-                    icon={TYPE_ICONS[item.reviewType] ?? <IconChat size={20} />}
-                    badge={badge}
-                    german={item.german || item.phraseId}
-                    portuguese={item.portuguese || item.reason}
-                    hint={item.reason}
-                    delayMs={idx * 70}
-                    onClick={() => startReview(item)}
-                  />
-                );
-              })}
-            </div>
 
-            <div className="mt-auto pt-7">
-              <button
-                type="button"
-                onClick={() => startReview()}
-                className="w-full min-h-14 rounded-[24px] text-white text-base font-semibold active:scale-[0.98] transition-transform inline-flex items-center justify-center gap-2.5"
-                style={{
-                  background: 'linear-gradient(180deg, #8b5cf6 0%, #7c3aed 100%)',
-                  boxShadow: 'var(--shadow-glow-purple)',
-                }}
-              >
-                <IconPlay size={20} /> Começar revisão
-              </button>
-              <p className="text-caption text-text-faint mt-3 text-center">
-                Prioridade: o que você sabe mas ainda não automatizou.
+          <div className="mt-3.5 grid grid-cols-3 gap-2.5">
+            {SLOT_OPTIONS.map((opt) => {
+              const active = selected === opt.id;
+              return (
+                <button
+                  key={opt.id}
+                  type="button"
+                  onClick={() => setSelected(opt.id)}
+                  className="rounded-[20px] p-3 min-h-[112px] flex flex-col items-center justify-center gap-1.5 active:scale-[0.97] transition-transform"
+                  style={{
+                    background: opt.bg,
+                    border: active ? `1px solid ${opt.color}99` : `1px solid ${opt.color}33`,
+                    boxShadow: active ? `0 0 20px ${opt.color}55` : `0 0 10px ${opt.color}22`,
+                  }}
+                >
+                  <span className="text-[22px] leading-none" aria-hidden>
+                    {opt.emoji}
+                  </span>
+                  <span className="text-[12px] font-bold text-white text-center leading-tight">{opt.de}</span>
+                  <span className="text-[10px] font-medium text-center leading-tight" style={{ color: opt.color }}>
+                    {opt.pt}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </section>
+
+        <section className="mt-6 rounded-[22px] p-4" style={GLASS}>
+          <div className="flex items-center gap-3 mb-3">
+            <span
+              className="w-9 h-9 rounded-full flex items-center justify-center"
+              style={{
+                background: 'rgba(255,81,47,0.2)',
+                color: '#FF512F',
+                boxShadow: '0 0 14px rgba(255,81,47,0.35)',
+              }}
+            >
+              <IconBolt size={18} />
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="text-[11px] uppercase tracking-[0.12em] font-semibold text-[#64748b]">
+                Nível de automatização
+              </p>
+              <p className="text-[15px] font-bold text-white mt-0.5">
+                {automation}% <span className="text-[13px] font-semibold text-[#FBBF24]">Muito bom!</span>
               </p>
             </div>
-          </>
-        )}
+          </div>
+          <div className="h-3 rounded-full bg-white/10 overflow-hidden">
+            <div
+              className="h-full rounded-full"
+              style={{
+                width: `${Math.min(100, automation)}%`,
+                background: 'linear-gradient(90deg, #FBBF24 0%, #FF512F 55%, #DD2476 100%)',
+                boxShadow: '0 0 14px rgba(255,81,47,0.55)',
+              }}
+            />
+          </div>
+          <p className="text-[12px] text-[#94A3B8] mt-3 leading-snug">
+            Continue praticando para ficar automático!
+          </p>
+        </section>
+
+        <section className="mt-6">
+          <p className="text-[11px] uppercase tracking-[0.16em] font-semibold text-[#64748b] mb-3">
+            Histórico de acertos
+          </p>
+          <div className="flex items-center gap-2.5 overflow-x-auto scrollbar-hide py-1">
+            {hits.map((hit, i) => (
+              <span
+                key={i}
+                className="shrink-0 w-10 h-10 rounded-full flex items-center justify-center"
+                style={
+                  hit
+                    ? {
+                        background: 'rgba(16,185,129,0.22)',
+                        border: '1px solid rgba(16,185,129,0.55)',
+                        color: '#10B981',
+                        boxShadow: '0 0 12px rgba(16,185,129,0.35)',
+                      }
+                    : {
+                        background: 'transparent',
+                        border: '1.5px solid rgba(255,255,255,0.14)',
+                        color: '#64748b',
+                      }
+                }
+                aria-label={hit ? 'Acerto' : 'Pendente'}
+              >
+                {hit ? <IconCheck size={18} /> : null}
+              </span>
+            ))}
+          </div>
+        </section>
+
+        <button
+          type="button"
+          onClick={startReview}
+          className="mt-7 w-full min-h-14 rounded-[24px] text-white text-[15px] font-semibold active:scale-[0.98] transition-transform inline-flex items-center justify-center gap-2.5"
+          style={{
+            background: 'linear-gradient(180deg, #A855F7 0%, #8B5CF6 100%)',
+            boxShadow: '0 0 28px rgba(139,92,246,0.5)',
+          }}
+        >
+          <IconPlay size={20} /> {queue.length > 0 ? `Revisar ${queue.length} itens` : 'Praticar em voz'}
+        </button>
       </main>
       <BottomNav />
     </div>
-  );
-}
-
-function ReviewCard({
-  color, icon, badge, german, portuguese, hint, delayMs, onClick,
-}: {
-  color: string;
-  icon: React.ReactNode;
-  badge: string;
-  german: string;
-  portuguese?: string;
-  hint?: string;
-  delayMs: number;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-label={`Revisar: ${german}`}
-      className="w-full flex items-center gap-3.5 p-4 rounded-[24px] dt-glass hover:border-primary/30 active:scale-[0.99] transition-all text-left animate-fade-in min-h-11"
-      style={{ animationDelay: `${delayMs}ms` }}
-    >
-      <span
-        className="shrink-0 w-11 h-11 rounded-[14px] flex items-center justify-center text-white shadow-sm"
-        style={{ background: color }}
-        aria-hidden
-      >
-        {icon}
-      </span>
-      <span className="min-w-0 flex-1">
-        <span
-          className="block text-body font-semibold text-text leading-snug"
-          style={{ overflowWrap: 'anywhere', wordBreak: 'break-word' }}
-        >
-          {german}
-        </span>
-        {portuguese && (
-          <span
-            className="block text-secondary text-text-muted mt-0.5 leading-snug"
-            style={{ overflowWrap: 'anywhere', wordBreak: 'break-word' }}
-          >
-            {portuguese}
-          </span>
-        )}
-        <span className="flex flex-wrap items-center gap-1.5 mt-2">
-          <span
-            className="inline-flex items-center px-2.5 py-0.5 rounded-full text-caption font-semibold"
-            style={{ background: `${color}22`, color }}
-          >
-            {badge}
-          </span>
-          {hint && hint !== portuguese && (
-            <span className="text-caption text-text-faint leading-snug">{hint}</span>
-          )}
-        </span>
-      </span>
-      <span className="shrink-0 text-text-faint" aria-hidden>›</span>
-    </button>
   );
 }

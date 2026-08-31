@@ -152,3 +152,18 @@ export const IconHelp = (p: IconProps) => (
 export const IconWave = (p: IconProps) => (
   <svg {...base(p)}><path d="M4 12v0M8 8v8M12 5v14M16 8v8M20 12v0" /></svg>
 );
+export const IconBell = (p: IconProps) => (
+  <svg {...base(p)}><path d="M6 16V10a6 6 0 1 1 12 0v6" /><path d="M5 16h14" /><path d="M10 19a2 2 0 0 0 4 0" /></svg>
+);
+export const IconPuzzle = (p: IconProps) => (
+  <svg {...base(p)}><path d="M10 4a2 2 0 0 1 4 0v1h2.5A1.5 1.5 0 0 1 18 6.5V9h1a2 2 0 1 1 0 4h-1v2.5a1.5 1.5 0 0 1-1.5 1.5H14v1a2 2 0 1 1-4 0v-1H7.5A1.5 1.5 0 0 1 6 15.5V13H5a2 2 0 1 1 0-4h1V6.5A1.5 1.5 0 0 1 7.5 5H10V4Z" /></svg>
+);
+export const IconCube = (p: IconProps) => (
+  <svg {...base(p)}><path d="M12 3 4 7.5v9L12 21l8-4.5v-9L12 3Z" /><path d="M12 12 4 7.5M12 12l8-4.5M12 12v9" /></svg>
+);
+export const IconDrop = (p: IconProps) => (
+  <svg {...base(p)}><path d="M12 3c3.5 5 6 8 6 11a6 6 0 1 1-12 0c0-3 2.5-6 6-11Z" /></svg>
+);
+export const IconHeadset = (p: IconProps) => (
+  <svg {...base(p)}><path d="M4 13a8 8 0 0 1 16 0" /><path d="M4 13v3a2 2 0 0 0 2 2h1v-7H6a2 2 0 0 0-2 2Z" /><path d="M20 13v3a2 2 0 0 1-2 2h-1v-7h1a2 2 0 0 1 2 2Z" /></svg>
+);

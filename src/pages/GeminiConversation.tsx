@@ -280,9 +280,9 @@ export function GeminiConversation({ profile, onFinish }: { profile: UserProfile
   const sequenceIndex = Math.max(0, Math.min(3, (live.userTurns || 0) % 4));
 
   const actions = [
-    { icon: <IconRefresh size={18} />, label: 'Repetir', sub: 'Ouvir de novo', color: '#3b82f6', onClick: replayTeacher },
-    { icon: <IconLightbulb size={18} />, label: 'Ajuda', sub: 'Preciso de ajuda', color: '#fbbf24', onClick: askHelp },
-    { icon: <IconTurtle size={18} />, label: 'Devagar', sub: 'Falar mais devagar', color: '#10b981', onClick: askSlow },
+    { icon: <IconRefresh size={18} />, label: 'Repetir', sub: 'Ouvir de novo', color: '#00F2FE', onClick: replayTeacher },
+    { icon: <IconLightbulb size={18} />, label: 'Ajuda', sub: 'Preciso de ajuda', color: '#FBBF24', onClick: askHelp },
+    { icon: <IconTurtle size={18} />, label: 'Devagar', sub: 'Falar mais devagar', color: '#34D399', onClick: askSlow },
   ];
 
   const abandon = () => {
@@ -300,20 +300,24 @@ export function GeminiConversation({ profile, onFinish }: { profile: UserProfile
   const showUserCard = !!live.userText && responseStatus !== 'none';
 
   return (
-    <div className="flex flex-col h-full bg-background max-w-md mx-auto overflow-hidden">
+    <div className="flex flex-col h-full max-w-md mx-auto overflow-hidden" style={{ background: '#0B0F19' }}>
       <header
         className="flex items-center justify-between gap-2 px-3 pb-2 shrink-0"
         style={{ paddingTop: 'calc(0.75rem + env(safe-area-inset-top, 0px))' }}
       >
-        <IconButton label="Voltar" className="min-h-11 min-w-11" onClick={abandon}>
+        <IconButton label="Voltar" className="min-h-11 min-w-11 text-white/80" onClick={abandon}>
           <IconBack size={20} />
         </IconButton>
         <SessionProgress current={progressCurrent} total={live.targetTurns} />
         <button
           type="button"
           onClick={finish}
-          className="inline-flex items-center gap-1.5 min-h-10 px-3 rounded-full text-[13px] font-semibold transition-colors"
-          style={{ background: 'var(--hangup-bg)', color: 'var(--hangup-fg)', border: '1px solid var(--hangup-border)' }}
+          className="inline-flex items-center gap-1.5 min-h-10 px-3 rounded-full text-[13px] font-semibold transition-colors text-white"
+          style={{
+            background: 'linear-gradient(135deg, rgba(239,68,68,0.35), rgba(185,28,28,0.55))',
+            border: '1px solid rgba(248,113,113,0.35)',
+            boxShadow: '0 4px 16px rgba(239,68,68,0.2)',
+          }}
         >
           <IconHangup size={14} /> Encerrar
         </button>
