@@ -2,25 +2,16 @@ import type { SpeechSpeed, VoiceServiceInterface } from '@/services/voice/VoiceS
 import { GeminiLiveService, type LiveProfile, type LiveSessionState } from '@/services/ai/GeminiLiveService';
 import {
   MIC_PCM_RATE,
-  PLAYBACK_PCM_RATE,
-  MAX_PLAYBACK_QUEUE_CHUNKS,
-  MAX_PLAYBACK_LAG_MS,
   MIC_CONSTRAINTS,
   createOrResumeAudioContext,
-  createPlaybackAudioContext,
   resumeAudioContextIfNeeded,
-  applyChunkFade,
-  parsePcmSampleRate,
-  playbackScheduleLagMs,
-  pcmToAudioBuffer,
   resampleLinearPcm,
-  type QueuedPcmChunk,
 } from '@/services/voice/AudioPipeline';
 import {
   registerGeminiPlaybackStop,
   stopAllAudio,
-  stopBrowserAudio,
 } from '@/services/voice/AudioPlayback';
+import { GeminiPcmPlayer } from '@/services/voice/GeminiPcmPlayer';
 
 const DEV = typeof import.meta !== 'undefined' && !!(import.meta as { env?: { DEV?: boolean } }).env?.DEV;
 
@@ -42,10 +33,6 @@ function floatTo16BitPCM(float32: Float32Array): ArrayBuffer {
   return buffer;
 }
 
-function resampleLinear(input: Float32Array, origRate: number, destRate: number): Float32Array {
-  return resampleLinearPcm(input, origRate, destRate);
-}
-
 function arrayBufferToBase64(buffer: ArrayBuffer): string {
   let binary = '';
   const bytes = new Uint8Array(buffer);
@@ -64,11 +51,6 @@ function base64ToArrayBuffer(base64: string): ArrayBuffer {
   return bytes.buffer;
 }
 
-type ActivePlaybackNode = {
-  source: AudioBufferSourceNode;
-  gain: GainNode;
-};
-
 export interface GeminiVoiceHandlers {
   onStateChange?: (state: LiveSessionState) => void;
   onTranscript?: (role: 'user' | 'assistant', text: string, meta?: { delta?: string; complete?: boolean }) => void;
@@ -81,8 +63,8 @@ export interface GeminiVoiceHandlers {
 
 export class GeminiVoiceService implements VoiceServiceInterface {
   private live: GeminiLiveService;
+  private pcmPlayer = new GeminiPcmPlayer();
   private micContext: AudioContext | null = null;
-  private playbackContext: AudioContext | null = null;
   private mediaStream: MediaStream | null = null;
   private sourceNode: MediaStreamAudioSourceNode | null = null;
   private processorNode: ScriptProcessorNode | null = null;
@@ -90,21 +72,14 @@ export class GeminiVoiceService implements VoiceServiceInterface {
   private listening = false;
   private micAcquired = false;
   private speaking = false;
-  private playbackQueue: QueuedPcmChunk[] = [];
-  private playing = false;
   private handlers: GeminiVoiceHandlers;
   private preferredDeviceId: string | null = null;
   private micState: MicCaptureState = 'IDLE';
   private chunksSent = 0;
   private bytesSent = 0;
-  private nextStartTime = 0;
-  private activeNodes: ActivePlaybackNode[] = [];
-  private lastPacketAt = 0;
   private visibilityHandler: (() => void) | null = null;
   private backgroundSuspended = false;
   private unregisterGeminiStop: (() => void) | null = null;
-
-  private lastPacketMime: string | undefined;
 
   setMicDeviceId(id: string | null): void {
     this.preferredDeviceId = id;
@@ -112,13 +87,16 @@ export class GeminiVoiceService implements VoiceServiceInterface {
 
   constructor(profile: LiveProfile, handlers: GeminiVoiceHandlers, backendUrl?: string) {
     this.handlers = handlers;
+    this.pcmPlayer.setOnSpeakingChange((s) => {
+      this.speaking = s;
+    });
     this.live = new GeminiLiveService(
       profile,
       {
         onStateChange: (s) => {
           this.handlers.onStateChange?.(s);
         },
-        onAudio: (b64, mime) => this.enqueueAudio(base64ToArrayBuffer(b64), mime),
+        onAudio: (b64, mime) => this.pcmPlayer.enqueue(base64ToArrayBuffer(b64), mime),
         onTranscript: (role, text, meta) => {
           if (role === 'assistant') this.speaking = true;
           this.handlers.onTranscript?.(role, text, meta);
@@ -136,7 +114,7 @@ export class GeminiVoiceService implements VoiceServiceInterface {
       },
       backendUrl,
     );
-    this.unregisterGeminiStop = registerGeminiPlaybackStop(() => this.flushPlaybackQueue('stop_all'));
+    this.unregisterGeminiStop = registerGeminiPlaybackStop(() => this.pcmPlayer.stop());
     this.bindVisibilityHandling();
   }
 
@@ -170,20 +148,16 @@ export class GeminiVoiceService implements VoiceServiceInterface {
   }
 
   isSpeaking(): boolean {
-    return this.speaking;
+    return this.speaking || this.pcmPlayer.isSpeaking();
   }
 
-  /** Pré-aquece AudioContext de saída (24 kHz) no gesto do usuário — evita chipmunk no PWA. */
+  /** Destrói e recria AudioContext de saída — exclusivo no gesto do usuário. */
   async preparePlaybackOnGesture(): Promise<void> {
-    this.playbackContext = await createPlaybackAudioContext(this.playbackContext);
-    if (DEV) {
-      console.log('[VOICE OUTPUT] prepared playback ctx sampleRate =', this.playbackContext.sampleRate);
-    }
+    await this.pcmPlayer.initOnUserGesture();
   }
 
   async connect(): Promise<void> {
     stopAllAudio();
-    this.flushPlaybackQueue('pre_connect');
     await this.live.connect();
   }
 
@@ -191,7 +165,6 @@ export class GeminiVoiceService implements VoiceServiceInterface {
     return this.live.getState();
   }
 
-  /** Recebe AudioContext + MediaStream já abertos no user gesture (Fase 1A). */
   attachAcquiredMic(ctx: AudioContext, stream: MediaStream): void {
     this.micContext = ctx;
     this.mediaStream = stream;
@@ -201,10 +174,6 @@ export class GeminiVoiceService implements VoiceServiceInterface {
     this.setMicState('IDLE');
   }
 
-  /**
-   * Fase 1A — adquirir mic + AudioContext DENTRO do user gesture,
-   * antes de awaits longos (token/WS). Não começa a enviar PCM ainda.
-   */
   async acquireMic(): Promise<void> {
     if (this.micAcquired && this.mediaStream) {
       const track = this.mediaStream.getAudioTracks()[0];
@@ -225,13 +194,8 @@ export class GeminiVoiceService implements VoiceServiceInterface {
       }
 
       const label = track.label || 'dispositivo sem nome';
-      const settings = track.getSettings();
       if (DEV) {
-        console.log('[VOICE INPUT] stream active =', this.mediaStream.active);
-        console.log('[VOICE INPUT] track active =', track.enabled, 'readyState =', track.readyState);
         console.log('[VOICE INPUT] AudioContext sampleRate =', this.micContext.sampleRate);
-        console.log('[VOICE INPUT] channels = 1 (target PCM 16kHz mono 16-bit)');
-        console.log('[mic] dispositivo:', label, settings);
       }
       this.handlers.onMicDevice?.(label);
       this.micAcquired = true;
@@ -245,7 +209,6 @@ export class GeminiVoiceService implements VoiceServiceInterface {
     }
   }
 
-  /** Liga o ScriptProcessor e começa a enviar PCM 16 kHz ao Gemini. */
   beginSending(): void {
     if (this.listening) return;
     if (!this.micContext || !this.mediaStream) {
@@ -277,13 +240,10 @@ export class GeminiVoiceService implements VoiceServiceInterface {
         levelEmit = now;
         this.handlers.onMicLevel?.(Math.min(1, rms * 4));
       }
-      const resampled = resampleLinear(input, nativeRate, MIC_PCM_RATE);
+      const resampled = resampleLinearPcm(input, nativeRate, MIC_PCM_RATE);
       const pcm = floatTo16BitPCM(resampled);
       this.chunksSent += 1;
       this.bytesSent += pcm.byteLength;
-      if (DEV && (this.chunksSent === 1 || this.chunksSent === 10 || this.chunksSent % 50 === 0)) {
-        console.log('[VOICE INPUT] chunkBytes =', pcm.byteLength, 'chunks =', this.chunksSent, 'bytesTotal =', this.bytesSent, 'rms =', rms.toFixed(4));
-      }
       const b64 = arrayBufferToBase64(pcm);
       void this.live.sendAudio(b64);
     };
@@ -293,7 +253,6 @@ export class GeminiVoiceService implements VoiceServiceInterface {
     this.silentGain.connect(this.micContext.destination);
     this.listening = true;
     this.setMicState('LISTENING');
-    if (DEV) console.log('[VOICE INPUT] LISTENING — PCM 16kHz mono → Gemini');
   }
 
   async startMic(): Promise<void> {
@@ -318,15 +277,12 @@ export class GeminiVoiceService implements VoiceServiceInterface {
     this.mediaStream = null;
     this.micAcquired = false;
     this.setMicState('IDLE');
-    if (DEV) console.log('[VOICE INPUT] STOPPED chunks=', this.chunksSent, 'bytes=', this.bytesSent);
   }
 
   listen(): Promise<string> {
     return new Promise((resolve) => {
       const handler = (role: 'user' | 'assistant', text: string) => {
-        if (role === 'user' && text) {
-          resolve(text);
-        }
+        if (role === 'user' && text) resolve(text);
       };
       const prev = this.handlers.onTranscript;
       this.handlers.onTranscript = (r, t) => {
@@ -356,13 +312,13 @@ export class GeminiVoiceService implements VoiceServiceInterface {
 
   stopSpeaking(): void {
     this.live.interrupt();
-    this.flushPlaybackQueue('stop_speaking');
+    this.pcmPlayer.stop();
     this.speaking = false;
   }
 
   interrupt(): void {
     this.live.interrupt();
-    this.flushPlaybackQueue('interrupt');
+    this.pcmPlayer.stop();
     this.speaking = false;
   }
 
@@ -371,12 +327,11 @@ export class GeminiVoiceService implements VoiceServiceInterface {
     this.unregisterGeminiStop = null;
     this.unbindVisibilityHandling();
     this.stopMic();
-    this.flushPlaybackQueue('disconnect');
+    this.pcmPlayer.stop();
     this.live.disconnect();
     void this.micContext?.close();
-    void this.playbackContext?.close();
+    void this.pcmPlayer.destroyContext();
     this.micContext = null;
-    this.playbackContext = null;
   }
 
   private bindVisibilityHandling(): void {
@@ -399,137 +354,17 @@ export class GeminiVoiceService implements VoiceServiceInterface {
   }
 
   private handleTabHidden(): void {
-    this.flushPlaybackQueue('tab_hidden');
+    this.pcmPlayer.stop();
     this.speaking = false;
     this.backgroundSuspended = true;
     void this.micContext?.suspend();
-    void this.playbackContext?.suspend();
+    void this.pcmPlayer.suspend();
   }
 
   private async handleTabVisible(): Promise<void> {
     if (!this.backgroundSuspended) return;
     this.backgroundSuspended = false;
     await resumeAudioContextIfNeeded(this.micContext);
-    await resumeAudioContextIfNeeded(this.playbackContext);
-    this.lastPacketAt = 0;
-    this.nextStartTime = 0;
-  }
-
-  private shouldFlushForJitter(now: number): boolean {
-    if (this.lastPacketAt > 0 && now - this.lastPacketAt > MAX_PLAYBACK_LAG_MS) {
-      return true;
-    }
-    if (this.playbackContext && this.nextStartTime > 0) {
-      const lag = playbackScheduleLagMs(this.playbackContext, this.nextStartTime);
-      if (lag > MAX_PLAYBACK_LAG_MS) return true;
-    }
-    return false;
-  }
-
-  private flushPlaybackQueue(reason: string): void {
-    if (DEV && (this.playbackQueue.length > 0 || this.activeNodes.length > 0)) {
-      console.log('[VOICE OUTPUT] flush:', reason, 'queued=', this.playbackQueue.length, 'active=', this.activeNodes.length);
-    }
-    this.playbackQueue = [];
-    this.playing = false;
-    this.nextStartTime = 0;
-    this.lastPacketAt = 0;
-    this.lastPacketMime = undefined;
-    for (const node of this.activeNodes) {
-      try { node.source.stop(); } catch { /* ignore */ }
-      try { node.source.disconnect(); } catch { /* ignore */ }
-      try { node.gain.disconnect(); } catch { /* ignore */ }
-    }
-    this.activeNodes = [];
-  }
-
-  private enqueueAudio(buf: ArrayBuffer, mime?: string) {
-    const now = performance.now();
-    if (mime) this.lastPacketMime = mime;
-    if (this.playbackQueue.length === 0 && !this.playing && this.activeNodes.length === 0) {
-      stopBrowserAudio();
-    }
-    if (this.shouldFlushForJitter(now)) {
-      this.flushPlaybackQueue('jitter');
-    }
-    if (this.playbackQueue.length >= MAX_PLAYBACK_QUEUE_CHUNKS) {
-      this.flushPlaybackQueue('overflow');
-    }
-    this.lastPacketAt = now;
-    this.playbackQueue.push({ buf, mime, receivedAt: now });
-    this.speaking = true;
-    void this.playQueue();
-  }
-
-  private async playQueue() {
-    if (this.playing) return;
-    this.playing = true;
-
-    try {
-      this.playbackContext = await createPlaybackAudioContext(this.playbackContext);
-      if (DEV) {
-        console.log(
-          '[VOICE OUTPUT] playback AudioContext sampleRate =',
-          this.playbackContext.sampleRate,
-          'target =',
-          PLAYBACK_PCM_RATE,
-        );
-      }
-
-      while (this.playbackQueue.length > 0) {
-        if (this.playbackContext && this.shouldFlushForJitter(performance.now())) {
-          this.flushPlaybackQueue('playback_lag');
-          break;
-        }
-
-        const item = this.playbackQueue.shift()!;
-        const rate = parsePcmSampleRate(
-          item.mime ?? this.lastPacketMime,
-          PLAYBACK_PCM_RATE,
-        );
-        this.schedulePcmChunk(item.buf, rate);
-      }
-    } finally {
-      this.playing = false;
-      if (this.playbackQueue.length > 0) {
-        void this.playQueue();
-      }
-    }
-  }
-
-  private schedulePcmChunk(pcm: ArrayBuffer, rate: number) {
-    if (!this.playbackContext) return;
-
-    const samples = pcm.byteLength / 2;
-    if (samples <= 0) return;
-
-    const audioBuf = pcmToAudioBuffer(this.playbackContext, pcm, rate);
-
-    const src = this.playbackContext.createBufferSource();
-    src.buffer = audioBuf;
-    src.playbackRate.value = 1;
-
-    const gain = this.playbackContext.createGain();
-    src.connect(gain);
-    gain.connect(this.playbackContext.destination);
-
-    const now = this.playbackContext.currentTime;
-    const start = Math.max(now, this.nextStartTime);
-    applyChunkFade(gain, start, audioBuf.duration);
-
-    src.start(start);
-    this.nextStartTime = start + audioBuf.duration;
-
-    const node: ActivePlaybackNode = { source: src, gain };
-    this.activeNodes.push(node);
-
-    src.onended = () => {
-      this.activeNodes = this.activeNodes.filter((n) => n.source !== src);
-      try { src.disconnect(); } catch { /* ignore */ }
-      try { gain.disconnect(); } catch { /* ignore */ }
-      if (this.activeNodes.length === 0 && this.playbackQueue.length === 0) {
-        this.speaking = false;
-      }
-    };
+    await this.pcmPlayer.resumeIfSuspended();
   }
 }

@@ -153,11 +153,34 @@ export function pcmToAudioBuffer(
   return audioBuf;
 }
 
-/** AudioContext de saída fixado em 24 kHz (voz Gemini). */
+/** AudioContext de saída — usa taxa NATIVA do dispositivo (sem forçar 24 kHz). */
+export async function createNativePlaybackAudioContext(
+  existing: AudioContext | null,
+): Promise<AudioContext> {
+  const Ctx = getAudioContextCtor();
+  if (existing && existing.state !== 'closed') {
+    try {
+      await existing.close();
+    } catch {
+      /* ignore */
+    }
+  }
+  const ctx = new Ctx();
+  if (ctx.state === 'suspended') {
+    try {
+      await ctx.resume();
+    } catch {
+      /* ignore */
+    }
+  }
+  return ctx;
+}
+
+/** @deprecated Use GeminiPcmPlayer.initOnUserGesture() */
 export async function createPlaybackAudioContext(
   existing: AudioContext | null,
 ): Promise<AudioContext> {
-  return createOrResumeAudioContext(existing, PLAYBACK_PCM_RATE);
+  return createNativePlaybackAudioContext(existing);
 }
 
 /** Atraso entre o relógio de áudio e o próximo chunk agendado (ms). */

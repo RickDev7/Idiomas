@@ -427,6 +427,7 @@ export function useGeminiLive(profile: UserProfile | null): GeminiLiveUI {
     if (!profile) return;
     if (startingRef.current) return;
     startingRef.current = true;
+    stopAllAudio();
     resetSessionLocals();
     disposeActiveService();
     try {
@@ -435,6 +436,7 @@ export function useGeminiLive(profile: UserProfile | null): GeminiLiveUI {
       svc.setMicDeviceId(selectedDeviceId);
       serviceRef.current = svc;
       activeVoiceService = svc;
+      await svc.preparePlaybackOnGesture();
       await svc.connect();
       void orchRef.current?.handle({ type: 'SESSION_STARTED' }).then((d) => {
         if (d) void applyDecision(d);
