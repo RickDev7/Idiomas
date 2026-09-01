@@ -9,9 +9,16 @@ import {
   buildReviewGeminiNudge,
   evaluateReviewAttempt,
   mapReviewTypeToAction,
+  opportunityFromQueueItem,
   type ReviewOpportunity,
   type ReviewType,
 } from '@/services/learning/ReviewEngine';
+import {
+  MAX_REVIEW_ITEM_ATTEMPTS,
+  persistReviewSession,
+  readReviewSessionSnapshot,
+  type ReviewSessionSnapshot,
+} from '@/services/learning/ReviewSession';
 import {
   getNextBestLearningAction,
   decideNextBestAction,
@@ -47,6 +54,28 @@ import {
   recordConfirmedSpontaneous,
   type SpontaneousOpportunity,
 } from '@/services/learning/SpontaneousUseDetector';
+import {
+  buildConversationCoachContext,
+  buildConversationTopicKickoff,
+  conversationTopicPlanLabel,
+  pickConversationOpening,
+  type ConversationTopicContext,
+} from '@/services/teacher/ConversationTopics';
+import {
+  buildSimulatorKickoff,
+  pickSimulatorOpening,
+  scenarioLabel,
+} from '@/services/teacher/SimulatorEngine';
+import type { SimulatorContext } from '@/services/teacher/SimulatorTypes';
+import { isSimulatorActive, recordSimulatorDeferred } from '@/services/teacher/SimulatorSession';
+import { buildImmersionMiniProvaKickoff } from '@/services/teacher/ImmersionPolicy';
+import { evaluateMiniProvaResponse } from '@/services/teacher/MiniProvaEngine';
+import {
+  getCurrentMiniProvaQuestion,
+  persistMiniProvaSnapshot,
+  recordMiniProvaAnswer,
+  type MiniProvaSnapshot,
+} from '@/services/teacher/MiniProvaSession';
 import { decideReviewOrConverse, decideSpontaneousOpportunity } from '@/services/teacher/TeacherEngine';
 import { EventStore, type LearningEventType } from '@/services/learning/EventStore';
 import { MemoryService } from '@/services/learning/MemoryService';
@@ -689,6 +718,10 @@ export interface OrchestratorDeps {
   phrases: Phrase[];
   sessionId?: string;
   reviewIntent?: { phraseId?: string; reviewType?: ReviewType };
+  reviewSessionSnapshot?: ReviewSessionSnapshot | null;
+  conversationIntent?: ConversationTopicContext;
+  simulatorIntent?: SimulatorContext;
+  miniProvaSnapshot?: MiniProvaSnapshot | null;
 }
 
 export class ConversationOrchestrator {
@@ -720,10 +753,15 @@ export class ConversationOrchestrator {
   private pendingReview: ReviewOpportunity | null = null;
   private sessionReviewed = new Set<string>();
   private reviewSession = false;
+  private reviewQueueSnapshot: ReviewSessionSnapshot | null = null;
   private interruptionsLast10 = 0;
   private briefCorrectionsLast10 = 0;
   private microStartsLast10 = 0;
   private coachContextText = '';
+  private simulatorMode = false;
+  private miniProvaSnapshot: MiniProvaSnapshot | null = null;
+  private miniProvaMode = false;
+  private miniProvaItemAttempts = 0;
   private followUpEventId: string | undefined;
   private followUpOpening: string | undefined;
   /** Ciclo correção: aguarda nova tentativa após modelo (Fase 11 §§26–28). */
@@ -850,40 +888,44 @@ export class ConversationOrchestrator {
     };
     const orch = new ConversationOrchestrator(merged, plan, ctx);
     orch.sessionSupport = plan.scaffoldLevel;
-    if (merged.reviewIntent) {
+    if (merged.reviewIntent || merged.reviewSessionSnapshot) {
       orch.reviewSession = true;
-      const opp = pickReviewOpportunity(merged.learning.phrases, phrases, {
-        profile: merged.profile,
-        phraseId: merged.reviewIntent.phraseId,
-        forcedType: merged.reviewIntent.reviewType,
-      });
-      if (opp) {
-        const use = opp;
-        orch.pendingReview = use;
-        const action = mapReviewTypeToAction(use.type);
-        orch.plan = {
-          ...orch.plan,
-          action,
-          actionReason: use.reason,
-          target: {
-            id: use.itemId,
-            german: use.german,
-            portuguese: use.portuguese,
-            expected: use.expected.toLowerCase(),
-            hint: use.prompt,
-          },
-        };
-        orch.ctx.targetItem = use.german;
-        orch.ctx.lastAction = action;
-        orch.ctx.currentGoal = 'review';
-        orch.ctx.mode = use.type === 'GUIDED_SPEAKING_REVIEW' ? 'GUIDED_CONVERSATION' : 'FREE_CONVERSATION';
+      const snapshot = merged.reviewSessionSnapshot
+        ?? (merged.reviewIntent ? readReviewSessionSnapshot() : null);
+      if (snapshot && snapshot.items.length > 0 && !snapshot.completed) {
+        orch.reviewQueueSnapshot = snapshot;
+        orch.applyReviewQueueItem(snapshot.currentIndex);
+      } else if (merged.reviewIntent?.phraseId) {
+        const opp = pickReviewOpportunity(merged.learning.phrases, phrases, {
+          profile: merged.profile,
+          phraseId: merged.reviewIntent.phraseId,
+          forcedType: merged.reviewIntent.reviewType,
+        });
+        if (opp) {
+          orch.applyReviewOpportunity(opp);
+        }
       }
+    } else if (merged.miniProvaSnapshot && merged.miniProvaSnapshot.questions.length > 0) {
+      orch.miniProvaMode = true;
+      orch.miniProvaSnapshot = merged.miniProvaSnapshot;
+      orch.applyMiniProvaQuestion(0);
+    } else if (merged.simulatorIntent) {
+      orch.applySimulatorIntent(merged.simulatorIntent);
+    } else if (merged.conversationIntent) {
+      orch.applyConversationTopicIntent(merged.conversationIntent);
     }
     orch.persist();
     try {
       saveCoachMemory(seedFromUserProfile(loadCoachMemory(), deps.profile));
-      const rel = selectRelevantCoachContext({ user: deps.profile, topic: plan.topic });
-      orch.coachContextText = rel.text;
+      const rel = selectRelevantCoachContext({ user: deps.profile, topic: orch.plan.topic });
+      if (merged.conversationIntent || merged.simulatorIntent) {
+        orch.coachContextText = [
+          orch.coachContextText,
+          rel.text,
+        ].filter(Boolean).join('\n\n');
+      } else {
+        orch.coachContextText = rel.text;
+      }
       orch.followUpOpening = rel.followUpOpening;
       orch.followUpEventId = rel.followUpEventId;
     } catch { /* coach memory opcional */ }
@@ -892,6 +934,272 @@ export class ConversationOrchestrator {
 
   getContext(): ConversationContext {
     return { ...this.ctx };
+  }
+
+  getReviewSessionSnapshot(): ReviewSessionSnapshot | null {
+    return this.reviewQueueSnapshot ? { ...this.reviewQueueSnapshot, items: [...this.reviewQueueSnapshot.items], results: [...this.reviewQueueSnapshot.results] } : null;
+  }
+
+  private applyReviewOpportunity(opp: ReviewOpportunity) {
+    this.pendingReview = opp;
+    const action = mapReviewTypeToAction(opp.type);
+    this.plan = {
+      ...this.plan,
+      action,
+      actionReason: opp.reason,
+      target: {
+        id: opp.itemId,
+        german: opp.german,
+        portuguese: opp.portuguese,
+        expected: opp.expected.toLowerCase(),
+        hint: opp.prompt,
+      },
+    };
+    this.ctx.targetItem = opp.german;
+    this.ctx.lastAction = action;
+    this.ctx.currentGoal = 'review';
+    this.ctx.mode = opp.type === 'GUIDED_SPEAKING_REVIEW' ? 'GUIDED_CONVERSATION' : 'FREE_CONVERSATION';
+  }
+
+  private applyReviewQueueItem(index: number): boolean {
+    if (!this.reviewQueueSnapshot) return false;
+    const item = this.reviewQueueSnapshot.items[index];
+    if (!item) return false;
+    const opp = opportunityFromQueueItem(item, this.learning.phrases, this.phrases, {
+      profile: this.profile,
+    });
+    if (!opp) return false;
+    this.reviewQueueSnapshot.currentIndex = index;
+    this.reviewQueueSnapshot.itemAttempts = 0;
+    persistReviewSession(this.reviewQueueSnapshot);
+    this.applyReviewOpportunity(opp);
+    return true;
+  }
+
+  /** Simulador — produção real em cenário baseado no aprendizado. */
+  applySimulatorIntent(intent: SimulatorContext) {
+    this.simulatorMode = true;
+    const opening = pickSimulatorOpening(intent);
+    const topicPt = scenarioLabel(intent, true);
+    const targetPhrase =
+      this.phrases.find((p) => p.german === opening)
+      || mergeZeroLanguagePhrases(this.phrases).find((p) => p.german === opening)
+      || null;
+
+    this.ctx.topic = topicPt;
+    this.ctx.mode = 'FREE_CONVERSATION';
+    this.ctx.currentGoal = 'converse';
+    this.ctx.lastAction = 'converse';
+    this.plan = {
+      ...this.plan,
+      action: 'converse',
+      actionReason: `simulator:${intent.simulatorMode}`,
+      topic: topicPt,
+      stageId: 'conversation',
+      training: {
+        ...this.plan.training,
+        totalMinutes: intent.durationMinutes,
+        stages: [],
+      },
+      target: targetPhrase
+        ? {
+            id: targetPhrase.id,
+            german: targetPhrase.german,
+            portuguese: targetPhrase.portuguese,
+            expected: targetPhrase.german.toLowerCase(),
+            hint: intent.chunk || '',
+          }
+        : this.plan.target,
+      actionKickoff: buildSimulatorKickoff(intent, opening),
+    };
+    this.plan.teacherDirective = buildDirective(
+      this.plan,
+      isZeroLanguageMode(this.profile),
+      intent.durationMinutes,
+    );
+    this.coachContextText = buildConversationCoachContext(intent);
+    this.ctx.targetItem = opening;
+  }
+
+  isSimulatorMode(): boolean {
+    return this.simulatorMode;
+  }
+
+  isMiniProvaMode(): boolean {
+    return this.miniProvaMode;
+  }
+
+  getMiniProvaSnapshot(): MiniProvaSnapshot | null {
+    return this.miniProvaSnapshot ? { ...this.miniProvaSnapshot } : null;
+  }
+
+  private applyMiniProvaQuestion(index: number): boolean {
+    if (!this.miniProvaSnapshot) return false;
+    const q = this.miniProvaSnapshot.questions[index];
+    if (!q) return false;
+    this.miniProvaSnapshot.currentIndex = index;
+    this.miniProvaItemAttempts = 0;
+    persistMiniProvaSnapshot(this.miniProvaSnapshot);
+    this.ctx.topic = 'Mini-Prüfung';
+    this.ctx.mode = 'FREE_CONVERSATION';
+    this.ctx.currentGoal = 'converse';
+    this.ctx.lastAction = 'converse';
+    this.plan = {
+      ...this.plan,
+      action: 'converse',
+      actionReason: `miniprova:${q.type}`,
+      topic: 'Mini-Prüfung',
+      stageId: 'conversation',
+      target: {
+        id: q.phraseId,
+        german: q.german,
+        portuguese: '',
+        expected: q.german.toLowerCase(),
+        hint: '',
+      },
+      actionKickoff: buildImmersionMiniProvaKickoff({
+        questionGerman: q.promptDe,
+        questionType: q.type,
+        total: this.miniProvaSnapshot.total,
+        index,
+      }),
+    };
+    this.ctx.targetItem = q.promptDe;
+    return true;
+  }
+
+  private async onMiniProvaAttempt(text: string): Promise<OrchestratorDecision> {
+    if (!this.miniProvaSnapshot) return this.continueResult('miniprova_sem_snapshot');
+    const q = getCurrentMiniProvaQuestion(this.miniProvaSnapshot);
+    if (!q) return this.continueResult('miniprova_complete');
+    this.userTurns += 1;
+    this.miniProvaItemAttempts += 1;
+    const usedHelp = this.helpUsedThisTurn;
+    this.helpUsedThisTurn = false;
+    const autonomy = evaluateMiniProvaResponse(text, q, {
+      usedHelp,
+      attempt: this.miniProvaItemAttempts,
+    });
+    const correct = autonomy !== 'incorrect' && autonomy !== 'no_response';
+    const eventsRecorded: LearningEventType[] = ['USER_UTTERANCE'];
+
+    if (!correct && this.miniProvaItemAttempts < 2) {
+      return {
+        flow: 'continueConversation',
+        action: 'converse',
+        mode: 'FREE_CONVERSATION',
+        reason: 'miniprova_retry',
+        targetItem: q.promptDe,
+        geminiNudge: [
+          '[INTERNE ANWEISUNG — nicht vorlesen]',
+          'MINI-PRÜFUNG — nur auf Deutsch.',
+          'Sage: "Noch einmal."',
+          `Wiederhole die Frage: "${q.promptDe}"`,
+          'KEINE Lösung zeigen. KEIN Portugiesisch.',
+        ].join('\n'),
+        eventsRecorded,
+      };
+    }
+
+    await saveLearningEvent(correct ? 'PHRASE_PRODUCED' : 'PHRASE_FAILED', {
+      phraseId: q.phraseId,
+      context: text,
+      helpLevel: usedHelp ? this.sessionSupport : 0,
+    });
+    eventsRecorded.push(correct ? 'PHRASE_PRODUCED' : 'PHRASE_FAILED');
+
+    if (!correct) {
+      await this.recordPhraseEvent(q.phraseId, { type: 'produced', correct: false });
+    } else {
+      await this.recordPhraseEvent(q.phraseId, {
+        type: 'produced',
+        correct: true,
+        withHelp: usedHelp,
+      });
+    }
+
+    this.miniProvaSnapshot = recordMiniProvaAnswer(this.miniProvaSnapshot, {
+      phraseId: q.phraseId,
+      german: q.german,
+      type: q.type,
+      autonomy,
+      correct,
+      userSaid: text,
+      at: new Date().toISOString(),
+    });
+
+    if (!this.miniProvaSnapshot.completed) {
+      const nextIndex = this.miniProvaSnapshot.currentIndex;
+      this.applyMiniProvaQuestion(nextIndex);
+      const nextQ = getCurrentMiniProvaQuestion(this.miniProvaSnapshot);
+      return {
+        flow: 'continueConversation',
+        action: 'converse',
+        mode: 'FREE_CONVERSATION',
+        reason: 'miniprova_next',
+        targetItem: nextQ?.promptDe ?? null,
+        geminiNudge: nextQ
+          ? [
+              '[INTERNE ANWEISUNG — nicht vorlesen]',
+              'Nächste Frage auf Deutsch.',
+              `Frage: "${nextQ.promptDe}"`,
+            ].join('\n')
+          : null,
+        eventsRecorded,
+      };
+    }
+
+    return {
+      flow: 'continueConversation',
+      action: 'converse',
+      mode: 'FREE_CONVERSATION',
+      reason: 'miniprova_done',
+      targetItem: null,
+      geminiNudge: [
+        '[INTERNE ANWEISUNG — nicht vorlesen]',
+        'Sage auf Deutsch: "Sehr gut! Die Mini-Prüfung ist fertig."',
+      ].join('\n'),
+      eventsRecorded,
+    };
+  }
+
+  /** Tema escolhido na tela Conversar — conversa guiada pelo progresso real. */
+  applyConversationTopicIntent(intent: ConversationTopicContext) {
+    const opening = pickConversationOpening(intent);
+    const topicPt = conversationTopicPlanLabel(intent.topic);
+    const targetPhrase =
+      this.phrases.find((p) => p.german === opening)
+      || mergeZeroLanguagePhrases(this.phrases).find((p) => p.german === opening)
+      || null;
+
+    this.ctx.topic = topicPt;
+    this.ctx.mode = 'FREE_CONVERSATION';
+    this.ctx.currentGoal = 'converse';
+    this.ctx.lastAction = 'converse';
+    this.plan = {
+      ...this.plan,
+      action: 'converse',
+      actionReason: `conversation_topic:${intent.id}`,
+      topic: topicPt,
+      stageId: 'conversation',
+      target: targetPhrase
+        ? {
+            id: targetPhrase.id,
+            german: targetPhrase.german,
+            portuguese: targetPhrase.portuguese,
+            expected: targetPhrase.german.toLowerCase(),
+            hint: intent.chunk || '',
+          }
+        : this.plan.target,
+      actionKickoff: buildConversationTopicKickoff(intent, opening),
+    };
+    this.plan.teacherDirective = buildDirective(
+      this.plan,
+      isZeroLanguageMode(this.profile),
+      this.plan.training?.totalMinutes,
+    );
+    this.coachContextText = buildConversationCoachContext(intent);
+    this.ctx.targetItem = opening;
   }
 
   getPlan(): ConversationPlan {
@@ -1036,6 +1344,129 @@ export class ConversationOrchestrator {
       context: text,
       helpLevel: usedHelp ? this.sessionSupport : 0,
     });
+
+    const inQueueSession = !!this.reviewQueueSnapshot;
+
+    if (inQueueSession && this.reviewQueueSnapshot) {
+      this.reviewQueueSnapshot.itemAttempts += 1;
+      const attempts = this.reviewQueueSnapshot.itemAttempts;
+      const shouldAdvance =
+        result === 'SUCCESS' ||
+        result === 'PARTIAL' ||
+        (result === 'FAILED' && attempts >= MAX_REVIEW_ITEM_ATTEMPTS);
+
+      if (!shouldAdvance && result === 'FAILED') {
+        this.justErrored = true;
+        persistReviewSession(this.reviewQueueSnapshot);
+        return {
+          flow: 'continueConversation',
+          action: 'practice',
+          mode: 'GUIDED_CONVERSATION',
+          reason: `review_retry:${attempts}_of_${MAX_REVIEW_ITEM_ATTEMPTS}`,
+          targetItem: opp.german,
+          geminiNudge: [
+            '[INSTRUÇÃO INTERNA — não leia isto em voz alta]',
+            'REVISÃO — resposta incorreta. Explique curto em português.',
+            `Modele: "${opp.german}"`,
+            'Peça nova tentativa. Não avance para o próximo item ainda.',
+            `Pergunta: "${opp.prompt}"`,
+          ].join('\n'),
+          eventsRecorded,
+        };
+      }
+
+      const ev: LearningEventType =
+        result === 'SUCCESS' ? 'REVIEW_SUCCESS' : result === 'PARTIAL' ? 'REVIEW_PARTIAL' : 'REVIEW_FAILED';
+      await saveLearningEvent(ev, {
+        phraseId: opp.itemId,
+        context: JSON.stringify({
+          reviewType: opp.type,
+          result,
+          prompt: opp.prompt,
+          helpLevel: usedHelp ? this.sessionSupport : 0,
+          sessionIndex: this.reviewQueueSnapshot.currentIndex,
+        }),
+        helpLevel: usedHelp ? this.sessionSupport : 0,
+      });
+      eventsRecorded.push(ev);
+
+      const storedResult: 'SUCCESS' | 'PARTIAL' | 'FAILED' | 'DEFERRED' =
+        result === 'FAILED' && attempts >= MAX_REVIEW_ITEM_ATTEMPTS ? 'DEFERRED' : result;
+
+      if (result === 'SUCCESS' && opp.type === 'RECALL_REVIEW') {
+        await saveLearningEvent('PHRASE_RECALLED', { phraseId: opp.itemId, context: text });
+        eventsRecorded.push('PHRASE_RECALLED');
+      }
+
+      const updated = await MemoryService.recordReviewResult(
+        opp.itemId,
+        storedResult === 'DEFERRED' ? 'FAILED' : result,
+        {
+        reviewType: opp.type,
+        helpLevel: usedHelp ? this.sessionSupport : 0,
+        sessionId: this.sessionId,
+      });
+      this.learning = {
+        ...this.learning,
+        phrases: { ...this.learning.phrases, [opp.itemId]: updated },
+      };
+      this.sessionReviewed.add(opp.itemId);
+      this.reviewQueueSnapshot.results.push({
+        phraseId: opp.itemId,
+        german: opp.german,
+        result: storedResult,
+        reviewType: opp.type,
+      });
+      this.pendingReview = null;
+      this.justErrored = storedResult === 'DEFERRED' || storedResult === 'FAILED';
+
+      const nextIndex = this.reviewQueueSnapshot.currentIndex + 1;
+      if (nextIndex < this.reviewQueueSnapshot.items.length) {
+        this.reviewQueueSnapshot.currentIndex = nextIndex;
+        this.reviewQueueSnapshot.itemAttempts = 0;
+        persistReviewSession(this.reviewQueueSnapshot);
+        this.applyReviewQueueItem(nextIndex);
+        const nextOpp = this.pendingReview!;
+        const pos = nextIndex + 1;
+        const total = this.reviewQueueSnapshot.total;
+        return {
+          flow: 'continueConversation',
+          action: mapReviewTypeToAction(nextOpp.type),
+          mode: nextOpp.type === 'GUIDED_SPEAKING_REVIEW' ? 'GUIDED_CONVERSATION' : 'FREE_CONVERSATION',
+          reason: `review_next:${pos}_of_${total}`,
+          targetItem: nextOpp.german,
+          geminiNudge: [
+            '[INSTRUÇÃO INTERNA — não leia isto em voz alta]',
+            `Revisão ${pos} de ${total}. Item anterior concluído.`,
+            buildReviewGeminiNudge(nextOpp).split('\n').slice(1).join('\n'),
+          ].join('\n'),
+          eventsRecorded,
+        };
+      }
+
+      this.reviewQueueSnapshot.completed = true;
+      persistReviewSession(this.reviewQueueSnapshot);
+      const summary = this.reviewQueueSnapshot.results;
+      const mastered = summary.filter((r) => r.result === 'SUCCESS').length;
+      const needsLater = summary.filter((r) => r.result === 'FAILED' || r.result === 'DEFERRED').length;
+      const withHelp = summary.filter((r) => r.result === 'PARTIAL').length;
+      this.ctx.mode = 'FREE_CONVERSATION';
+      this.persist();
+      return {
+        flow: 'continueConversation',
+        action: 'converse',
+        mode: 'FREE_CONVERSATION',
+        reason: 'review_session_complete',
+        targetItem: null,
+        geminiNudge: [
+          '[INSTRUÇÃO INTERNA — não leia isto em voz alta]',
+          `Revisão concluída. ${this.reviewQueueSnapshot.total} itens revisados.`,
+          `Dominados nesta sessão: ${mastered}. Com ajuda: ${withHelp}. Para revisão posterior: ${needsLater}.`,
+          'Elogie brevemente e encerre a revisão de forma natural.',
+        ].join('\n'),
+        eventsRecorded,
+      };
+    }
 
     const ev: LearningEventType =
       result === 'SUCCESS' ? 'REVIEW_SUCCESS' : result === 'PARTIAL' ? 'REVIEW_PARTIAL' : 'REVIEW_FAILED';
@@ -1997,6 +2428,9 @@ export class ConversationOrchestrator {
     if (!this.l0DeferredPhraseIds.includes(opts.phraseId)) {
       this.l0DeferredPhraseIds.push(opts.phraseId);
     }
+    if (isSimulatorActive()) {
+      recordSimulatorDeferred(opts.phraseId);
+    }
     this.l0DeferredReviewCount += 1;
     this.justErrored = false;
     this.l0PhrasePhase = 'ADVANCE';
@@ -2076,6 +2510,9 @@ export class ConversationOrchestrator {
 
     if (this.pendingTransfer) {
       return this.onTransferAttempt(trimmed);
+    }
+    if (this.miniProvaSnapshot && !this.miniProvaSnapshot.completed) {
+      return this.onMiniProvaAttempt(trimmed);
     }
     if (this.pendingReview) {
       return this.onReviewAttempt(trimmed);

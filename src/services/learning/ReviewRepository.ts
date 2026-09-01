@@ -4,6 +4,10 @@ import {
   getReviewQueue,
   type ReviewQueueItem,
 } from '@/services/learning/ReviewEngine';
+import {
+  startReviewSession,
+  type ReviewSessionSnapshot,
+} from '@/services/learning/ReviewSession';
 
 const DEFAULT_LIMIT = 12;
 
@@ -16,4 +20,9 @@ export async function getDueReviewCount(limit = DEFAULT_LIMIT): Promise<number> 
   return q.length;
 }
 
-export type { ReviewQueueItem };
+/** UI e sessão usam o mesmo snapshot da fila. */
+export function beginReviewSessionFromQueue(items: ReviewQueueItem[]): ReviewSessionSnapshot {
+  return startReviewSession(items);
+}
+
+export type { ReviewQueueItem, ReviewSessionSnapshot };

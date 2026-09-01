@@ -9,6 +9,10 @@ import { ReviewPage } from '@/pages/ReviewPage';
 import { ProgressPage } from '@/pages/ProgressPage';
 import { CoursePage } from '@/pages/CoursePage';
 import { SettingsPage } from '@/pages/SettingsPage';
+import { SimulatorPage } from '@/pages/SimulatorPage';
+import { SimulatorResultPage } from '@/pages/SimulatorResultPage';
+import { MiniProvaPage } from '@/pages/MiniProvaPage';
+import { MiniProvaResultPage } from '@/pages/MiniProvaResultPage';
 import { ToastHost } from '@/components/ui/Toast';
 
 export default function App() {
@@ -21,6 +25,10 @@ export default function App() {
           <Route path="/" element={<HomePage />} />
           <Route path="/onboarding" element={<OnboardingPage />} />
           <Route path="/conversar" element={<TalkPage />} />
+          <Route path="/simulador" element={<SimulatorPage />} />
+          <Route path="/simulador/resultado" element={<SimulatorResultPage />} />
+          <Route path="/mini-prova" element={<MiniProvaPage />} />
+          <Route path="/mini-prova/resultado" element={<MiniProvaResultPage />} />
           <Route path="/sessao" element={<ConversationPage />} />
           <Route path="/revisar" element={<ReviewPage />} />
           <Route path="/progresso" element={<ProgressPage />} />

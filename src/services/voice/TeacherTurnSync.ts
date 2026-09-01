@@ -1,6 +1,7 @@
 /**
- * Sincronização teacher output ↔ UI target — evita nudge duplicado em Gemini Live.
+ * Sincronização teacher output ↔ UI — transcript do professor é fonte da verdade.
  */
+import { separateTeacherSpeech } from '@/services/ai/TranslationService';
 import type { ConversationOrchestrator } from '@/services/teacher/ConversationOrchestrator';
 
 const DEV = typeof import.meta !== 'undefined' && !!(import.meta as { env?: { DEV?: boolean } }).env?.DEV;
@@ -24,6 +25,79 @@ export type TeacherTurnLogContext = {
   targetId?: string | null;
   targetText?: string | null;
 };
+
+/** Extrai alemão do transcript do professor para exibição na UI. */
+export function extractTeacherGermanForUi(rawUtterance: string): string {
+  const trimmed = (rawUtterance || '').trim();
+  if (!trimmed) return '';
+  const { german } = separateTeacherSpeech(trimmed);
+  return (german || trimmed).trim();
+}
+
+function normalizeForCompare(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/ß/g, 'ss')
+    .replace(/[.?!…,;:]+$/u, '')
+    .trim();
+}
+
+export function pedagogicalMatchesTeacherUtterance(
+  pedagogicalTarget: string,
+  teacherUtterance: string,
+): boolean {
+  const p = normalizeForCompare(pedagogicalTarget);
+  const t = normalizeForCompare(teacherUtterance);
+  if (!p || !t) return true;
+  return p === t;
+}
+
+export type UiTeacherSyncInput = {
+  teacherUtterance: string;
+  pedagogicalTarget?: string | null;
+  turnId: string;
+  sessionGeneration: number;
+  /** false durante chunks parciais — evita spam de logs */
+  final?: boolean;
+};
+
+/**
+ * TEACHER AUDIO / TRANSCRIPT IS SOURCE OF TRUTH for current UI turn.
+ * Retorna o texto que a UI deve exibir como instrução/pergunta atual.
+ */
+export function resolveUiTeacherTurn(input: UiTeacherSyncInput): string {
+  const teacherUtterance = (input.teacherUtterance || '').trim();
+  const displayed = extractTeacherGermanForUi(teacherUtterance);
+  const pedagogicalTarget = (input.pedagogicalTarget || '').trim();
+
+  if (DEV && input.final) {
+    console.log('[TEACHER_TURN]', {
+      teacherUtterance,
+      turnId: input.turnId,
+      timestamp: Date.now(),
+    });
+    if (pedagogicalTarget) {
+      console.log('[PEDAGOGICAL_TARGET]', { target: pedagogicalTarget });
+    }
+    console.log('[UI_TARGET_SYNC]', {
+      displayed,
+      sessionGeneration: input.sessionGeneration,
+      turnId: input.turnId,
+    });
+    if (
+      pedagogicalTarget &&
+      displayed &&
+      !pedagogicalMatchesTeacherUtterance(pedagogicalTarget, displayed)
+    ) {
+      console.warn('[TARGET_MISMATCH]', {
+        pedagogicalTarget,
+        teacherUtterance: displayed,
+      });
+    }
+  }
+
+  return displayed;
+}
 
 export function logTeacherAudio(
   ctx: TeacherTurnLogContext,
@@ -113,9 +187,9 @@ export function shouldEmitPedagogicalNudge(
   return true;
 }
 
-/** UI target só após o professor falar, exceto micro/intervenção imediata. */
-export function shouldUpdateTargetImmediately(decision: OrchestratorDecision): boolean {
-  if (!decision.targetItem) return false;
-  if (decision.reason === 'fala do professor registrada') return false;
-  return isPedagogicalOverrideFlow(decision);
+/**
+ * @deprecated UI nunca sincroniza a partir de target pedagógico — use resolveUiTeacherTurn.
+ */
+export function shouldUpdateTargetImmediately(_decision: OrchestratorDecision): boolean {
+  return false;
 }

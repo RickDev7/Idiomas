@@ -342,6 +342,7 @@ export interface VoiceAreaProps {
   disabled: boolean;
   noSignal: boolean;
   onPickMic: () => void;
+  allowTextInput?: boolean;
   textMode: boolean;
   textValue: string;
   onTextChange: (v: string) => void;
@@ -351,6 +352,7 @@ export interface VoiceAreaProps {
 
 export function VoiceArea({
   micActive, micLevel, statusLabel, statusHint, onMic, disabled, noSignal, onPickMic,
+  allowTextInput = true,
   textMode, textValue, onTextChange, onTextSubmit, onToggleText,
 }: VoiceAreaProps) {
   const levelBoost = Math.min(1, Math.max(0, micLevel * 4));
@@ -432,7 +434,7 @@ export function VoiceArea({
         </button>
       )}
 
-      {!textMode ? (
+      {allowTextInput && (!textMode ? (
         <button
           type="button"
           onClick={onToggleText}
@@ -488,7 +490,7 @@ export function VoiceArea({
             ✕
           </button>
         </form>
-      )}
+      ))}
     </div>
   );
 }

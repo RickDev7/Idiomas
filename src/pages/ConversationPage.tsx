@@ -33,7 +33,7 @@ export function ConversationPage() {
   const [searchParams] = useSearchParams();
   const type = searchParams.get('type') || 'lesson';
 
-  const useGemini = isGeminiLiveEnabled() || type === 'review';
+  const useGemini = isGeminiLiveEnabled() || type === 'review' || type === 'simulator' || type === 'miniprova';
   const lesson = useLesson(type, profile);
 
   useStudySession(
@@ -83,6 +83,28 @@ export function ConversationPage() {
   }, [loading, profile, navigate]);
 
   const finish = async () => {
+    if (type === 'simulator') {
+      const { finalizeSimulatorSession } = await import('@/services/teacher/SimulatorSession');
+      const { storeSimulatorResult, clearSimulatorContext } = await import('@/services/teacher/SimulatorIntent');
+      const result = finalizeSimulatorSession();
+      if (result) storeSimulatorResult(result);
+      clearSimulatorContext();
+      navigate('/simulador/resultado');
+      return;
+    }
+    if (type === 'miniprova') {
+      const { readMiniProvaSnapshot, finalizeMiniProvaResult, clearMiniProvaSnapshot } = await import('@/services/teacher/MiniProvaSession');
+      const { storeMiniProvaResult, clearMiniProvaContext } = await import('@/services/teacher/MiniProvaIntent');
+      const snap = readMiniProvaSnapshot();
+      if (snap) {
+        const result = finalizeMiniProvaResult(snap);
+        storeMiniProvaResult(result);
+      }
+      clearMiniProvaSnapshot();
+      clearMiniProvaContext();
+      navigate('/mini-prova/resultado');
+      return;
+    }
     if (profile) {
       const streak = updateStreak(profile.lastStudyDate, profile.streak);
       await updateProfile({ ...streak });

@@ -1,4 +1,4 @@
-import type { CSSProperties } from 'react';
+import { useEffect, useState, type CSSProperties } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { BottomNav } from '@/components/layout/BottomNav';
 import { LoadingScreen } from '@/components/ui/LoadingScreen';
@@ -6,6 +6,15 @@ import { IconBack, IconMic, IconKeyboard, IconWave, IconSparkle } from '@/compon
 import { LiveAudioOrb } from '@/components/ui/VoiceOrb';
 import { useProfile } from '@/hooks/useProfile';
 import { suggestConversationTopic } from '@/services/teacher/TeacherEngine';
+import { MemoryService } from '@/services/learning/MemoryService';
+import { StorageService } from '@/services/storage/StorageService';
+import {
+  getConversationTopics,
+  recordConversationTopicsShown,
+  toConversationContext,
+  type ConversationTopic,
+} from '@/services/teacher/ConversationTopics';
+import { storeConversationTopicContext } from '@/services/teacher/ConversationTopicIntent';
 
 const GLASS: CSSProperties = {
   background: 'rgba(15, 23, 42, 0.65)',
@@ -14,24 +23,43 @@ const GLASS: CSSProperties = {
   WebkitBackdropFilter: 'blur(16px)',
 };
 
-const SUPPORT_CHIPS = [
-  'Ich möchte...',
-  'Ich brauche...',
-  'Ich muss...',
-  'Kannst du...?',
-  'Ich arbeite...',
-  'Wo...?',
-];
-
 export function TalkPage() {
   const { profile, loading } = useProfile();
   const navigate = useNavigate();
+  const [topics, setTopics] = useState<ConversationTopic[]>([]);
+  const [topicsLoading, setTopicsLoading] = useState(true);
+
+  useEffect(() => {
+    if (!profile) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const learning = await MemoryService.loadProfile(profile);
+        const phrases = await StorageService.getAllPhrases();
+        const dynamic = getConversationTopics(learning, phrases);
+        if (!cancelled) {
+          setTopics(dynamic);
+          recordConversationTopicsShown(dynamic.map((t) => t.topic));
+        }
+      } finally {
+        if (!cancelled) setTopicsLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [profile]);
 
   if (loading || !profile) return <LoadingScreen />;
 
-  const topic = suggestConversationTopic(profile);
-  const startFree = (t?: string) => navigate(`/sessao?type=free&topic=${encodeURIComponent(t ?? topic)}`);
-  const startListen = () => navigate(`/sessao?type=free&topic=${encodeURIComponent(topic)}&mode=listen`);
+  const fallbackTopic = suggestConversationTopic(profile);
+  const startFree = (topic?: ConversationTopic) => {
+    if (topic) {
+      storeConversationTopicContext(toConversationContext(topic));
+      navigate(`/sessao?type=free&topic=${encodeURIComponent(topic.topic)}`);
+      return;
+    }
+    navigate(`/sessao?type=free&topic=${encodeURIComponent(fallbackTopic)}`);
+  };
+  const startListen = () => navigate(`/sessao?type=free&topic=${encodeURIComponent(fallbackTopic)}&mode=listen`);
 
   return (
     <div className="flex flex-col h-full max-w-md mx-auto" style={{ background: '#070A12' }}>
@@ -76,6 +104,38 @@ export function TalkPage() {
           </p>
         </div>
 
+        <button
+          type="button"
+          onClick={() => navigate('/simulador')}
+          className="mt-4 w-full rounded-[20px] px-4 py-4 text-left active:scale-[0.98] transition-transform"
+          style={{
+            ...GLASS,
+            border: '1px solid rgba(255,81,47,0.35)',
+            boxShadow: '0 0 18px rgba(255,81,47,0.12)',
+          }}
+        >
+          <p className="text-[14px] font-bold text-white">🎯 SIMULATOR</p>
+          <p className="text-[12px] text-[#94A3B8] mt-1">
+            Sprich so viel Deutsch wie möglich — ohne Druck
+          </p>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => navigate('/mini-prova')}
+          className="mt-2 w-full rounded-[20px] px-4 py-4 text-left active:scale-[0.98] transition-transform"
+          style={{
+            ...GLASS,
+            border: '1px solid rgba(168,85,247,0.35)',
+            boxShadow: '0 0 18px rgba(168,85,247,0.12)',
+          }}
+        >
+          <p className="text-[14px] font-bold text-white">📝 MINI-PRÜFUNG</p>
+          <p className="text-[12px] text-[#94A3B8] mt-1">
+            Was kannst du schon auf Deutsch?
+          </p>
+        </button>
+
         <div className="flex-1 flex flex-col items-center justify-center py-5 min-h-[240px]">
           <LiveAudioOrb state="listening" size={220} />
           <p className="mt-4 text-[14px] font-semibold tracking-wide" style={{ color: '#00F2FE', textShadow: '0 0 12px rgba(0,242,254,0.45)' }}>
@@ -83,22 +143,30 @@ export function TalkPage() {
           </p>
         </div>
 
-        <div className="grid grid-cols-3 gap-2">
-          {SUPPORT_CHIPS.map((chip) => (
-            <button
-              key={chip}
-              type="button"
-              onClick={() => startFree(chip)}
-              className="px-2 py-2.5 rounded-full text-[11px] font-semibold text-white active:scale-95 transition-transform truncate"
-              style={{
-                ...GLASS,
-                border: '1px solid rgba(0,242,254,0.28)',
-              }}
-            >
-              {chip}
-            </button>
-          ))}
-        </div>
+        {!topicsLoading && topics.length > 0 ? (
+          <div className="grid grid-cols-3 gap-2">
+            {topics.map((chip) => (
+              <button
+                key={chip.baseId}
+                type="button"
+                onClick={() => startFree(chip)}
+                title={chip.subtitle}
+                className="px-2 py-2.5 rounded-full text-[11px] font-semibold text-white active:scale-95 transition-transform"
+                style={{
+                  ...GLASS,
+                  border: '1px solid rgba(0,242,254,0.28)',
+                }}
+              >
+                <span className="block truncate leading-tight">{chip.label}</span>
+                {chip.subtitle ? (
+                  <span className="block truncate text-[9px] font-medium text-[#94A3B8] mt-0.5 leading-tight">
+                    {chip.emoji ? `${chip.emoji} ` : ''}{chip.subtitle}
+                  </span>
+                ) : null}
+              </button>
+            ))}
+          </div>
+        ) : null}
 
         <div className="mt-7 flex items-end justify-between gap-2 px-1">
           <button

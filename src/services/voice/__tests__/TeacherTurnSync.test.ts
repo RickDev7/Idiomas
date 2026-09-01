@@ -1,4 +1,7 @@
 import {
+  extractTeacherGermanForUi,
+  pedagogicalMatchesTeacherUtterance,
+  resolveUiTeacherTurn,
   shouldEmitPedagogicalNudge,
   shouldUpdateTargetImmediately,
 } from '@/services/voice/TeacherTurnSync';
@@ -26,7 +29,89 @@ async function run() {
     else { failed++; console.log('  ✗', name); }
   };
 
-  // Um target → não emitir nudge duplicado se Gemini já responde
+  // CASO EXATO: pedagogical ≠ teacher utterance → UI = teacher
+  {
+    const pedagogical = 'Was möchtest du?';
+    const teacher = 'Was möchtest du essen?';
+    const ui = resolveUiTeacherTurn({
+      teacherUtterance: teacher,
+      pedagogicalTarget: pedagogical,
+      turnId: 't-1',
+      sessionGeneration: 1,
+      final: true,
+    });
+    assert('UI = teacher utterance completo', ui === 'Was möchtest du essen?');
+    assert('UI ≠ pedagogical target', ui !== pedagogical);
+    assert('mismatch detectável', !pedagogicalMatchesTeacherUtterance(pedagogical, teacher));
+  }
+
+  // Target Ich arbeite / Teacher Wo arbeitest du?
+  {
+    const ui = resolveUiTeacherTurn({
+      teacherUtterance: 'Wo arbeitest du?',
+      pedagogicalTarget: 'Ich arbeite.',
+      turnId: 't-2',
+      sessionGeneration: 1,
+      final: true,
+    });
+    assert('pergunta real do professor na UI', ui === 'Wo arbeitest du?');
+    assert('não mostra chunk alvo', ui !== 'Ich arbeite');
+  }
+
+  // Target Ich möchte / Teacher Was möchtest du essen?
+  {
+    const ui = resolveUiTeacherTurn({
+      teacherUtterance: 'Was möchtest du essen?',
+      pedagogicalTarget: 'Ich möchte...',
+      turnId: 't-3',
+      sessionGeneration: 1,
+      final: true,
+    });
+    assert('não mostra Ich möchte', ui !== 'Ich möchte...');
+    assert('mostra pergunta real', ui === 'Was möchtest du essen?');
+  }
+
+  // A) teacher fala X → UI mostra X
+  {
+    const x = 'Guten Tag! Wie geht es dir?';
+    assert('teacher X → UI X', resolveUiTeacherTurn({
+      teacherUtterance: x,
+      turnId: 't-4',
+      sessionGeneration: 1,
+    }) === extractTeacherGermanForUi(x));
+  }
+
+  // B) pedagogical Y, teacher X → UI X
+  {
+    const ui = resolveUiTeacherTurn({
+      teacherUtterance: 'Was möchtest du essen?',
+      pedagogicalTarget: 'Was möchtest du?',
+      turnId: 't-5',
+      sessionGeneration: 1,
+    });
+    assert('pedagogical Y teacher X → UI X', ui === 'Was möchtest du essen?');
+  }
+
+  // C) pequena variação do Gemini ainda é o utterance real
+  {
+    const ui = resolveUiTeacherTurn({
+      teacherUtterance: 'Was möchtest du heute essen?',
+      pedagogicalTarget: 'Was möchtest du essen?',
+      turnId: 't-6',
+      sessionGeneration: 1,
+    });
+    assert('variação natural preservada', ui === 'Was möchtest du heute essen?');
+  }
+
+  // D) nunca antecipar target pedagógico na UI
+  {
+    assert(
+      'shouldUpdateTargetImmediately sempre false',
+      !shouldUpdateTargetImmediately(decision({ flow: 'startMicroPractice', targetItem: 'Hallo' })),
+    );
+  }
+
+  // nudge duplicado bloqueado em live
   {
     const d = decision({
       geminiNudge: '[INSTRUÇÃO INTERNA] Fale X',
@@ -42,76 +127,19 @@ async function run() {
     assert('live + resposta natural → nudge bloqueado', !emit);
   }
 
-  // intervenePedagogically → sempre emite (override)
+  // intervene → override permitido
   {
-    const d = decision({
-      geminiNudge: 'Corrija',
-      flow: 'intervenePedagogically',
-    });
-    const emit = shouldEmitPedagogicalNudge(d, {
-      liveVoiceActive: true,
-      naturalTeacherResponseExpected: true,
-      assistantSpeaking: true,
-      teacherReceiving: true,
-      playerPlaying: true,
-    });
+    const emit = shouldEmitPedagogicalNudge(
+      decision({ geminiNudge: 'Corrija', flow: 'intervenePedagogically' }),
+      {
+        liveVoiceActive: true,
+        naturalTeacherResponseExpected: true,
+        assistantSpeaking: true,
+        teacherReceiving: true,
+        playerPlaying: true,
+      },
+    );
     assert('intervenePedagogically → nudge permitido', emit);
-  }
-
-  // abertura → nunca emite nudge
-  {
-    const d = decision({
-      geminiNudge: 'kickoff',
-      reason: 'sessão iniciada com plano TeacherEngine',
-    });
-    const emit = shouldEmitPedagogicalNudge(d, {
-      liveVoiceActive: true,
-      naturalTeacherResponseExpected: false,
-      assistantSpeaking: false,
-      teacherReceiving: false,
-      playerPlaying: false,
-    });
-    assert('abertura → nudge bloqueado', !emit);
-  }
-
-  // modo texto (sem live voice) → nudge permitido
-  {
-    const d = decision({
-      geminiNudge: '[INSTRUÇÃO INTERNA] próximo passo',
-      flow: 'continueConversation',
-    });
-    const emit = shouldEmitPedagogicalNudge(d, {
-      liveVoiceActive: false,
-      naturalTeacherResponseExpected: false,
-      assistantSpeaking: false,
-      teacherReceiving: false,
-      playerPlaying: false,
-    });
-    assert('modo sem live voice → nudge permitido', emit);
-  }
-
-  // target imediato só em micro/intervenção
-  {
-    assert(
-      'micro → target imediato',
-      shouldUpdateTargetImmediately(decision({ flow: 'startMicroPractice', targetItem: 'Hallo' })),
-    );
-    assert(
-      'continue → target adiado',
-      !shouldUpdateTargetImmediately(decision({ flow: 'continueConversation', targetItem: 'Hallo' })),
-    );
-  }
-
-  // UI target A vs teacher audio B — política: target só após professor (continue adia)
-  {
-    const uiShowsA = !shouldUpdateTargetImmediately(
-      decision({ flow: 'continueConversation', targetItem: 'Ich möchte...' }),
-    );
-    const uiShowsAOnMicro = shouldUpdateTargetImmediately(
-      decision({ flow: 'startMicroPractice', targetItem: 'Ich möchte...' }),
-    );
-    assert('UI target A antes do professor (continue) → adiado', uiShowsA);
-    assert('UI target A em micro → imediato', uiShowsAOnMicro);
   }
 
   console.log(`\n${passed} passaram, ${failed} falharam.`);

@@ -407,6 +407,35 @@ export function pickReviewOpportunity(
   return null;
 }
 
+/** Converte item da fila (snapshot) em oportunidade de revisão — mesma fonte que a UI. */
+export function opportunityFromQueueItem(
+  item: ReviewQueueItem,
+  map: Record<string, PhraseConfidence>,
+  phrases: Phrase[],
+  opts?: { profile?: UserProfile; now?: Date },
+): ReviewOpportunity | null {
+  const c = map[item.phraseId];
+  const p = phrases.find((x) => x.id === item.phraseId) || null;
+  const german = item.german || p?.german || c?.phraseId || item.phraseId;
+  const portuguese = item.portuguese || p?.portuguese || '';
+  const type = item.reviewType;
+  const { prompt, context } = buildReviewPrompt(german, type, {
+    profession: opts?.profile?.profession,
+    portuguese,
+  });
+  return {
+    itemId: item.phraseId,
+    german,
+    portuguese,
+    type,
+    reason: item.reason,
+    context,
+    priority: item.priority,
+    prompt,
+    expected: german,
+  };
+}
+
 export function mapReviewTypeToAction(type: ReviewType): 'recall' | 'practice' | 'transfer' | 'spontaneous' | 'converse' {
   if (type === 'GUIDED_SPEAKING_REVIEW') return 'practice';
   if (type === 'TRANSFER_REVIEW') return 'transfer';

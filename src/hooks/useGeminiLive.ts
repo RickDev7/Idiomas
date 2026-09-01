@@ -11,9 +11,8 @@ import {
 import {
   logTeacherAudio,
   logTeacherTranscript,
-  logUiTarget,
+  resolveUiTeacherTurn,
   shouldEmitPedagogicalNudge,
-  shouldUpdateTargetImmediately,
 } from '@/services/voice/TeacherTurnSync';
 import { GeminiVoiceService, type GeminiVoiceHandlers, type MicCaptureState } from '@/services/voice/GeminiVoiceService';
 import type { LiveSessionState } from '@/services/ai/GeminiLiveService';
@@ -27,6 +26,19 @@ import {
   ConversationOrchestrator,
 } from '@/services/teacher/ConversationOrchestrator';
 import type { ReviewType } from '@/services/learning/ReviewEngine';
+import { readConversationTopicContext } from '@/services/teacher/ConversationTopicIntent';
+import { readSimulatorContext } from '@/services/teacher/SimulatorIntent';
+import { readMiniProvaContext } from '@/services/teacher/MiniProvaIntent';
+import { startMiniProvaSession, readMiniProvaSnapshot } from '@/services/teacher/MiniProvaSession';
+import {
+  getSimulatorElapsedLabel,
+  isSimulatorActive,
+  isSimulatorTimeUp,
+  recordSimulatorOpportunity,
+  recordSimulatorTurn,
+  startSimulatorSession,
+} from '@/services/teacher/SimulatorSession';
+import { readReviewSessionSnapshot } from '@/services/learning/ReviewSession';
 
 let activeVoiceService: GeminiVoiceService | null = null;
 
@@ -39,6 +51,37 @@ function readReviewIntent(): { phraseId?: string; reviewType?: ReviewType } | un
     phraseId: q.get('phrase') || undefined,
     reviewType: mode || undefined,
   };
+}
+
+function readFreeConversationIntent() {
+  if (typeof window === 'undefined') return undefined;
+  const q = new URLSearchParams(window.location.search);
+  if (q.get('type') !== 'free') return undefined;
+  return readConversationTopicContext();
+}
+
+function readSimulatorIntent() {
+  if (typeof window === 'undefined') return undefined;
+  const q = new URLSearchParams(window.location.search);
+  if (q.get('type') !== 'simulator') return undefined;
+  return readSimulatorContext();
+}
+
+function readMiniProvaIntent() {
+  if (typeof window === 'undefined') return undefined;
+  const q = new URLSearchParams(window.location.search);
+  if (q.get('type') !== 'miniprova') return undefined;
+  return readMiniProvaContext();
+}
+
+function isSimulatorSession(): boolean {
+  if (typeof window === 'undefined') return false;
+  return new URLSearchParams(window.location.search).get('type') === 'simulator';
+}
+
+function isMiniProvaSession(): boolean {
+  if (typeof window === 'undefined') return false;
+  return new URLSearchParams(window.location.search).get('type') === 'miniprova';
 }
 
 const DEV = typeof import.meta !== 'undefined' && !!(import.meta as { env?: { DEV?: boolean } }).env?.DEV;
@@ -91,6 +134,22 @@ export interface GeminiLiveUI {
   targetTurns: number;
   /** Professor emitindo áudio/transcrição. */
   assistantSpeaking: boolean;
+  /** Modo simulador ativo. */
+  simulatorMode: boolean;
+  /** Modo mini prova ativo. */
+  miniProvaMode: boolean;
+  /** Simulador ou mini prova — imersão em alemão, sem tradução. */
+  immersionMode: boolean;
+  /** Progresso da mini prova (questão atual / total). */
+  miniProvaProgress: { current: number; total: number };
+  /** Mini prova concluída — navegar para resultado. */
+  miniProvaComplete: boolean;
+  /** Tempo decorrido MM:SS (simulador). */
+  simulatorElapsed: string;
+  /** Label do cenário (simulador). */
+  simulatorScenarioLabel: string | null;
+  /** Tempo esgotado — encerrar simulação. */
+  simulatorTimeUp: boolean;
 }
 
 export function useGeminiLive(profile: UserProfile | null): GeminiLiveUI {
@@ -118,6 +177,11 @@ export function useGeminiLive(profile: UserProfile | null): GeminiLiveUI {
   const [userTurns, setUserTurns] = useState(0);
   const [targetTurns, setTargetTurns] = useState(5);
   const [assistantSpeaking, setAssistantSpeaking] = useState(false);
+  const [simulatorElapsed, setSimulatorElapsed] = useState('00:00');
+  const [simulatorTimeUp, setSimulatorTimeUp] = useState(false);
+  const [miniProvaProgress, setMiniProvaProgress] = useState({ current: 0, total: 0 });
+  const [miniProvaComplete, setMiniProvaComplete] = useState(false);
+  const simulatorTimeUpRef = useRef(false);
   const accRef = useRef(new GeminiTurnAccumulator());
   const turnIdsRef = useRef({ assistant: '', user: '' });
   const serviceRef = useRef<GeminiVoiceService | null>(null);
@@ -136,18 +200,20 @@ export function useGeminiLive(profile: UserProfile | null): GeminiLiveUI {
   const naturalTeacherResponseExpectedRef = useRef(false);
   const teacherAudioLoggedForTurnRef = useRef('');
 
-  const syncTargetFromOrchestrator = useCallback((turnId: string) => {
-    const plan = orchRef.current?.getPlan();
-    const targetText = plan?.target?.german ?? null;
-    const targetId = plan?.target?.id ?? null;
-    if (!targetText) return;
-    setTargetPhrase(targetText);
-    logUiTarget({
-      sessionGeneration: sessionGenRef.current,
+  const syncUiFromTeacherUtterance = useCallback((
+    teacherUtterance: string,
+    turnId: string,
+    final = false,
+  ) => {
+    const pedagogicalTarget = orchRef.current?.getPlan().target?.german ?? null;
+    const displayed = resolveUiTeacherTurn({
+      teacherUtterance,
+      pedagogicalTarget,
       turnId,
-      targetId,
-      targetText,
+      sessionGeneration: sessionGenRef.current,
+      final,
     });
+    if (displayed) setTargetPhrase(displayed);
   }, []);
 
   const applyDecision = useCallback(async (decision: Awaited<ReturnType<ConversationOrchestrator['handle']>>) => {
@@ -155,15 +221,16 @@ export function useGeminiLive(profile: UserProfile | null): GeminiLiveUI {
     if (decision.reason !== 'fala do professor registrada') {
       setPedagogicalAction(decision.action);
       setPedagogicalReason(decision.reason);
-      if (decision.targetItem && shouldUpdateTargetImmediately(decision)) {
-        setTargetPhrase(decision.targetItem);
-        logUiTarget({
-          sessionGeneration: sessionGenRef.current,
-          turnId: turnIdsRef.current.assistant || `target-${Date.now()}`,
-          targetId: decision.targetItem,
-          targetText: decision.targetItem,
-        });
-      }
+    }
+    if (decision.reason === 'miniprova_done') {
+      setMiniProvaComplete(true);
+    }
+    const mpSnap = orchRef.current?.getMiniProvaSnapshot();
+    if (mpSnap) {
+      setMiniProvaProgress({
+        current: Math.min(mpSnap.currentIndex + (mpSnap.completed ? 0 : 1), mpSnap.total),
+        total: mpSnap.total,
+      });
     }
     if (DEV && decision.reason !== 'fala do professor registrada') {
       console.log('[PEDAGOGICAL ACTION]', decision.action, decision.reason, decision.targetItem || '');
@@ -255,8 +322,28 @@ export function useGeminiLive(profile: UserProfile | null): GeminiLiveUI {
     if (!orchRef.current) return;
     userTurnsRef.current += 1;
     setUserTurns(userTurnsRef.current);
+    if (isSimulatorActive()) {
+      recordSimulatorOpportunity();
+    }
     const decision = await orchRef.current.handleUserUtterance(trimmed);
     await applyDecision(decision);
+    if (isSimulatorActive()) {
+      const plan = orchRef.current.getPlan();
+      const correct =
+        !decision.correction &&
+        decision.flow !== 'intervenePedagogically' &&
+        !decision.eventsRecorded.includes('PHRASE_FAILED');
+      recordSimulatorTurn({
+        phraseId: plan.target?.id ?? null,
+        german: trimmed,
+        correct,
+        withHint: decision.eventsRecorded.includes('PHRASE_PRODUCED_WITH_HINT'),
+        withHelp:
+          decision.eventsRecorded.includes('PHRASE_PRODUCED_WITH_HINT') ||
+          /help|hint|ajuda/i.test(decision.reason),
+        repeated: /repeat|repet/i.test(decision.reason),
+      });
+    }
     const wrap = orchRef.current.maybeZeroLanguageWrapUp();
     if (wrap) await applyDecision(wrap);
   }, [applyDecision]);
@@ -268,7 +355,34 @@ export function useGeminiLive(profile: UserProfile | null): GeminiLiveUI {
       const learning = await MemoryService.loadProfile(profile);
       const phrases = await StorageService.getAllPhrases();
       const reviewIntent = readReviewIntent();
-      const orch = ConversationOrchestrator.create({ profile, learning, phrases, reviewIntent });
+      const reviewSessionSnapshot = readReviewSessionSnapshot();
+      const miniProvaIntent = readMiniProvaIntent();
+      const simulatorIntent = miniProvaIntent ? undefined : readSimulatorIntent();
+      const conversationIntent = simulatorIntent || miniProvaIntent ? undefined : readFreeConversationIntent();
+      if (simulatorIntent) {
+        startSimulatorSession(simulatorIntent);
+        simulatorTimeUpRef.current = false;
+        setSimulatorTimeUp(false);
+      }
+      const miniProvaSnapshot = miniProvaIntent
+        ? (readMiniProvaSnapshot() || startMiniProvaSession(miniProvaIntent))
+        : null;
+      if (miniProvaSnapshot) {
+        setMiniProvaProgress({
+          current: Math.min(miniProvaSnapshot.currentIndex + 1, miniProvaSnapshot.total),
+          total: miniProvaSnapshot.total,
+        });
+      }
+      const orch = ConversationOrchestrator.create({
+        profile,
+        learning,
+        phrases,
+        reviewIntent,
+        reviewSessionSnapshot,
+        conversationIntent,
+        simulatorIntent,
+        miniProvaSnapshot,
+      });
       orchRef.current = orch;
       userTurnsRef.current = 0;
       setUserTurns(0);
@@ -277,12 +391,18 @@ export function useGeminiLive(profile: UserProfile | null): GeminiLiveUI {
       const pendingReview = orch.getPendingReview();
       setPedagogicalAction(plan.action);
       setPedagogicalReason(plan.actionReason || (reviewIntent ? 'review_session' : 'session_start'));
-      // targetPhrase: sincronizado após fala do professor (syncTargetFromOrchestrator)
+      // targetPhrase: sincronizado só após transcript do professor (syncUiFromTeacherUtterance)
       const stages = plan.training?.stages?.length ?? 0;
       const minutes = plan.training?.totalMinutes ?? profile.dailyMinutes ?? 20;
       const zeroMode = !!(live as { zeroLanguageMode?: boolean }).zeroLanguageMode;
+      const simMode = !!simulatorIntent;
+      const mpMode = !!miniProvaSnapshot;
       // L0: barra de progresso = orçamento de tempo (minutos), não “5 frases e fim”
-      if (zeroMode) {
+      if (mpMode && miniProvaSnapshot) {
+        setTargetTurns(miniProvaSnapshot.total);
+      } else if (simMode && simulatorIntent) {
+        setTargetTurns(Math.max(6, Math.round(simulatorIntent.durationMinutes * 1.2)));
+      } else if (zeroMode) {
         const { zeroLanguageSessionUnits } = await import('@/services/teacher/ZeroLanguageMode');
         setTargetTurns(zeroLanguageSessionUnits(minutes));
       } else {
@@ -380,6 +500,7 @@ export function useGeminiLive(profile: UserProfile | null): GeminiLiveUI {
       if (ids[role] !== turn.id) {
         if (role === 'assistant') {
           stopGeminiPlayback();
+          setTargetPhrase(null);
         }
         ids[role] = turn.id;
         list.push(turn.text);
@@ -392,6 +513,9 @@ export function useGeminiLive(profile: UserProfile | null): GeminiLiveUI {
         setAssistantText(turn.text);
         setTeacherTurnStatus(turn.status);
         setAssistantSpeaking(turn.status === 'RECEIVING');
+        if (turn.text) {
+          syncUiFromTeacherUtterance(turn.text, turn.id, false);
+        }
         logTeacherTranscript(
           {
             sessionGeneration: sessionGenRef.current,
@@ -437,15 +561,17 @@ export function useGeminiLive(profile: UserProfile | null): GeminiLiveUI {
         const list = transcriptRef.current.assistant;
         if (list.length) list[list.length - 1] = done.text;
         else if (done.text) list.push(done.text);
+        if (done.text.trim()) {
+          const turnId = turnIdsRef.current.assistant || done.id;
+          syncUiFromTeacherUtterance(done.text, turnId, true);
+        }
         if (done.text.trim() && orchRef.current) {
           const text = done.text;
-          const turnId = turnIdsRef.current.assistant || done.id;
           orchQueueRef.current = orchQueueRef.current
             .then(async () => {
               if (!orchRef.current) return;
               const d = await orchRef.current.handle({ type: 'TEACHER_UTTERANCE', text });
               await applyDecision(d);
-              syncTargetFromOrchestrator(turnId);
             })
             .catch(() => { /* não quebrar a fila */ });
         }
@@ -471,7 +597,7 @@ export function useGeminiLive(profile: UserProfile | null): GeminiLiveUI {
     },
     onMicLevel: (lvl) => setMicLevel(lvl),
     onMicDevice: (label) => setMicDevice(label),
-  }), [applyDecision, processUserTurnComplete, syncTargetFromOrchestrator]);
+  }), [applyDecision, processUserTurnComplete, syncUiFromTeacherUtterance]);
 
   const resetSessionLocals = () => {
     endedRef.current = false;
@@ -814,9 +940,32 @@ export function useGeminiLive(profile: UserProfile | null): GeminiLiveUI {
   }, [persistEnd]);
 
   useStudySession(
-    'gemini-live',
+    isSimulatorSession() ? 'simulator' : isMiniProvaSession() ? 'miniprova' : 'gemini-live',
     state === 'connected' && (micActive || assistantSpeaking),
   );
+
+  useEffect(() => {
+    if (!isSimulatorSession() || state !== 'connected') return;
+    const tick = () => {
+      setSimulatorElapsed(getSimulatorElapsedLabel());
+      if (!simulatorTimeUpRef.current && isSimulatorTimeUp()) {
+        simulatorTimeUpRef.current = true;
+        setSimulatorTimeUp(true);
+      }
+    };
+    tick();
+    const id = window.setInterval(tick, 1000);
+    return () => window.clearInterval(id);
+  }, [state]);
+
+  const simulatorScenarioLabel = isSimulatorSession()
+    ? readSimulatorContext()?.scenario
+      ? `${readSimulatorContext()!.scenario.emoji} ${readSimulatorContext()!.scenario.titleDe}`
+      : 'Simulator'
+    : null;
+
+  const miniProvaMode = isMiniProvaSession();
+  const immersionMode = isSimulatorSession() || miniProvaMode;
 
   return {
     state,
@@ -851,5 +1000,13 @@ export function useGeminiLive(profile: UserProfile | null): GeminiLiveUI {
     userTurns,
     targetTurns,
     assistantSpeaking,
+    simulatorMode: isSimulatorSession(),
+    miniProvaMode,
+    immersionMode,
+    miniProvaProgress,
+    miniProvaComplete,
+    simulatorElapsed,
+    simulatorScenarioLabel,
+    simulatorTimeUp,
   };
 }

@@ -1,4 +1,4 @@
-import { useEffect, useState, type CSSProperties } from 'react';
+import { useEffect, useMemo, useState, type CSSProperties } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { BottomNav } from '@/components/layout/BottomNav';
 import {
@@ -9,11 +9,12 @@ import {
   IconPlay,
   IconPuzzle,
 } from '@/components/ui/Icons';
-import { getDueReviews } from '@/services/learning/ReviewRepository';
+import { beginReviewSessionFromQueue, getDueReviews } from '@/services/learning/ReviewRepository';
 import type { ReviewQueueItem } from '@/services/learning/ReviewEngine';
 import { useProfile } from '@/hooks/useProfile';
 import { MemoryService } from '@/services/learning/MemoryService';
 import { computeProgress } from '@/services/learning/ProgressEngine';
+import type { UserLearningProfile } from '@/services/learning/ConfidenceService';
 
 const GLASS: CSSProperties = {
   background: 'rgba(15, 23, 42, 0.65)',
@@ -28,13 +29,31 @@ const SLOT_OPTIONS = [
   { id: 'hause', de: 'nach Hause.', pt: 'para casa.', color: '#FF512F', bg: 'rgba(255,81,47,0.14)', emoji: '🏠' },
 ] as const;
 
+function recentReviewHits(learning: UserLearningProfile | null, limit = 8): Array<boolean | null> {
+  if (!learning) return Array(limit).fill(null);
+  const entries = Object.values(learning.phrases)
+    .flatMap((p) => (p.reviewHistory || []).map((h) => ({ ...h, phraseId: p.phraseId })))
+    .sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp))
+    .slice(0, limit);
+  if (!entries.length) return Array(limit).fill(null);
+  const hits: Array<boolean | null> = entries.map((e) => e.result === 'SUCCESS');
+  while (hits.length < limit) hits.push(null);
+  return hits.slice(0, limit);
+}
+
+function automationLabel(score: number): string {
+  if (score >= 70) return 'Muito bom!';
+  if (score >= 45) return 'Em progresso';
+  return 'Continue praticando';
+}
+
 export function ReviewPage() {
   const navigate = useNavigate();
   const { profile } = useProfile();
   const [queue, setQueue] = useState<ReviewQueueItem[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
-  const [automation, setAutomation] = useState(68);
-  const hits = [true, true, true, true, true, true, false, false];
+  const [automation, setAutomation] = useState(0);
+  const [learning, setLearning] = useState<UserLearningProfile | null>(null);
 
   useEffect(() => {
     getDueReviews(12).then(setQueue).catch(() => setQueue([]));
@@ -43,17 +62,21 @@ export function ReviewPage() {
   useEffect(() => {
     if (!profile) return;
     MemoryService.loadProfile(profile)
-      .then((learning) => setAutomation(Math.round(computeProgress(learning).automationScore || 68)))
+      .then((lp) => {
+        setLearning(lp);
+        setAutomation(Math.round(computeProgress(lp).automationScore || 0));
+      })
       .catch(() => {});
   }, [profile]);
 
+  const hits = useMemo(() => recentReviewHits(learning), [learning]);
+  const featured = queue[0];
+
   const startReview = () => {
-    const first = queue[0];
-    navigate(
-      first
-        ? `/sessao?type=review&phrase=${encodeURIComponent(first.phraseId)}&mode=${first.reviewType}`
-        : '/sessao?type=review',
-    );
+    if (queue.length > 0) {
+      beginReviewSessionFromQueue(queue);
+    }
+    navigate('/sessao?type=review');
   };
 
   const filled = SLOT_OPTIONS.find((o) => o.id === selected);
@@ -90,12 +113,12 @@ export function ReviewPage() {
         <div className="rounded-[24px] p-5 flex items-center gap-4" style={GLASS}>
           <div className="min-w-0 flex-1">
             <p className="text-[11px] uppercase tracking-[0.14em] font-semibold text-[#64748b] mb-1.5">
-              Estrutura atual
+              Próximo na fila
             </p>
             <p className="text-[28px] font-bold text-white leading-tight font-[family-name:var(--font-display)]">
-              Ich möchte...
+              {featured?.german || '—'}
             </p>
-            <p className="text-[14px] text-[#94A3B8] mt-1">Quero...</p>
+            <p className="text-[14px] text-[#94A3B8] mt-1">{featured?.portuguese || 'Carregando…'}</p>
           </div>
           <span
             className="shrink-0 w-[72px] h-[72px] rounded-2xl flex items-center justify-center text-white"
@@ -121,7 +144,7 @@ export function ReviewPage() {
               className="px-3.5 py-2.5 rounded-xl text-[16px] font-bold text-white"
               style={{ background: 'rgba(15,23,42,0.95)', border: '1px solid rgba(255,255,255,0.12)' }}
             >
-              Ich möchte
+              {featured?.german?.replace(/\.\.\.$/, '').replace(/\.$/, '') || 'Ich möchte'}
             </span>
             <span
               className="min-w-[112px] px-4 py-2.5 rounded-xl border-2 border-dashed text-center text-[14px] font-semibold"
@@ -184,7 +207,7 @@ export function ReviewPage() {
                 Nível de automatização
               </p>
               <p className="text-[15px] font-bold text-white mt-0.5">
-                {automation}% <span className="text-[13px] font-semibold text-[#FBBF24]">Muito bom!</span>
+                {automation}% <span className="text-[13px] font-semibold text-[#FBBF24]">{automationLabel(automation)}</span>
               </p>
             </div>
           </div>
@@ -213,22 +236,28 @@ export function ReviewPage() {
                 key={i}
                 className="shrink-0 w-10 h-10 rounded-full flex items-center justify-center"
                 style={
-                  hit
+                  hit === true
                     ? {
                         background: 'rgba(16,185,129,0.22)',
                         border: '1px solid rgba(16,185,129,0.55)',
                         color: '#10B981',
                         boxShadow: '0 0 12px rgba(16,185,129,0.35)',
                       }
-                    : {
-                        background: 'transparent',
-                        border: '1.5px solid rgba(255,255,255,0.14)',
-                        color: '#64748b',
-                      }
+                    : hit === false
+                      ? {
+                          background: 'rgba(239,68,68,0.12)',
+                          border: '1px solid rgba(239,68,68,0.35)',
+                          color: '#f87171',
+                        }
+                      : {
+                          background: 'transparent',
+                          border: '1.5px solid rgba(255,255,255,0.14)',
+                          color: '#64748b',
+                        }
                 }
-                aria-label={hit ? 'Acerto' : 'Pendente'}
+                aria-label={hit === true ? 'Acerto' : hit === false ? 'Erro' : 'Sem dados'}
               >
-                {hit ? <IconCheck size={18} /> : null}
+                {hit === true ? <IconCheck size={18} /> : null}
               </span>
             ))}
           </div>

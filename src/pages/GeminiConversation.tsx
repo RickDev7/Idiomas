@@ -21,6 +21,32 @@ import {
 } from '@/services/ai/TranslationService';
 import { useKeyboardInset } from '@/hooks/useKeyboardInset';
 
+/** Feedback em alemão para modos de imersão (Simulador / Mini Prova). */
+function deriveImmersionFeedback(opts: {
+  microFeedback: string | null;
+  pedagogicalAction: string | null;
+  responseStatus: 'processing' | 'received' | 'none';
+  microActive: boolean;
+}): { text: string | null; tone: 'success' | 'adjust' | 'neutral' } {
+  if (opts.responseStatus !== 'received') return { text: null, tone: 'neutral' };
+  if (opts.microFeedback?.trim()) {
+    const t = opts.microFeedback.trim();
+    const adjust = /fast|noch|wieder|korrig|fehl|hilfe/i.test(t);
+    return adjust
+      ? { text: 'Fast. Noch einmal.', tone: 'adjust' }
+      : { text: 'Sehr gut!', tone: 'success' };
+  }
+  if (opts.microActive) return { text: null, tone: 'neutral' };
+  const action = opts.pedagogicalAction || '';
+  if (action === 'practice' || action === 'recall') {
+    return { text: 'Fast. Noch einmal.', tone: 'adjust' };
+  }
+  if (action === 'transfer' || action === 'spontaneous' || action === 'converse' || action === 'introduce') {
+    return { text: 'Sehr gut!', tone: 'success' };
+  }
+  return { text: null, tone: 'neutral' };
+}
+
 /** Feedback amigável a partir do estado pedagógico real — UI não inventa acerto/erro. */
 function deriveFeedback(opts: {
   microFeedback: string | null;
@@ -51,12 +77,13 @@ function deriveFeedback(opts: {
   return { text: null, tone: 'neutral' };
 }
 
-function buildPromptTitle(targetPhrase: string | null, germanFromSpeech: string): string {
+function buildPromptTitle(targetPhrase: string | null, germanFromSpeech: string, immersion = false): string {
   const raw = (targetPhrase || germanFromSpeech || '').trim();
   if (!raw) return '';
   const clean = raw.replace(/[.?!…]+$/u, '').trim();
   if (!clean) return '';
   const short = clean.length > 48 ? clean.slice(0, 48).trim() : clean;
+  if (immersion) return short;
   return `Diga "${short}".`;
 }
 
@@ -107,8 +134,27 @@ export function GeminiConversation({ profile, onFinish }: { profile: UserProfile
     if (live.error) toast(live.error, 'error');
   }, [live.error]);
 
-  // Tradução só para subtítulo curto do card — sem painel BR / PISTA
   useEffect(() => {
+    if (!live.simulatorMode || !live.simulatorTimeUp) return;
+    SoundService.play('end');
+    live.end('COMPLETED');
+    onFinish();
+  }, [live.simulatorMode, live.simulatorTimeUp, live, onFinish]);
+
+  useEffect(() => {
+    if (!live.miniProvaMode || !live.miniProvaComplete) return;
+    SoundService.play('end');
+    live.end('COMPLETED');
+    onFinish();
+  }, [live.miniProvaMode, live.miniProvaComplete, live, onFinish]);
+
+  // Tradução só para subtítulo curto do card — desligada em imersão (Simulador / Mini Prova)
+  useEffect(() => {
+    if (live.immersionMode) {
+      setPtTranslation('');
+      translatedForRef.current = '';
+      return;
+    }
     const speech = separateTeacherSpeech(live.assistantText);
     const german = (speech.german || live.assistantText).trim();
     if (!german || live.teacherTurnStatus !== 'COMPLETE') {
@@ -134,7 +180,9 @@ export function GeminiConversation({ profile, onFinish }: { profile: UserProfile
       }
     });
     return () => { cancelled = true; };
-  }, [live.assistantText, live.teacherTurnStatus]);
+  }, [live.assistantText, live.teacherTurnStatus, live.immersionMode]);
+
+  const immersion = live.immersionMode;
 
   useEffect(() => {
     if (live.userText && live.userText !== prevUserText.current) {
@@ -169,23 +217,37 @@ export function GeminiConversation({ profile, onFinish }: { profile: UserProfile
             : live.state === 'connected' && responseStatus === 'processing' ? 'processing'
               : 'idle';
 
-  const statusBadge =
-    live.state === 'connecting' ? 'Conectando…'
+  const statusBadge = immersion
+    ? (live.state === 'connecting' ? 'Verbinden…'
+      : live.state === 'reconnecting' ? 'Wieder verbinden…'
+        : live.state === 'error' ? 'Keine Verbindung'
+          : live.micActive ? 'Ich höre zu'
+            : live.assistantSpeaking || live.teacherTurnStatus === 'RECEIVING' ? 'Ich spreche'
+              : responseStatus === 'processing' ? 'Prüfen…'
+                : 'Bereit')
+    : (live.state === 'connecting' ? 'Conectando…'
       : live.state === 'reconnecting' ? 'Reconectando…'
         : live.state === 'error' ? 'Sem conexão'
           : live.micActive ? 'Ouvindo'
             : live.assistantSpeaking || live.teacherTurnStatus === 'RECEIVING' ? 'Falando'
               : responseStatus === 'processing' ? 'Verificando'
-                : 'Pronto';
+                : 'Pronto');
 
-  const micStatus =
-    live.micState === 'REQUESTING_PERMISSION' ? 'Pedindo microfone…'
+  const micStatus = immersion
+    ? (live.micState === 'REQUESTING_PERMISSION' ? 'Mikrofon erlauben…'
+      : live.micState === 'ERROR' ? 'Mikrofon nicht verfügbar'
+        : live.micActive || live.micState === 'LISTENING' ? 'Ich höre zu'
+          : live.assistantSpeaking ? 'Ich höre zu'
+            : live.state === 'connecting' || live.state === 'reconnecting' ? 'Verbinden…'
+              : responseStatus === 'processing' ? 'Verstanden. Ich prüfe…'
+                : started ? 'Tippen zum Sprechen' : 'Tippen zum Starten')
+    : (live.micState === 'REQUESTING_PERMISSION' ? 'Pedindo microfone…'
       : live.micState === 'ERROR' ? 'Não conseguimos acessar o microfone'
         : live.micActive || live.micState === 'LISTENING' ? 'Estou ouvindo você'
           : live.assistantSpeaking ? 'Estou ouvindo você'
             : live.state === 'connecting' || live.state === 'reconnecting' ? 'Conectando…'
               : responseStatus === 'processing' ? 'Entendi. Estou verificando...'
-                : started ? 'Toque para falar' : 'Toque para começar';
+                : started ? 'Toque para falar' : 'Toque para começar');
 
   const micHint =
     live.micState === 'ERROR' ? 'Verifique a permissão do microfone.'
@@ -212,12 +274,14 @@ export function GeminiConversation({ profile, onFinish }: { profile: UserProfile
   const teacherSpeech = separateTeacherSpeech(live.assistantText);
   const shownGerman = teacherSpeech.german || (teacherSpeech.embeddedPortuguese ? '' : live.assistantText);
 
-  const promptTitle = buildPromptTitle(live.targetPhrase, shownGerman);
-  const promptSubtitle = buildPromptSubtitle(
-    teacherSpeech.embeddedPortuguese,
-    ptTranslation,
-    live.pedagogicalReason,
-  );
+  const promptTitle = buildPromptTitle(live.targetPhrase, shownGerman, immersion);
+  const promptSubtitle = immersion
+    ? undefined
+    : buildPromptSubtitle(
+      teacherSpeech.embeddedPortuguese,
+      ptTranslation,
+      live.pedagogicalReason,
+    );
 
   /** Repetir = TTS local da última frase. Não dispara nova resposta Gemini. */
   const replayTeacher = () => {
@@ -234,7 +298,11 @@ export function GeminiConversation({ profile, onFinish }: { profile: UserProfile
 
   const askHelp = () => {
     haptic(8);
-    void live.sendHelp('Não entendi. Pode me ajudar a responder?');
+    void live.sendHelp(
+      immersion
+        ? 'Ich habe es nicht verstanden. Bitte noch einmal auf Deutsch.'
+        : 'Não entendi. Pode me ajudar a responder?',
+    );
   };
 
   const askSlow = () => {
@@ -267,12 +335,19 @@ export function GeminiConversation({ profile, onFinish }: { profile: UserProfile
     await live.submitUserText(t);
   };
 
-  const feedback = deriveFeedback({
-    microFeedback: live.microFeedback,
-    pedagogicalAction: live.pedagogicalAction,
-    responseStatus,
-    microActive: !!live.microPractice,
-  });
+  const feedback = immersion
+    ? deriveImmersionFeedback({
+      microFeedback: live.microFeedback,
+      pedagogicalAction: live.pedagogicalAction,
+      responseStatus,
+      microActive: !!live.microPractice,
+    })
+    : deriveFeedback({
+      microFeedback: live.microFeedback,
+      pedagogicalAction: live.pedagogicalAction,
+      responseStatus,
+      microActive: !!live.microPractice,
+    });
 
   const progressCurrent = Math.min(
     live.targetTurns,
@@ -281,11 +356,17 @@ export function GeminiConversation({ profile, onFinish }: { profile: UserProfile
 
   const sequenceIndex = Math.max(0, Math.min(3, (live.userTurns || 0) % 4));
 
-  const actions = [
-    { icon: <IconRefresh size={18} />, label: 'Repetir', sub: 'Ouvir de novo', color: '#00F2FE', onClick: replayTeacher },
-    { icon: <IconLightbulb size={18} />, label: 'Ajuda', sub: 'Preciso de ajuda', color: '#FBBF24', onClick: askHelp },
-    { icon: <IconTurtle size={18} />, label: 'Devagar', sub: 'Falar mais devagar', color: '#34D399', onClick: askSlow },
-  ];
+  const actions = immersion
+    ? [
+      { icon: <IconRefresh size={18} />, label: 'Nochmal', sub: 'Wiederholen', color: '#00F2FE', onClick: replayTeacher },
+      { icon: <IconLightbulb size={18} />, label: 'Hilfe', sub: 'Ich brauche Hilfe', color: '#FBBF24', onClick: askHelp },
+      { icon: <IconTurtle size={18} />, label: 'Langsam', sub: 'Langsamer sprechen', color: '#34D399', onClick: askSlow },
+    ]
+    : [
+      { icon: <IconRefresh size={18} />, label: 'Repetir', sub: 'Ouvir de novo', color: '#00F2FE', onClick: replayTeacher },
+      { icon: <IconLightbulb size={18} />, label: 'Ajuda', sub: 'Preciso de ajuda', color: '#FBBF24', onClick: askHelp },
+      { icon: <IconTurtle size={18} />, label: 'Devagar', sub: 'Falar mais devagar', color: '#34D399', onClick: askSlow },
+    ];
 
   const abandon = () => {
     SoundService.play('end');
@@ -310,7 +391,29 @@ export function GeminiConversation({ profile, onFinish }: { profile: UserProfile
         <IconButton label="Voltar" className="min-h-11 min-w-11 text-white/80" onClick={abandon}>
           <IconBack size={20} />
         </IconButton>
-        <SessionProgress current={progressCurrent} total={live.targetTurns} />
+        {live.simulatorMode ? (
+          <div className="flex flex-col items-center min-w-0 flex-1 px-1">
+            <span className="text-[10px] uppercase tracking-[0.14em] font-semibold text-[#00F2FE]">
+              SIMULATOR
+            </span>
+            <span className="text-[12px] text-white font-semibold truncate max-w-full">
+              {live.simulatorScenarioLabel}
+            </span>
+            <span className="text-[11px] text-[#64748b] tabular-nums">{live.simulatorElapsed}</span>
+          </div>
+        ) : live.miniProvaMode ? (
+          <div className="flex flex-col items-center min-w-0 flex-1 px-1">
+            <span className="text-[10px] uppercase tracking-[0.14em] font-semibold text-[#A855F7]">
+              MINI-PRÜFUNG
+            </span>
+            <span className="text-[12px] text-white font-semibold tabular-nums">
+              {live.miniProvaProgress.current} / {live.miniProvaProgress.total}
+            </span>
+            <span className="text-[11px] text-[#64748b]">Was kannst du schon?</span>
+          </div>
+        ) : (
+          <SessionProgress current={progressCurrent} total={live.targetTurns} />
+        )}
         <button
           type="button"
           onClick={finish}
@@ -326,7 +429,19 @@ export function GeminiConversation({ profile, onFinish }: { profile: UserProfile
       </header>
 
       <div className="px-4 pb-2 shrink-0">
-        <ConversationProgressBar current={progressCurrent} total={live.targetTurns} />
+        {live.simulatorMode ? (
+          <p className="text-center text-[11px] text-[#64748b]">
+            {live.userTurns > 0
+              ? `${live.userTurns} Produktionen`
+              : 'Sprich so viel Deutsch wie möglich.'}
+          </p>
+        ) : live.miniProvaMode ? (
+          <p className="text-center text-[11px] text-[#64748b]">
+            Frage {live.miniProvaProgress.current} von {live.miniProvaProgress.total}
+          </p>
+        ) : (
+          <ConversationProgressBar current={progressCurrent} total={live.targetTurns} />
+        )}
       </div>
 
       <div className="flex-1 min-h-0 overflow-y-auto scrollbar-hide px-4 flex flex-col">
@@ -334,7 +449,9 @@ export function GeminiConversation({ profile, onFinish }: { profile: UserProfile
           <TeacherCard
             orbState={orbState}
             statusText={statusBadge}
-            promptTitle={promptTitle || (live.assistantText ? 'Escute o professor.' : 'Aguardando o professor…')}
+            promptTitle={promptTitle || (live.assistantText
+              ? (immersion ? 'Hör zu.' : 'Escute o professor.')
+              : (immersion ? 'Warte auf den Lehrer…' : 'Aguardando o professor…'))}
             promptSubtitle={promptSubtitle}
             onRepeat={replayTeacher}
           />
@@ -422,6 +539,7 @@ export function GeminiConversation({ profile, onFinish }: { profile: UserProfile
         onTextChange={setTextValue}
         onTextSubmit={handleTextSubmit}
         onToggleText={() => setTextMode((v) => !v)}
+        allowTextInput={!immersion}
       />
 
       {showMicSettings && started && live.audioInputs.length > 0 && (
