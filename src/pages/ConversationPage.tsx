@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useStudySession } from '@/hooks/useStudySession';
 import { LoadingScreen } from '@/components/ui/LoadingScreen';
 import { MicButton, HelpButton } from '@/components/ui/Shared';
 import { VoiceOrb } from '@/components/ui/VoiceOrb';
@@ -33,12 +34,17 @@ export function ConversationPage() {
   const type = searchParams.get('type') || 'lesson';
 
   const useGemini = isGeminiLiveEnabled() || type === 'review';
+  const lesson = useLesson(type, profile);
+
+  useStudySession(
+    `sessao-${type}`,
+    !!profile && !loading && !useGemini && lesson.phase !== 'idle',
+  );
 
   const isFree = type === 'free';
   const isAssessment = type === 'assessment';
-  const lesson = useLesson(type, profile);
 
-  // Modo de tradução persistente (controlado pelo usuário, não some automaticamente)
+  // Modo de tradução persistente
   const [translationMode] = useState<TranslationMode>(() => UiPrefsService.get().translationMode);
   const [translationVisible, setTranslationVisible] = useState(translationMode === 'always');
 

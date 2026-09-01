@@ -51,6 +51,7 @@ import { decideReviewOrConverse, decideSpontaneousOpportunity } from '@/services
 import { EventStore, type LearningEventType } from '@/services/learning/EventStore';
 import { MemoryService } from '@/services/learning/MemoryService';
 import { ChunkTrackerStore } from '@/services/learning/ChunkTrackerStore';
+import { UserMetricsStore } from '@/services/learning/UserMetricsStore';
 import {
   planTodaysTraining,
   suggestConversationTopic,
@@ -2642,6 +2643,11 @@ export class ConversationOrchestrator {
         correct: true,
         withHelp: guidedProduction,
       });
+      UserMetricsStore.recordSpeechOutcome({
+        correct: true,
+        withHint: usedHelp || this.sessionSupport > 0,
+      });
+      UserMetricsStore.syncFromLearning(this.learning);
       const prevSupport = this.sessionSupport;
       const faded = recordHelpAttempt(targetId, this.sessionSupport, true, {
         sessionId: this.sessionId,
@@ -2727,6 +2733,10 @@ export class ConversationOrchestrator {
       });
       eventsRecorded.push('PHRASE_FAILED');
       await this.recordPhraseEvent(targetId, { type: 'produced', correct: false });
+      UserMetricsStore.recordSpeechOutcome({
+        correct: false,
+        withHint: usedHelp || this.sessionSupport > 0,
+      });
       const helpUpdate = recordHelpAttempt(targetId, this.sessionSupport, false);
       this.sessionSupport = escalateSupport(helpUpdate.nextInSession);
       this.plan = { ...this.plan, scaffoldLevel: this.sessionSupport };

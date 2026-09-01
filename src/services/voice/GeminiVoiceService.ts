@@ -1,7 +1,19 @@
 import type { SpeechSpeed, VoiceServiceInterface } from '@/services/voice/VoiceService';
 import { GeminiLiveService, type LiveProfile, type LiveSessionState } from '@/services/ai/GeminiLiveService';
+import {
+  MIC_PCM_RATE,
+  PLAYBACK_PCM_RATE,
+  MAX_PLAYBACK_QUEUE_CHUNKS,
+  MAX_PLAYBACK_LAG_MS,
+  MIC_CONSTRAINTS,
+  createOrResumeAudioContext,
+  resumeAudioContextIfNeeded,
+  applyChunkFade,
+  parsePcmSampleRate,
+  playbackScheduleLagMs,
+  type QueuedPcmChunk,
+} from '@/services/voice/AudioPipeline';
 
-const PCM_SAMPLE_RATE = 16000;
 const DEV = typeof import.meta !== 'undefined' && !!(import.meta as { env?: { DEV?: boolean } }).env?.DEV;
 
 export type MicCaptureState =
@@ -55,6 +67,11 @@ function base64ToArrayBuffer(base64: string): ArrayBuffer {
   return bytes.buffer;
 }
 
+type ActivePlaybackNode = {
+  source: AudioBufferSourceNode;
+  gain: GainNode;
+};
+
 export interface GeminiVoiceHandlers {
   onStateChange?: (state: LiveSessionState) => void;
   onTranscript?: (role: 'user' | 'assistant', text: string, meta?: { delta?: string; complete?: boolean }) => void;
@@ -76,13 +93,18 @@ export class GeminiVoiceService implements VoiceServiceInterface {
   private listening = false;
   private micAcquired = false;
   private speaking = false;
-  private playbackQueue: ArrayBuffer[] = [];
+  private playbackQueue: QueuedPcmChunk[] = [];
   private playing = false;
   private handlers: GeminiVoiceHandlers;
   private preferredDeviceId: string | null = null;
   private micState: MicCaptureState = 'IDLE';
   private chunksSent = 0;
   private bytesSent = 0;
+  private nextStartTime = 0;
+  private activeNodes: ActivePlaybackNode[] = [];
+  private lastPacketAt = 0;
+  private visibilityHandler: (() => void) | null = null;
+  private backgroundSuspended = false;
 
   setMicDeviceId(id: string | null): void {
     this.preferredDeviceId = id;
@@ -106,7 +128,7 @@ export class GeminiVoiceService implements VoiceServiceInterface {
           this.handlers.onTurnComplete?.(role, text);
         },
         onInterrupted: (text) => {
-          this.stopPlayback();
+          this.flushPlaybackQueue('interrupted');
           this.speaking = false;
           this.handlers.onTurnComplete?.('assistant', text);
         },
@@ -114,6 +136,7 @@ export class GeminiVoiceService implements VoiceServiceInterface {
       },
       backendUrl,
     );
+    this.bindVisibilityHandling();
   }
 
   getMicState(): MicCaptureState {
@@ -130,9 +153,11 @@ export class GeminiVoiceService implements VoiceServiceInterface {
   }
 
   isSupported(): boolean {
-    const w = window as any;
-    const nav = navigator as any;
-    return !!(nav.mediaDevices?.getUserMedia && (w.AudioContext || w.webkitAudioContext));
+    return !!(
+      typeof navigator !== 'undefined' &&
+      !!navigator.mediaDevices &&
+      ('AudioContext' in window || 'webkitAudioContext' in window)
+    );
   }
 
   setLanguage(_lang: string): void {}
@@ -176,17 +201,9 @@ export class GeminiVoiceService implements VoiceServiceInterface {
     }
     this.setMicState('REQUESTING_PERMISSION');
     try {
-      if (!this.micContext) {
-        this.micContext = new AudioContext();
-      }
-      if (this.micContext.state === 'suspended') await this.micContext.resume();
+      this.micContext = await createOrResumeAudioContext(this.micContext, MIC_PCM_RATE);
 
-      const audioConstraint: MediaTrackConstraints = {
-        channelCount: 1,
-        echoCancellation: true,
-        noiseSuppression: true,
-        autoGainControl: true,
-      };
+      const audioConstraint: MediaTrackConstraints = { ...MIC_CONSTRAINTS };
       if (this.preferredDeviceId) audioConstraint.deviceId = { exact: this.preferredDeviceId };
       this.mediaStream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraint });
 
@@ -201,7 +218,7 @@ export class GeminiVoiceService implements VoiceServiceInterface {
       if (DEV) {
         console.log('[VOICE INPUT] stream active =', this.mediaStream.active);
         console.log('[VOICE INPUT] track active =', track.enabled, 'readyState =', track.readyState);
-        console.log('[VOICE INPUT] sampleRate (native) =', this.micContext.sampleRate);
+        console.log('[VOICE INPUT] AudioContext sampleRate =', this.micContext.sampleRate);
         console.log('[VOICE INPUT] channels = 1 (target PCM 16kHz mono 16-bit)');
         console.log('[mic] dispositivo:', label, settings);
       }
@@ -223,9 +240,7 @@ export class GeminiVoiceService implements VoiceServiceInterface {
     if (!this.micContext || !this.mediaStream) {
       throw new Error('microphone_not_acquired');
     }
-    if (this.micContext.state === 'suspended') {
-      void this.micContext.resume();
-    }
+    void resumeAudioContextIfNeeded(this.micContext);
 
     this.teardownProcessor();
 
@@ -251,7 +266,7 @@ export class GeminiVoiceService implements VoiceServiceInterface {
         levelEmit = now;
         this.handlers.onMicLevel?.(Math.min(1, rms * 4));
       }
-      const resampled = resampleLinear(input, nativeRate, PCM_SAMPLE_RATE);
+      const resampled = resampleLinear(input, nativeRate, MIC_PCM_RATE);
       const pcm = floatTo16BitPCM(resampled);
       this.chunksSent += 1;
       this.bytesSent += pcm.byteLength;
@@ -322,14 +337,13 @@ export class GeminiVoiceService implements VoiceServiceInterface {
     return this.live.sendText(text);
   }
 
-  /** Envia fala do aluno como conteúdo de usuário (fallback texto). */
   sendUserText(text: string): Promise<void> {
     return this.live.sendText(text);
   }
 
   stopSpeaking(): void {
     this.live.interrupt();
-    this.stopPlayback();
+    this.flushPlaybackQueue('stop_speaking');
     this.speaking = false;
   }
 
@@ -338,76 +352,160 @@ export class GeminiVoiceService implements VoiceServiceInterface {
   }
 
   disconnect(): void {
+    this.unbindVisibilityHandling();
     this.stopMic();
-    this.stopPlayback();
+    this.flushPlaybackQueue('disconnect');
     this.live.disconnect();
+    void this.micContext?.close();
+    void this.playbackContext?.close();
+    this.micContext = null;
+    this.playbackContext = null;
   }
 
-  private nextStartTime = 0;
-  private activeSources: AudioBufferSourceNode[] = [];
+  private bindVisibilityHandling(): void {
+    if (typeof document === 'undefined' || this.visibilityHandler) return;
+    this.visibilityHandler = () => {
+      if (document.hidden) {
+        this.handleTabHidden();
+      } else {
+        void this.handleTabVisible();
+      }
+    };
+    document.addEventListener('visibilitychange', this.visibilityHandler);
+  }
 
-  private parseSampleRate(mime?: string): number {
-    if (mime) {
-      const m = mime.match(/rate=(\d+)/i);
-      if (m) return parseInt(m[1], 10);
+  private unbindVisibilityHandling(): void {
+    if (this.visibilityHandler) {
+      document.removeEventListener('visibilitychange', this.visibilityHandler);
+      this.visibilityHandler = null;
     }
-    return 24000;
+  }
+
+  private handleTabHidden(): void {
+    this.flushPlaybackQueue('tab_hidden');
+    this.speaking = false;
+    this.backgroundSuspended = true;
+    void this.micContext?.suspend();
+    void this.playbackContext?.suspend();
+  }
+
+  private async handleTabVisible(): Promise<void> {
+    if (!this.backgroundSuspended) return;
+    this.backgroundSuspended = false;
+    await resumeAudioContextIfNeeded(this.micContext);
+    await resumeAudioContextIfNeeded(this.playbackContext);
+    this.lastPacketAt = 0;
+    this.nextStartTime = 0;
+  }
+
+  private shouldFlushForJitter(now: number): boolean {
+    if (this.lastPacketAt > 0 && now - this.lastPacketAt > MAX_PLAYBACK_LAG_MS) {
+      return true;
+    }
+    if (this.playbackContext && this.nextStartTime > 0) {
+      const lag = playbackScheduleLagMs(this.playbackContext, this.nextStartTime);
+      if (lag > MAX_PLAYBACK_LAG_MS) return true;
+    }
+    return false;
+  }
+
+  private flushPlaybackQueue(reason: string): void {
+    if (DEV && (this.playbackQueue.length > 0 || this.activeNodes.length > 0)) {
+      console.log('[VOICE OUTPUT] flush:', reason, 'queued=', this.playbackQueue.length, 'active=', this.activeNodes.length);
+    }
+    this.playbackQueue = [];
+    this.playing = false;
+    this.nextStartTime = 0;
+    this.lastPacketAt = 0;
+    for (const node of this.activeNodes) {
+      try { node.source.stop(); } catch { /* ignore */ }
+      try { node.source.disconnect(); } catch { /* ignore */ }
+      try { node.gain.disconnect(); } catch { /* ignore */ }
+    }
+    this.activeNodes = [];
   }
 
   private enqueueAudio(buf: ArrayBuffer, mime?: string) {
-    this.playbackQueue.push(buf);
+    const now = performance.now();
+    if (this.shouldFlushForJitter(now)) {
+      this.flushPlaybackQueue('jitter');
+    }
+    if (this.playbackQueue.length >= MAX_PLAYBACK_QUEUE_CHUNKS) {
+      this.flushPlaybackQueue('overflow');
+    }
+    this.lastPacketAt = now;
+    this.playbackQueue.push({ buf, mime, receivedAt: now });
     this.speaking = true;
-    void this.playQueue(mime);
+    void this.playQueue();
   }
 
-  private async playQueue(mime?: string) {
+  private async playQueue() {
     if (this.playing) return;
     this.playing = true;
-    if (!this.playbackContext) {
-      this.playbackContext = new AudioContext();
-    }
-    if (this.playbackContext.state === 'suspended') await this.playbackContext.resume();
 
-    const rate = this.parseSampleRate(mime);
-    while (this.playbackQueue.length > 0) {
-      const buf = this.playbackQueue.shift()!;
-      this.schedulePcmChunk(buf, rate);
+    try {
+      this.playbackContext = await createOrResumeAudioContext(
+        this.playbackContext,
+        PLAYBACK_PCM_RATE,
+      );
+
+      while (this.playbackQueue.length > 0) {
+        if (this.playbackContext && this.shouldFlushForJitter(performance.now())) {
+          this.flushPlaybackQueue('playback_lag');
+          break;
+        }
+
+        const item = this.playbackQueue.shift()!;
+        const rate = parsePcmSampleRate(item.mime, PLAYBACK_PCM_RATE);
+        this.schedulePcmChunk(item.buf, rate);
+      }
+    } finally {
+      this.playing = false;
+      if (this.playbackQueue.length > 0) {
+        void this.playQueue();
+      }
     }
-    this.playing = false;
   }
 
   private schedulePcmChunk(pcm: ArrayBuffer, rate: number) {
     if (!this.playbackContext) return;
+
     const view = new DataView(pcm);
     const samples = pcm.byteLength / 2;
+    if (samples <= 0) return;
+
     const float = new Float32Array(samples);
     for (let i = 0; i < samples; i++) {
       float[i] = view.getInt16(i * 2, true) / 0x8000;
     }
+
     const audioBuf = this.playbackContext.createBuffer(1, float.length, rate);
     audioBuf.copyToChannel(float, 0);
+
     const src = this.playbackContext.createBufferSource();
     src.buffer = audioBuf;
-    src.connect(this.playbackContext.destination);
+
+    const gain = this.playbackContext.createGain();
+    src.connect(gain);
+    gain.connect(this.playbackContext.destination);
 
     const now = this.playbackContext.currentTime;
     const start = Math.max(now, this.nextStartTime);
+    applyChunkFade(gain, start, audioBuf.duration);
+
     src.start(start);
     this.nextStartTime = start + audioBuf.duration;
-    this.activeSources.push(src);
+
+    const node: ActivePlaybackNode = { source: src, gain };
+    this.activeNodes.push(node);
+
     src.onended = () => {
-      this.activeSources = this.activeSources.filter((s) => s !== src);
-      if (this.activeSources.length === 0 && this.playbackQueue.length === 0) {
+      this.activeNodes = this.activeNodes.filter((n) => n.source !== src);
+      try { src.disconnect(); } catch { /* ignore */ }
+      try { gain.disconnect(); } catch { /* ignore */ }
+      if (this.activeNodes.length === 0 && this.playbackQueue.length === 0) {
         this.speaking = false;
       }
     };
-  }
-
-  private stopPlayback() {
-    this.playbackQueue = [];
-    this.playing = false;
-    this.nextStartTime = 0;
-    this.activeSources.forEach((s) => { try { s.stop(); } catch { /* ignore */ } });
-    this.activeSources = [];
   }
 }

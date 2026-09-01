@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useStudySession } from '@/hooks/useStudySession';
+import { createOrResumeAudioContext, MIC_CONSTRAINTS, MIC_PCM_RATE } from '@/services/voice/AudioPipeline';
 import { GeminiVoiceService, type GeminiVoiceHandlers, type MicCaptureState } from '@/services/voice/GeminiVoiceService';
 import type { LiveSessionState } from '@/services/ai/GeminiLiveService';
 import type { UserProfile } from '@/types';
@@ -457,14 +459,8 @@ export function useGeminiLive(profile: UserProfile | null): GeminiLiveUI {
     let earlyStream: MediaStream | null = null;
     try {
       setMicState('REQUESTING_PERMISSION');
-      earlyCtx = new AudioContext();
-      if (earlyCtx.state === 'suspended') await earlyCtx.resume();
-      const audioConstraint: MediaTrackConstraints = {
-        channelCount: 1,
-        echoCancellation: true,
-        noiseSuppression: true,
-        autoGainControl: true,
-      };
+      earlyCtx = await createOrResumeAudioContext(null, MIC_PCM_RATE);
+      const audioConstraint: MediaTrackConstraints = { ...MIC_CONSTRAINTS };
       if (selectedDeviceId) audioConstraint.deviceId = { exact: selectedDeviceId };
       earlyStream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraint });
       const track = earlyStream.getAudioTracks()[0];
@@ -654,6 +650,11 @@ export function useGeminiLive(profile: UserProfile | null): GeminiLiveUI {
       }
     };
   }, [persistEnd]);
+
+  useStudySession(
+    'gemini-live',
+    state === 'connected' && (micActive || assistantSpeaking),
+  );
 
   return {
     state,

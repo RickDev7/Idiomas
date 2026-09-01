@@ -1,5 +1,6 @@
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import { ChunkTrackerProvider } from '@/context/ChunkTrackerContext';
+import { UserMetricsProvider } from '@/context/UserMetricsContext';
 import { HomePage } from '@/pages/HomePage';
 import { OnboardingPage } from '@/pages/OnboardingPage';
 import { ConversationPage } from '@/pages/ConversationPage';
@@ -13,6 +14,7 @@ import { ToastHost } from '@/components/ui/Toast';
 export default function App() {
   return (
     <ChunkTrackerProvider>
+      <UserMetricsProvider>
       <BrowserRouter>
         <ToastHost />
         <Routes>
@@ -27,6 +29,7 @@ export default function App() {
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </BrowserRouter>
+      </UserMetricsProvider>
     </ChunkTrackerProvider>
   );
 }
