@@ -22,6 +22,8 @@ export type MiniProvaQuestion = {
   promptDe: string;
   priority: number;
   weak: boolean;
+  /** Palavras-chave da estrutura para avaliar transferência. */
+  expectedKeywords?: string[];
 };
 
 export type MiniProvaAnswer = {

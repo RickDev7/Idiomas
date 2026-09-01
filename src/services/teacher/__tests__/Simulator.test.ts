@@ -4,6 +4,7 @@ import { emptyLearningProfile, acceptedConf } from '@/services/learning/RealProg
 import {
   buildSimulatorContext,
   buildWeakPhraseIds,
+  buildSimulatorConversationHints,
   listCompatibleScenarios,
   pickSimulatorOpening,
   buildSimulatorKickoff,
@@ -55,9 +56,11 @@ export function testSimulator() {
 
   const opening = pickSimulatorOpening(ctx!);
   assert(opening.length > 0, 'abertura definida');
+  const hints = buildSimulatorConversationHints(ctx!);
+  assert(hints.length >= 1, 'dicas de conversa');
   const kickoff = buildSimulatorKickoff(ctx!, opening);
   assert(kickoff.includes('SIMULATOR'), 'kickoff modo simulador imersão');
-  assert(kickoff.includes('NUR DEUTSCH'), 'kickoff sem português');
+  assert(kickoff.includes('GESPRÄCHSFLUSS') || kickoff.includes('NATÜRLICHES GESPRÄCH'), 'kickoff conversa');
   assert(kickoff.includes('Schleife'), 'anti-repetição no kickoff');
   assert(kickoff.includes(opening), 'abertura no kickoff');
 

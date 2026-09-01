@@ -174,22 +174,61 @@ function collectStructures(
   return { structures: structures.slice(0, 16), baseIds };
 }
 
+const STRUCTURE_SITUATIONS: Array<{ match: RegExp; prompts: string[] }> = [
+  { match: /möcht/i, prompts: ['Was möchtest du trinken?', 'Was möchtest du essen?', 'Was möchtest du kaufen?', 'Was möchtest du heute machen?'] },
+  { match: /arbeit/i, prompts: ['Wo arbeitest du?', 'Was arbeitest du?', 'Arbeitest du morgens oder abends?', 'Und wann arbeitest du?'] },
+  { match: /brauch/i, prompts: ['Was brauchst du?', 'Brauchst du Hilfe?', 'Was brauchst du heute?'] },
+  { match: /muss/i, prompts: ['Was musst du heute machen?', 'Wann musst du arbeiten?', 'Musst du heute einkaufen?'] },
+  { match: /wohn|wo\b/i, prompts: ['Wo wohnst du?', 'Wo arbeitest du?', 'Wo bist du?'] },
+  { match: /heiß|komm|bin/i, prompts: ['Wie heißt du?', 'Woher kommst du?', 'Wie geht es dir?'] },
+  { match: /kannst|helfen/i, prompts: ['Kannst du mir helfen?', 'Kannst du das wiederholen?'] },
+];
+
+/** Perguntas variadas para guiar o Gemini — sem revelar que são pontos fracos. */
+export function buildSimulatorConversationHints(ctx: SimulatorContext): string[] {
+  const hints: string[] = [];
+  const seen = new Set<string>();
+  const sources = [...ctx.focusStructures, ...ctx.weakPhraseIds.map((id) => id)];
+  for (const item of sources) {
+    for (const { match, prompts } of STRUCTURE_SITUATIONS) {
+      if (!match.test(item)) continue;
+      for (const p of prompts) {
+        if (seen.has(p)) continue;
+        seen.add(p);
+        hints.push(p);
+      }
+      break;
+    }
+  }
+  if (hints.length === 0) {
+    for (const s of ctx.knownStructures.filter((x) => x.includes('?')).slice(0, 6)) {
+      if (!seen.has(s)) hints.push(s);
+    }
+  }
+  return hints.slice(0, 10);
+}
+
 function pickOpening(structures: string[], scenario: SimulatorScenario): string {
-  const questions = structures.filter((s) => s.includes('?'));
-  const topicQs = questions.filter((q) => {
-    if (scenario.topic === 'work') return /arbeit/i.test(q);
-    if (scenario.topic === 'food') return /möcht|essen|trinken/i.test(q);
-    if (scenario.topic === 'needs') return /brauch/i.test(q);
-    if (scenario.topic === 'routine') return /muss/i.test(q);
-    if (scenario.topic === 'requests') return /kannst|helfen/i.test(q);
-    if (scenario.topic === 'places') return /wohn|wo\b/i.test(q);
-    if (scenario.topic === 'identity') return /heiß|komm|bin/i.test(q);
+  const topicQs = structures.filter((s) => {
+    if (!s.includes('?')) return false;
+    if (scenario.topic === 'work') return /arbeit/i.test(s);
+    if (scenario.topic === 'food') return /möcht|essen|trinken/i.test(s);
+    if (scenario.topic === 'needs') return /brauch/i.test(s);
+    if (scenario.topic === 'routine') return /muss/i.test(s);
+    if (scenario.topic === 'requests') return /kannst|helfen/i.test(s);
+    if (scenario.topic === 'places') return /wohn|wo\b/i.test(s);
+    if (scenario.topic === 'identity') return /heiß|komm|bin/i.test(s);
     return true;
   });
+  for (const { match, prompts } of STRUCTURE_SITUATIONS) {
+    if (topicQs.some((q) => match.test(q)) && prompts.length) {
+      return prompts[0];
+    }
+  }
   if (topicQs.length) return topicQs[0];
+  const questions = structures.filter((s) => s.includes('?'));
   if (questions.length) return questions[0];
-  const statement = structures.find((s) => !s.includes('?'));
-  return statement || 'Hallo!';
+  return structures[0] || 'Hallo!';
 }
 
 export function buildWeakPhraseIds(learning: UserLearningProfile): string[] {
@@ -281,9 +320,7 @@ export function buildSimulatorContext(input: {
 }
 
 export function buildSimulatorKickoff(ctx: SimulatorContext, openingGerman: string): string {
-  const weakStructures = ctx.weakPhraseIds
-    .map((id) => ctx.knownStructures.find((s) => s.toLowerCase().includes(id.slice(0, 8))) || '')
-    .filter(Boolean);
+  const conversationHints = buildSimulatorConversationHints(ctx);
   return buildImmersionSimulatorKickoff({
     settingDe: ctx.scenario.settingDe,
     roleDe: ctx.scenario.roleDe,
@@ -291,8 +328,7 @@ export function buildSimulatorKickoff(ctx: SimulatorContext, openingGerman: stri
     openingGerman,
     structures: ctx.knownStructures,
     vocabulary: ctx.knownVocabulary,
-    focusStructures: ctx.focusStructures,
-    weakStructures: weakStructures.length ? weakStructures : ctx.focusStructures,
+    conversationHints,
   });
 }
 

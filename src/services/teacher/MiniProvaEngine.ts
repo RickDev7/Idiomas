@@ -1,11 +1,13 @@
 /**
  * Mini Prova — fila de questões a partir do Learning State real.
+ * Avaliação objetiva com transferência — não decoração de frases.
  */
 import type { Phrase } from '@/types';
 import type { PhraseConfidence, UserLearningProfile } from '@/services/learning/ConfidenceService';
 import {
   L0_CHUNK_GRAPH,
   isZeroLanguagePhraseAccepted,
+  l0ChunkBaseForPhraseId,
   mergeZeroLanguagePhrases,
   zeroLanguageSeedPhrases,
 } from '@/services/teacher/ZeroLanguageMode';
@@ -22,6 +24,59 @@ const TYPE_ROTATION: MiniProvaQuestionType[] = [
   'autonomous',
 ];
 
+/** Cenários de transferência por chunk base — testa estrutura, não frase decorada. */
+const TRANSFER_BY_BASE: Record<string, string[]> = {
+  'l0-hook-ich-moechte': [
+    'Du bist im Restaurant. Was möchtest du trinken?',
+    'Du bist im Supermarkt. Was möchtest du kaufen?',
+    'Was möchtest du heute essen?',
+  ],
+  'survival-arbeite': [
+    'Wo arbeitest du?',
+    'Was arbeitest du?',
+    'Arbeitest du morgens oder abends?',
+  ],
+  'l0-hook-ich-brauche': [
+    'Was brauchst du heute?',
+    'Du bist im Laden. Was brauchst du?',
+  ],
+  'l0-hook-ich-muss': [
+    'Was musst du heute machen?',
+    'Wann musst du arbeiten?',
+  ],
+  'l0-hook-kannst-du': [
+    'Kannst du mir helfen?',
+    'Du hast ein Problem. Was sagst du?',
+  ],
+  'l0-ich-wohne': [
+    'Wo wohnst du?',
+    'Wie ist deine Wohnung?',
+  ],
+  'l0-ich-heisse': [
+    'Wie heißt du?',
+    'Stell dich vor.',
+  ],
+  'l0-ich-komme': [
+    'Woher kommst du?',
+  ],
+  'l0-ich-bin': [
+    'Wie geht es dir?',
+    'Wie fühlst du dich heute?',
+  ],
+};
+
+const STRUCTURE_KEYWORDS: Record<string, string[]> = {
+  'l0-hook-ich-moechte': ['möcht', 'möchte'],
+  'survival-arbeite': ['arbeit'],
+  'l0-hook-ich-brauche': ['brauch'],
+  'l0-hook-ich-muss': ['muss'],
+  'l0-hook-kannst-du': ['kannst', 'helfen'],
+  'l0-ich-wohne': ['wohn'],
+  'l0-ich-heisse': ['heiß'],
+  'l0-ich-komme': ['komm'],
+  'l0-ich-bin': ['bin', 'geht'],
+};
+
 function phrasePool(phrases: Phrase[]): Map<string, Phrase> {
   return new Map(mergeZeroLanguagePhrases(phrases).map((p) => [p.id, p]));
 }
@@ -35,22 +90,30 @@ function isStudied(conf: PhraseConfidence | undefined): boolean {
   return isZeroLanguagePhraseAccepted(conf) || (conf.timesCorrect ?? 0) > 0;
 }
 
-function promptForType(type: MiniProvaQuestionType, german: string): string {
+function isMastered(conf: PhraseConfidence | undefined): boolean {
+  return isZeroLanguagePhraseAccepted(conf) || (conf?.confidence ?? 0) >= 70;
+}
+
+function transferPrompt(phraseId: string, german: string, type: MiniProvaQuestionType, index: number): string {
+  const base = l0ChunkBaseForPhraseId(phraseId) || phraseId;
+  const transfers = TRANSFER_BY_BASE[base];
+  if (transfers?.length && (type === 'variation' || type === 'dialogue' || type === 'comprehension' || type === 'autonomous')) {
+    return transfers[index % transfers.length];
+  }
+  if (german.includes('?')) return german;
   switch (type) {
     case 'comprehension':
-      return `Verstehe und antworte: ${german}`;
+      return german;
     case 'production':
-      return german.includes('?') ? german : `Sag: ${german}`;
+      return german.endsWith('?') ? german : `Antworte: ${german}`;
     case 'variation':
-      return `Benutze die Struktur in einer neuen Situation: ${german.replace(/\?$/u, '')}...`;
-    case 'construction':
-      return `Bilde einen Satz mit: ${german}`;
-    case 'chunk':
-      return `Produziere den Chunk: ${german}`;
     case 'dialogue':
-      return `Setze das Gespräch fort: ${german}`;
     case 'autonomous':
-      return german.includes('?') ? german : `Was sagst du? (${german})`;
+      return german;
+    case 'construction':
+      return `Bilde einen Satz: ${german.replace(/\?$/u, '')}`;
+    case 'chunk':
+      return german;
     default:
       return german;
   }
@@ -64,6 +127,12 @@ function priorityScore(id: string, conf: PhraseConfidence | undefined, weakSet: 
   if (conf?.timesProduced && conf.timesCorrect / conf.timesProduced < 0.6) score += 15;
   if (isZeroLanguagePhraseAccepted(conf)) score += 5;
   return score;
+}
+
+function structureKeywordsFor(phraseId: string, german: string): string[] {
+  const base = l0ChunkBaseForPhraseId(phraseId) || phraseId;
+  if (STRUCTURE_KEYWORDS[base]) return STRUCTURE_KEYWORDS[base];
+  return german.toLowerCase().split(/\s+/).filter((w) => w.length > 4);
 }
 
 export function buildMiniProvaQuestions(
@@ -84,13 +153,19 @@ export function buildMiniProvaQuestions(
     }
   }
 
-  candidates.sort((a, b) => b.priority - a.priority);
+  const weakPicks = candidates.filter((c) => weakIds.has(c.id));
+  const masteredPicks = candidates.filter((c) => isMastered(c.conf) && !weakIds.has(c.id));
+  const midPicks = candidates.filter((c) => !weakIds.has(c.id) && !isMastered(c.conf));
 
-  const weakCount = Math.max(1, Math.floor(limit * 0.35));
-  const weakPicks = candidates.filter((c) => weakIds.has(c.id)).slice(0, weakCount);
-  const weakIdSet = new Set(weakPicks.map((c) => c.id));
-  const rest = candidates.filter((c) => !weakIdSet.has(c.id));
-  const ordered = [...weakPicks, ...rest].slice(0, limit);
+  const weakCount = Math.max(2, Math.floor(limit * 0.25));
+  const masteredCount = Math.max(2, Math.floor(limit * 0.3));
+  const midCount = Math.max(1, limit - weakCount - masteredCount);
+
+  const ordered = [
+    ...weakPicks.sort((a, b) => b.priority - a.priority).slice(0, weakCount),
+    ...masteredPicks.sort((a, b) => b.conf.confidence - a.conf.confidence).slice(0, masteredCount),
+    ...midPicks.sort((a, b) => b.priority - a.priority).slice(0, midCount),
+  ].slice(0, limit);
 
   return ordered.map((c, i) => {
     const german = germanForId(c.id, pool);
@@ -99,9 +174,10 @@ export function buildMiniProvaQuestions(
       phraseId: c.id,
       german,
       type,
-      promptDe: promptForType(type, german),
+      promptDe: transferPrompt(c.id, german, type, i),
       priority: c.priority,
       weak: weakIds.has(c.id),
+      expectedKeywords: structureKeywordsFor(c.id, german),
     };
   });
 }
@@ -119,6 +195,8 @@ export function buildMiniProvaContext(
   };
 }
 
+const NOT_KNOWN_RE = /weiß (ich )?nicht|keine ahnung|ich habe keine|weiß nicht/i;
+
 export function evaluateMiniProvaResponse(
   userSaid: string,
   question: MiniProvaQuestion,
@@ -126,11 +204,13 @@ export function evaluateMiniProvaResponse(
 ): import('@/services/teacher/MiniProvaTypes').MiniProvaAutonomyLevel {
   const said = userSaid.trim().toLowerCase();
   if (!said) return 'no_response';
+  if (NOT_KNOWN_RE.test(said)) return 'incorrect';
 
-  const target = question.german.toLowerCase().replace(/\.\.\./g, '').trim();
-  const keywords = target.split(/\s+/).filter((w) => w.length > 3);
-  const hitCount = keywords.filter((k) => said.includes(k)).length;
-  const correct = hitCount >= Math.max(1, Math.ceil(keywords.length * 0.4));
+  const keywords = question.expectedKeywords?.length
+    ? question.expectedKeywords
+    : structureKeywordsFor(question.phraseId, question.german);
+  const hitCount = keywords.filter((k) => said.includes(k.toLowerCase())).length;
+  const correct = hitCount >= Math.max(1, Math.ceil(keywords.length * 0.5));
 
   if (!correct) return 'incorrect';
   if (opts.usedHelp) return 'correct_after_hint';

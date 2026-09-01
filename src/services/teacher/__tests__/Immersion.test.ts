@@ -63,13 +63,12 @@ export function testImmersion() {
     openingGerman: 'Guten Tag!',
     structures: ['Ich möchte Wasser.'],
     vocabulary: ['Wasser', 'Kaffee'],
-    focusStructures: ['Wo arbeitest du?'],
-    weakStructures: ['Wo arbeitest du?'],
+    conversationHints: ['Was möchtest du trinken?', 'Was möchtest du essen?'],
   });
-  assert(simKick.includes('NUR DEUTSCH'), 'professor simulador em alemão');
+  assert(simKick.includes('NATÜRLICHES GESPRÄCH'), 'kickoff conversa natural');
+  assert(simKick.includes('GESPRÄCHSFLUSS'), 'fluxo conversa não aula');
   assert(simKick.includes(GERMAN_SILENCE_POLICY.slice(0, 20)), 'política de silêncio');
-  assert(simKick.includes('VARIATION'), 'variação contextual');
-  assert(!simKick.includes('português na interface'), 'sem PT na interface');
+  assert(!simKick.includes('Schwächen üben:'), 'não revelar pontos fracos');
 
   const mpKick = buildImmersionMiniProvaKickoff({
     questionGerman: 'Sag: Ich arbeite.',
@@ -78,15 +77,17 @@ export function testImmersion() {
     index: 2,
   });
   assert(mpKick.includes('MINI-PRÜFUNG'), 'kickoff mini prova');
-  assert(mpKick.includes('KEINE Lösung'), 'não revela resposta');
+  assert(mpKick.includes('KEIN Unterricht'), 'não ensina durante prova');
   assert(mpKick.includes('5–8 Sekunden'), 'tempo de recuperação');
+  assert(!mpKick.includes('Noch einmal'), 'sem retry na prova');
 
-  assert(GERMAN_PROGRESSIVE_HELP.includes('NÍVEL 1'), 'ajuda progressiva definida');
+  assert(GERMAN_PROGRESSIVE_HELP.includes('Stufe 1'), 'ajuda progressiva definida');
 
   const learning = learningWithContent();
   const questions = buildMiniProvaQuestions(learning, [], 12);
   assert(questions.length >= 3, 'questões do learning state');
-  assert(questions.every((q) => !q.promptDe.includes('português')), 'prompts em alemão');
+  assert(questions.every((q) => !q.promptDe.toLowerCase().includes('sag:')), 'sem instrução de aula');
+  assert(questions.some((q) => q.promptDe.includes('Restaurant') || q.promptDe.includes('?')), 'transferência contextual');
   assert(questions.some((q) => q.weak), 'pontos fracos incluídos');
 
   const weakIds = buildWeakPhraseIds(learning);
@@ -97,9 +98,12 @@ export function testImmersion() {
   assert(!!ctx, 'contexto mini prova');
   let snap = createMiniProvaSnapshot(ctx!);
   const q0 = snap.questions[0];
-  const autonomyOk = evaluateMiniProvaResponse(q0.german, q0, { usedHelp: false, attempt: 1 });
+  const sampleAnswer = q0.expectedKeywords?.length
+    ? `Ich ${q0.expectedKeywords[0]} etwas.`
+    : q0.german;
+  const autonomyOk = evaluateMiniProvaResponse(sampleAnswer, q0, { usedHelp: false, attempt: 1 });
   assert(autonomyOk === 'correct_no_help', 'autonomia sem ajuda');
-  const autonomyHint = evaluateMiniProvaResponse(q0.german, q0, { usedHelp: true, attempt: 1 });
+  const autonomyHint = evaluateMiniProvaResponse(sampleAnswer, q0, { usedHelp: true, attempt: 1 });
   assert(autonomyHint === 'correct_after_hint', 'autonomia com ajuda separada');
 
   snap = recordMiniProvaAnswer(snap, {

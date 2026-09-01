@@ -63,12 +63,21 @@ import {
 } from '@/services/teacher/ConversationTopics';
 import {
   buildSimulatorKickoff,
+  buildSimulatorConversationHints,
   pickSimulatorOpening,
   scenarioLabel,
 } from '@/services/teacher/SimulatorEngine';
 import type { SimulatorContext } from '@/services/teacher/SimulatorTypes';
 import { isSimulatorActive, recordSimulatorDeferred } from '@/services/teacher/SimulatorSession';
-import { buildImmersionMiniProvaKickoff } from '@/services/teacher/ImmersionPolicy';
+import {
+  buildImmersionMiniProvaKickoff,
+  buildMiniProvaDirective,
+  buildMiniProvaNextNudge,
+  buildSimulatorCoachContext,
+  buildSimulatorDirective,
+  buildSimulatorHelpNudge,
+  buildSimulatorTurnNudge,
+} from '@/services/teacher/ImmersionPolicy';
 import { evaluateMiniProvaResponse } from '@/services/teacher/MiniProvaEngine';
 import {
   getCurrentMiniProvaQuestion,
@@ -759,9 +768,11 @@ export class ConversationOrchestrator {
   private microStartsLast10 = 0;
   private coachContextText = '';
   private simulatorMode = false;
+  private simulatorContext: SimulatorContext | null = null;
+  private simulatorTurnIndex = 0;
+  private simulatorConversationHints: string[] = [];
   private miniProvaSnapshot: MiniProvaSnapshot | null = null;
   private miniProvaMode = false;
-  private miniProvaItemAttempts = 0;
   private followUpEventId: string | undefined;
   private followUpOpening: string | undefined;
   /** Ciclo correção: aguarda nova tentativa após modelo (Fase 11 §§26–28). */
@@ -979,14 +990,13 @@ export class ConversationOrchestrator {
   /** Simulador — produção real em cenário baseado no aprendizado. */
   applySimulatorIntent(intent: SimulatorContext) {
     this.simulatorMode = true;
+    this.simulatorContext = intent;
+    this.simulatorTurnIndex = 0;
+    this.simulatorConversationHints = buildSimulatorConversationHints(intent);
     const opening = pickSimulatorOpening(intent);
-    const topicPt = scenarioLabel(intent, true);
-    const targetPhrase =
-      this.phrases.find((p) => p.german === opening)
-      || mergeZeroLanguagePhrases(this.phrases).find((p) => p.german === opening)
-      || null;
+    const topicDe = scenarioLabel(intent, true);
 
-    this.ctx.topic = topicPt;
+    this.ctx.topic = topicDe;
     this.ctx.mode = 'FREE_CONVERSATION';
     this.ctx.currentGoal = 'converse';
     this.ctx.lastAction = 'converse';
@@ -994,30 +1004,24 @@ export class ConversationOrchestrator {
       ...this.plan,
       action: 'converse',
       actionReason: `simulator:${intent.simulatorMode}`,
-      topic: topicPt,
+      topic: topicDe,
       stageId: 'conversation',
       training: {
         ...this.plan.training,
         totalMinutes: intent.durationMinutes,
         stages: [],
       },
-      target: targetPhrase
-        ? {
-            id: targetPhrase.id,
-            german: targetPhrase.german,
-            portuguese: targetPhrase.portuguese,
-            expected: targetPhrase.german.toLowerCase(),
-            hint: intent.chunk || '',
-          }
-        : this.plan.target,
+      target: {
+        id: intent.baseId || 'simulator',
+        german: opening,
+        portuguese: '',
+        expected: opening.toLowerCase(),
+        hint: '',
+      },
       actionKickoff: buildSimulatorKickoff(intent, opening),
     };
-    this.plan.teacherDirective = buildDirective(
-      this.plan,
-      isZeroLanguageMode(this.profile),
-      intent.durationMinutes,
-    );
-    this.coachContextText = buildConversationCoachContext(intent);
+    this.plan.teacherDirective = buildSimulatorDirective(intent);
+    this.coachContextText = buildSimulatorCoachContext(intent, this.simulatorConversationHints);
     this.ctx.targetItem = opening;
   }
 
@@ -1038,7 +1042,6 @@ export class ConversationOrchestrator {
     const q = this.miniProvaSnapshot.questions[index];
     if (!q) return false;
     this.miniProvaSnapshot.currentIndex = index;
-    this.miniProvaItemAttempts = 0;
     persistMiniProvaSnapshot(this.miniProvaSnapshot);
     this.ctx.topic = 'Mini-Prüfung';
     this.ctx.mode = 'FREE_CONVERSATION';
@@ -1064,6 +1067,8 @@ export class ConversationOrchestrator {
         index,
       }),
     };
+    this.plan.teacherDirective = buildMiniProvaDirective(this.miniProvaSnapshot.total);
+    this.coachContextText = '';
     this.ctx.targetItem = q.promptDe;
     return true;
   }
@@ -1073,33 +1078,14 @@ export class ConversationOrchestrator {
     const q = getCurrentMiniProvaQuestion(this.miniProvaSnapshot);
     if (!q) return this.continueResult('miniprova_complete');
     this.userTurns += 1;
-    this.miniProvaItemAttempts += 1;
     const usedHelp = this.helpUsedThisTurn;
     this.helpUsedThisTurn = false;
     const autonomy = evaluateMiniProvaResponse(text, q, {
       usedHelp,
-      attempt: this.miniProvaItemAttempts,
+      attempt: 1,
     });
     const correct = autonomy !== 'incorrect' && autonomy !== 'no_response';
     const eventsRecorded: LearningEventType[] = ['USER_UTTERANCE'];
-
-    if (!correct && this.miniProvaItemAttempts < 2) {
-      return {
-        flow: 'continueConversation',
-        action: 'converse',
-        mode: 'FREE_CONVERSATION',
-        reason: 'miniprova_retry',
-        targetItem: q.promptDe,
-        geminiNudge: [
-          '[INTERNE ANWEISUNG — nicht vorlesen]',
-          'MINI-PRÜFUNG — nur auf Deutsch.',
-          'Sage: "Noch einmal."',
-          `Wiederhole die Frage: "${q.promptDe}"`,
-          'KEINE Lösung zeigen. KEIN Portugiesisch.',
-        ].join('\n'),
-        eventsRecorded,
-      };
-    }
 
     await saveLearningEvent(correct ? 'PHRASE_PRODUCED' : 'PHRASE_FAILED', {
       phraseId: q.phraseId,
@@ -1139,11 +1125,11 @@ export class ConversationOrchestrator {
         reason: 'miniprova_next',
         targetItem: nextQ?.promptDe ?? null,
         geminiNudge: nextQ
-          ? [
-              '[INTERNE ANWEISUNG — nicht vorlesen]',
-              'Nächste Frage auf Deutsch.',
-              `Frage: "${nextQ.promptDe}"`,
-            ].join('\n')
+          ? buildMiniProvaNextNudge({
+            questionGerman: nextQ.promptDe,
+            index: nextIndex,
+            total: this.miniProvaSnapshot.total,
+          })
           : null,
         eventsRecorded,
       };
@@ -1159,6 +1145,42 @@ export class ConversationOrchestrator {
         '[INTERNE ANWEISUNG — nicht vorlesen]',
         'Sage auf Deutsch: "Sehr gut! Die Mini-Prüfung ist fertig."',
       ].join('\n'),
+      eventsRecorded,
+    };
+  }
+
+  /** Simulador — conversa natural, fora do ciclo de aula L0. */
+  private async onSimulatorUtterance(text: string): Promise<OrchestratorDecision> {
+    const trimmed = text.trim();
+    if (!trimmed || !this.simulatorContext) {
+      return this.continueResult('simulator_empty');
+    }
+    this.userTurns += 1;
+    this.ctx.lastUserUtterance = trimmed;
+    this.simulatorTurnIndex += 1;
+    const eventsRecorded: LearningEventType[] = ['USER_UTTERANCE'];
+    await saveLearningEvent('USER_UTTERANCE', {
+      phraseId: this.plan.target?.id,
+      context: trimmed,
+      helpLevel: this.helpUsedThisTurn ? this.sessionSupport : 0,
+    });
+    this.helpUsedThisTurn = false;
+
+    const hints = this.simulatorConversationHints;
+    const nextHint = hints[this.simulatorTurnIndex % Math.max(1, hints.length)] || '';
+    const ctx = this.simulatorContext;
+
+    return {
+      flow: 'continueConversation',
+      action: 'converse',
+      mode: 'FREE_CONVERSATION',
+      reason: `simulator_turn:${this.simulatorTurnIndex}`,
+      targetItem: nextHint || this.ctx.targetItem,
+      geminiNudge: buildSimulatorTurnNudge({
+        userSaid: trimmed,
+        nextHint,
+        settingDe: ctx.scenario.settingDe,
+      }),
       eventsRecorded,
     };
   }
@@ -2190,6 +2212,39 @@ export class ConversationOrchestrator {
   }
 
   private async onHelp(text?: string): Promise<OrchestratorDecision> {
+    if (this.miniProvaMode && this.miniProvaSnapshot && !this.miniProvaSnapshot.completed) {
+      this.helpUsedThisTurn = true;
+      await saveLearningEvent('HELP_REQUESTED', { context: text, phraseId: this.plan.target?.id });
+      return {
+        flow: 'continueConversation',
+        action: 'converse',
+        mode: 'FREE_CONVERSATION',
+        reason: 'miniprova_no_help',
+        targetItem: this.ctx.targetItem,
+        geminiNudge: null,
+        eventsRecorded: ['HELP_REQUESTED'],
+      };
+    }
+
+    if (this.simulatorMode && this.simulatorContext) {
+      this.sessionSupport = escalateSupport(this.sessionSupport);
+      this.helpUsedThisTurn = true;
+      await saveLearningEvent('HELP_REQUESTED', {
+        context: text,
+        helpLevel: this.sessionSupport,
+        phraseId: this.plan.target?.id,
+      });
+      return {
+        flow: 'continueConversation',
+        action: 'converse',
+        mode: 'FREE_CONVERSATION',
+        reason: `simulator_help_${this.sessionSupport}`,
+        targetItem: this.ctx.targetItem,
+        geminiNudge: buildSimulatorHelpNudge(this.sessionSupport, this.ctx.targetItem),
+        eventsRecorded: ['HELP_REQUESTED'],
+      };
+    }
+
     const from = this.sessionSupport;
     this.sessionSupport = escalateSupport(this.sessionSupport);
     this.helpUsedThisTurn = true;
@@ -2513,6 +2568,9 @@ export class ConversationOrchestrator {
     }
     if (this.miniProvaSnapshot && !this.miniProvaSnapshot.completed) {
       return this.onMiniProvaAttempt(trimmed);
+    }
+    if (this.simulatorMode && this.simulatorContext) {
+      return this.onSimulatorUtterance(trimmed);
     }
     if (this.pendingReview) {
       return this.onReviewAttempt(trimmed);
