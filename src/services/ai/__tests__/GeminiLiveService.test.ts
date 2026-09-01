@@ -51,6 +51,16 @@ async function run() {
     assert('resume não lança sincronamente', !threw);
   }
 
+  // 6. connect bloqueado em reconnecting (evita WS duplicado)
+  {
+    const states: LiveSessionState[] = [];
+    const s = makeService({ onStateChange: (st: LiveSessionState) => states.push(st) });
+    (s as unknown as { state: LiveSessionState }).state = 'reconnecting';
+    await s.connect();
+    assert('connect em reconnecting não muda estado', s.getState() === 'reconnecting');
+    assert('connect em reconnecting não emite connecting', !states.includes('connecting'));
+  }
+
   console.log(`\n${passed} passaram, ${failed} falharam.`);
   if (failed > 0) process.exit(1);
 }

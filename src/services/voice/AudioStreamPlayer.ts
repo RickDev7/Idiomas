@@ -1,8 +1,25 @@
+const DEV = typeof import.meta !== 'undefined' && !!(import.meta as { env?: { DEV?: boolean } }).env?.DEV;
+
+type QueueItem = {
+  pcm: Float32Array;
+  generation: number;
+};
+
 export class AudioStreamPlayer {
   private audioCtx: AudioContext | null = null;
-  private queue: Float32Array[] = [];
+  private queue: QueueItem[] = [];
   private isPlaying = false;
   private currentSource: AudioBufferSourceNode | null = null;
+  private activeGeneration = 0;
+  private chunkSeq = 0;
+
+  setGeneration(generation: number): void {
+    this.activeGeneration = generation;
+    this.stopAll();
+    if (DEV) {
+      console.log('[LIVE_PLAYER]', { playerId: 'audioStreamPlayer', generation, created: true });
+    }
+  }
 
   private initContext(): AudioContext {
     if (!this.audioCtx || this.audioCtx.state === 'closed') {
@@ -15,15 +32,37 @@ export class AudioStreamPlayer {
   }
 
   /** Adiciona um bloco de áudio PCM (24kHz) recebido do Gemini na fila. */
-  public enqueue(pcmChunk24k: Float32Array): void {
+  public enqueue(pcmChunk24k: Float32Array, generation: number): void {
     if (pcmChunk24k.length === 0) return;
-    this.queue.push(pcmChunk24k);
+    if (generation !== this.activeGeneration) {
+      if (DEV) {
+        console.log('[LIVE_AUDIO]', {
+          sessionId: generation,
+          chunkId: 'discarded',
+          playerId: 'audioStreamPlayer',
+          reason: 'stale_generation',
+        });
+      }
+      return;
+    }
+    const chunkId = ++this.chunkSeq;
+    if (DEV) {
+      console.log('[LIVE_AUDIO]', {
+        sessionId: generation,
+        chunkId,
+        playerId: 'audioStreamPlayer',
+      });
+    }
+    this.queue.push({ pcm: pcmChunk24k, generation });
     if (!this.isPlaying) {
       this.playNext();
     }
   }
 
   private playNext(): void {
+    while (this.queue.length > 0 && this.queue[0].generation !== this.activeGeneration) {
+      this.queue.shift();
+    }
     if (this.queue.length === 0) {
       this.isPlaying = false;
       return;
@@ -31,7 +70,12 @@ export class AudioStreamPlayer {
 
     this.isPlaying = true;
     const ctx = this.initContext();
-    const chunk24k = this.queue.shift()!;
+    const { pcm: chunk24k, generation } = this.queue.shift()!;
+    if (generation !== this.activeGeneration) {
+      this.isPlaying = false;
+      this.playNext();
+      return;
+    }
 
     const sourceRate = 24000;
     const targetRate = ctx.sampleRate;
@@ -55,7 +99,11 @@ export class AudioStreamPlayer {
 
     source.onended = () => {
       this.currentSource = null;
-      this.playNext();
+      if (generation === this.activeGeneration) {
+        this.playNext();
+      } else {
+        this.isPlaying = false;
+      }
     };
 
     this.currentSource = source;
@@ -78,8 +126,8 @@ export class AudioStreamPlayer {
   }
 
   /** Fecha contexto e zera estado — chamar no gesto do usuário ao iniciar sessão. */
-  resetForSession(): void {
-    this.stopAll();
+  resetForSession(generation: number): void {
+    this.setGeneration(generation);
     if (this.audioCtx && this.audioCtx.state !== 'closed') {
       void this.audioCtx.close();
     }

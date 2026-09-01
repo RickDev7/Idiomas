@@ -12,6 +12,7 @@ import {
 } from '@/services/voice/AudioPipeline';
 import { stopAllAudio } from '@/services/voice/AudioPlayback';
 import { audioStreamPlayer } from '@/services/voice/AudioStreamPlayer';
+import { isLiveSessionCurrent } from '@/services/voice/LiveSessionRegistry';
 
 const DEV = typeof import.meta !== 'undefined' && !!(import.meta as { env?: { DEV?: boolean } }).env?.DEV;
 
@@ -78,12 +79,19 @@ export class GeminiVoiceService implements VoiceServiceInterface {
   private bytesSent = 0;
   private visibilityHandler: (() => void) | null = null;
   private backgroundSuspended = false;
+  private readonly sessionGen: number;
 
   setMicDeviceId(id: string | null): void {
     this.preferredDeviceId = id;
   }
 
-  constructor(profile: LiveProfile, handlers: GeminiVoiceHandlers, backendUrl?: string) {
+  constructor(
+    profile: LiveProfile,
+    handlers: GeminiVoiceHandlers,
+    backendUrl?: string,
+    sessionGen?: number,
+  ) {
+    this.sessionGen = sessionGen ?? 0;
     this.handlers = handlers;
     this.live = new GeminiLiveService(
       profile,
@@ -92,6 +100,7 @@ export class GeminiVoiceService implements VoiceServiceInterface {
           this.handlers.onStateChange?.(s);
         },
         onAudio: (b64, mime) => {
+          if (!isLiveSessionCurrent(this.sessionGen)) return;
           const pcm = base64ToArrayBuffer(b64);
           const float = decodePcm16LE(pcm);
           const rate = parsePcmSampleRate(mime, PLAYBACK_PCM_RATE);
@@ -100,17 +109,20 @@ export class GeminiVoiceService implements VoiceServiceInterface {
               ? float
               : resampleLinearPcm(float, rate, PLAYBACK_PCM_RATE);
           this.speaking = true;
-          audioStreamPlayer.enqueue(chunk24k);
+          audioStreamPlayer.enqueue(chunk24k, this.sessionGen);
         },
         onTranscript: (role, text, meta) => {
+          if (!isLiveSessionCurrent(this.sessionGen)) return;
           if (role === 'assistant') this.speaking = true;
           this.handlers.onTranscript?.(role, text, meta);
         },
         onTurnComplete: (role, text) => {
+          if (!isLiveSessionCurrent(this.sessionGen)) return;
           this.speaking = false;
           this.handlers.onTurnComplete?.(role, text);
         },
         onInterrupted: (text) => {
+          if (!isLiveSessionCurrent(this.sessionGen)) return;
           stopAllAudio();
           this.speaking = false;
           this.handlers.onTurnComplete?.('assistant', text);
@@ -156,7 +168,7 @@ export class GeminiVoiceService implements VoiceServiceInterface {
   }
 
   async preparePlaybackOnGesture(): Promise<void> {
-    audioStreamPlayer.resetForSession();
+    audioStreamPlayer.resetForSession(this.sessionGen);
   }
 
   async connect(): Promise<void> {

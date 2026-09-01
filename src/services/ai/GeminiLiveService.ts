@@ -84,7 +84,7 @@ export class GeminiLiveService {
 
   async connect(): Promise<void> {
     this.closedByUser = false;
-    if (this.state === 'connecting' || this.state === 'connected') return;
+    if (this.state === 'connecting' || this.state === 'connected' || this.state === 'reconnecting') return;
     this.setState('connecting');
     try {
       await this.ensureToken();

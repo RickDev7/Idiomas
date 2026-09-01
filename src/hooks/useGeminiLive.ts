@@ -2,6 +2,12 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useStudySession } from '@/hooks/useStudySession';
 import { createOrResumeAudioContext, MIC_CONSTRAINTS, MIC_PCM_RATE } from '@/services/voice/AudioPipeline';
 import { stopAllAudio, stopGeminiPlayback } from '@/services/voice/AudioPlayback';
+import { audioStreamPlayer } from '@/services/voice/AudioStreamPlayer';
+import {
+  beginLiveSession,
+  invalidateLiveSession,
+  isLiveSessionCurrent,
+} from '@/services/voice/LiveSessionRegistry';
 import { GeminiVoiceService, type GeminiVoiceHandlers, type MicCaptureState } from '@/services/voice/GeminiVoiceService';
 import type { LiveSessionState } from '@/services/ai/GeminiLiveService';
 import type { UserProfile } from '@/types';
@@ -415,29 +421,67 @@ export function useGeminiLive(profile: UserProfile | null): GeminiLiveUI {
   };
 
   const disposeActiveService = () => {
-    if (activeVoiceService) {
-      try { activeVoiceService.disconnect(); } catch { /* ignore */ }
-      activeVoiceService = null;
+    const refs = new Set<GeminiVoiceService>();
+    if (activeVoiceService) refs.add(activeVoiceService);
+    if (serviceRef.current) refs.add(serviceRef.current);
+    for (const svc of refs) {
+      try { svc.disconnect(); } catch { /* ignore */ }
     }
-    try { serviceRef.current?.disconnect(); } catch { /* ignore */ }
+    activeVoiceService = null;
     serviceRef.current = null;
+  };
+
+  const releaseEarlyMic = (ctx: AudioContext | null, stream: MediaStream | null) => {
+    stream?.getTracks().forEach((t) => t.stop());
+    if (ctx && ctx.state !== 'closed') {
+      try { void ctx.close(); } catch { /* ignore */ }
+    }
+  };
+
+  const abandonStaleSession = (
+    sessionGen: number,
+    earlyCtx: AudioContext | null = null,
+    earlyStream: MediaStream | null = null,
+  ) => {
+    if (isLiveSessionCurrent(sessionGen)) return false;
+    releaseEarlyMic(earlyCtx, earlyStream);
+    return true;
   };
 
   const start = useCallback(async () => {
     if (!profile) return;
     if (startingRef.current) return;
     startingRef.current = true;
+    const sessionGen = beginLiveSession();
+    audioStreamPlayer.setGeneration(sessionGen);
     stopAllAudio();
     resetSessionLocals();
     disposeActiveService();
     try {
       const liveProfile = await buildProfile();
-      const svc = new GeminiVoiceService(liveProfile, wireHandlers());
+      if (abandonStaleSession(sessionGen)) return;
+      const svc = new GeminiVoiceService(liveProfile, wireHandlers(), undefined, sessionGen);
+      if (abandonStaleSession(sessionGen)) {
+        try { svc.disconnect(); } catch { /* ignore */ }
+        return;
+      }
       svc.setMicDeviceId(selectedDeviceId);
       serviceRef.current = svc;
       activeVoiceService = svc;
       await svc.preparePlaybackOnGesture();
+      if (abandonStaleSession(sessionGen)) {
+        try { svc.disconnect(); } catch { /* ignore */ }
+        serviceRef.current = null;
+        activeVoiceService = null;
+        return;
+      }
       await svc.connect();
+      if (abandonStaleSession(sessionGen)) {
+        try { svc.disconnect(); } catch { /* ignore */ }
+        serviceRef.current = null;
+        activeVoiceService = null;
+        return;
+      }
       void orchRef.current?.handle({ type: 'SESSION_STARTED' }).then((d) => {
         if (d) void applyDecision(d);
       });
@@ -446,8 +490,10 @@ export function useGeminiLive(profile: UserProfile | null): GeminiLiveUI {
         setAudioInputs(devs.filter((d) => d.kind === 'audioinput'));
       } catch { /* ignore */ }
     } catch {
-      setError('Não consegui conectar ao professor.');
-      setMicState('ERROR');
+      if (isLiveSessionCurrent(sessionGen)) {
+        setError('Não consegui conectar ao professor.');
+        setMicState('ERROR');
+      }
     } finally {
       startingRef.current = false;
     }
@@ -463,6 +509,8 @@ export function useGeminiLive(profile: UserProfile | null): GeminiLiveUI {
     if (!profile) return;
     if (startingRef.current) return;
     startingRef.current = true;
+    const sessionGen = beginLiveSession();
+    audioStreamPlayer.setGeneration(sessionGen);
     stopAllAudio();
     resetSessionLocals();
     disposeActiveService();
@@ -472,26 +520,34 @@ export function useGeminiLive(profile: UserProfile | null): GeminiLiveUI {
     try {
       setMicState('REQUESTING_PERMISSION');
       earlyCtx = await createOrResumeAudioContext(null, MIC_PCM_RATE);
+      if (abandonStaleSession(sessionGen, earlyCtx, earlyStream)) return;
       const audioConstraint: MediaTrackConstraints = { ...MIC_CONSTRAINTS };
       if (selectedDeviceId) audioConstraint.deviceId = { exact: selectedDeviceId };
       earlyStream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraint });
+      if (abandonStaleSession(sessionGen, earlyCtx, earlyStream)) return;
       const track = earlyStream.getAudioTracks()[0];
       if (!track || track.readyState !== 'live') throw new Error('microphone_inactive');
       if (DEV) {
         console.log('[VOICE INPUT] gesture OK — stream active =', earlyStream.active, 'readyState =', track.readyState);
       }
     } catch {
+      if (isLiveSessionCurrent(sessionGen)) {
+        setError('Preciso de acesso ao microfone. Permita na configuração do navegador.');
+        setMicState('ERROR');
+      }
+      releaseEarlyMic(earlyCtx, earlyStream);
       startingRef.current = false;
-      earlyStream?.getTracks().forEach((t) => t.stop());
-      try { void earlyCtx?.close(); } catch { /* ignore */ }
-      setError('Preciso de acesso ao microfone. Permita na configuração do navegador.');
-      setMicState('ERROR');
       return;
     }
 
     try {
       const liveProfile = await buildProfile();
-      const svc = new GeminiVoiceService(liveProfile, wireHandlers());
+      if (abandonStaleSession(sessionGen, earlyCtx, earlyStream)) return;
+      const svc = new GeminiVoiceService(liveProfile, wireHandlers(), undefined, sessionGen);
+      if (abandonStaleSession(sessionGen, earlyCtx, earlyStream)) {
+        try { svc.disconnect(); } catch { /* ignore */ }
+        return;
+      }
       svc.setMicDeviceId(selectedDeviceId);
       serviceRef.current = svc;
       activeVoiceService = svc;
@@ -499,7 +555,19 @@ export function useGeminiLive(profile: UserProfile | null): GeminiLiveUI {
       earlyCtx = null;
       earlyStream = null;
       await svc.preparePlaybackOnGesture();
+      if (abandonStaleSession(sessionGen)) {
+        try { svc.disconnect(); } catch { /* ignore */ }
+        serviceRef.current = null;
+        activeVoiceService = null;
+        return;
+      }
       await svc.connect();
+      if (abandonStaleSession(sessionGen)) {
+        try { svc.disconnect(); } catch { /* ignore */ }
+        serviceRef.current = null;
+        activeVoiceService = null;
+        return;
+      }
       svc.beginSending();
       setMicActive(true);
       void orchRef.current?.handle({ type: 'SESSION_STARTED' }).then((d) => {
@@ -510,11 +578,12 @@ export function useGeminiLive(profile: UserProfile | null): GeminiLiveUI {
         setAudioInputs(devs.filter((d) => d.kind === 'audioinput'));
       } catch { /* ignore */ }
     } catch {
-      earlyStream?.getTracks().forEach((t) => t.stop());
-      try { void earlyCtx?.close(); } catch { /* ignore */ }
-      setError('Não consegui conectar ao professor.');
-      setMicState('ERROR');
-      setMicActive(false);
+      releaseEarlyMic(earlyCtx, earlyStream);
+      if (isLiveSessionCurrent(sessionGen)) {
+        setError('Não consegui conectar ao professor.');
+        setMicState('ERROR');
+        setMicActive(false);
+      }
     } finally {
       startingRef.current = false;
     }
@@ -647,8 +716,9 @@ export function useGeminiLive(profile: UserProfile | null): GeminiLiveUI {
 
   const end = useCallback((status: 'COMPLETED' | 'PAUSED' | 'ABANDONED' = 'COMPLETED') => {
     persistEnd(status);
-    if (activeVoiceService) { try { activeVoiceService.disconnect(); } catch { /* ignore */ } activeVoiceService = null; }
-    serviceRef.current?.disconnect();
+    const gen = invalidateLiveSession();
+    audioStreamPlayer.setGeneration(gen);
+    disposeActiveService();
     setMicActive(false);
     setMicState('IDLE');
     setState('idle');
@@ -657,11 +727,9 @@ export function useGeminiLive(profile: UserProfile | null): GeminiLiveUI {
   useEffect(() => {
     return () => {
       persistEnd('ABANDONED');
-      const svc = serviceRef.current;
-      if (svc && activeVoiceService === svc) {
-        try { svc.disconnect(); } catch { /* ignore */ }
-        activeVoiceService = null;
-      }
+      const gen = invalidateLiveSession();
+      audioStreamPlayer.setGeneration(gen);
+      disposeActiveService();
     };
   }, [persistEnd]);
 
