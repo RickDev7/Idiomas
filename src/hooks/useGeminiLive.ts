@@ -8,6 +8,13 @@ import {
   invalidateLiveSession,
   isLiveSessionCurrent,
 } from '@/services/voice/LiveSessionRegistry';
+import {
+  logTeacherAudio,
+  logTeacherTranscript,
+  logUiTarget,
+  shouldEmitPedagogicalNudge,
+  shouldUpdateTargetImmediately,
+} from '@/services/voice/TeacherTurnSync';
 import { GeminiVoiceService, type GeminiVoiceHandlers, type MicCaptureState } from '@/services/voice/GeminiVoiceService';
 import type { LiveSessionState } from '@/services/ai/GeminiLiveService';
 import type { UserProfile } from '@/types';
@@ -125,13 +132,38 @@ export function useGeminiLive(profile: UserProfile | null): GeminiLiveUI {
   const lastProcessedUtteranceRef = useRef<{ id: string; text: string; at: number } | null>(null);
   /** Serializa TEACHER_UTTERANCE → USER_UTTERANCE para o snapshot do turno existir antes da avaliação. */
   const orchQueueRef = useRef(Promise.resolve());
+  const sessionGenRef = useRef(0);
+  const naturalTeacherResponseExpectedRef = useRef(false);
+  const teacherAudioLoggedForTurnRef = useRef('');
+
+  const syncTargetFromOrchestrator = useCallback((turnId: string) => {
+    const plan = orchRef.current?.getPlan();
+    const targetText = plan?.target?.german ?? null;
+    const targetId = plan?.target?.id ?? null;
+    if (!targetText) return;
+    setTargetPhrase(targetText);
+    logUiTarget({
+      sessionGeneration: sessionGenRef.current,
+      turnId,
+      targetId,
+      targetText,
+    });
+  }, []);
 
   const applyDecision = useCallback(async (decision: Awaited<ReturnType<ConversationOrchestrator['handle']>>) => {
     // Não sobrescrever a decisão pedagógica do aluno com o eco da fala do professor
     if (decision.reason !== 'fala do professor registrada') {
       setPedagogicalAction(decision.action);
       setPedagogicalReason(decision.reason);
-      if (decision.targetItem) setTargetPhrase(decision.targetItem);
+      if (decision.targetItem && shouldUpdateTargetImmediately(decision)) {
+        setTargetPhrase(decision.targetItem);
+        logUiTarget({
+          sessionGeneration: sessionGenRef.current,
+          turnId: turnIdsRef.current.assistant || `target-${Date.now()}`,
+          targetId: decision.targetItem,
+          targetText: decision.targetItem,
+        });
+      }
     }
     if (DEV && decision.reason !== 'fala do professor registrada') {
       console.log('[PEDAGOGICAL ACTION]', decision.action, decision.reason, decision.targetItem || '');
@@ -148,18 +180,14 @@ export function useGeminiLive(profile: UserProfile | null): GeminiLiveUI {
     }
     const svc = serviceRef.current;
     if (decision.geminiNudge && svc) {
-      const isOpeningTurn =
-        decision.reason === 'sessão iniciada com plano TeacherEngine' ||
-        decision.reason?.startsWith('review_started:') ||
-        decision.reason === 'follow_up_real_world_event';
-      const shouldSend =
-        !isOpeningTurn &&
-        (decision.flow === 'intervenePedagogically' ||
-          decision.flow === 'startMicroPractice' ||
-          decision.flow === 'resumeConversation' ||
-          (decision.flow === 'continueConversation' &&
-            decision.geminiNudge.includes('INSTRUÇÃO INTERNA')));
-      if (shouldSend) {
+      const emitNudge = shouldEmitPedagogicalNudge(decision, {
+        liveVoiceActive: micActive || state === 'connected',
+        naturalTeacherResponseExpected: naturalTeacherResponseExpectedRef.current,
+        assistantSpeaking,
+        teacherReceiving: teacherTurnStatus === 'RECEIVING',
+        playerPlaying: audioStreamPlayer.getIsPlaying(),
+      });
+      if (emitNudge) {
         if (DEV) {
           console.debug(
             '[AUTOMATION]',
@@ -168,10 +196,26 @@ export function useGeminiLive(profile: UserProfile | null): GeminiLiveUI {
             `target=${decision.targetItem || ''}`,
           );
         }
+        logTeacherAudio(
+          {
+            sessionGeneration: sessionGenRef.current,
+            turnId: turnIdsRef.current.assistant || `nudge-${Date.now()}`,
+            targetId: decision.targetItem,
+            targetText: decision.targetItem,
+          },
+          'NUDGE',
+          decision.geminiNudge,
+        );
+        naturalTeacherResponseExpectedRef.current = false;
         await svc.speak(decision.geminiNudge);
+      } else if (DEV && decision.geminiNudge) {
+        console.debug('[TEACHER_AUDIO] NUDGE skipped — Gemini Live já responde naturalmente', {
+          reason: decision.reason,
+          flow: decision.flow,
+        });
       }
     }
-  }, []);
+  }, [assistantSpeaking, micActive, state, teacherTurnStatus]);
 
   const processUserTurnComplete = useCallback(async (text: string) => {
     const trimmed = text.trim();
@@ -233,7 +277,7 @@ export function useGeminiLive(profile: UserProfile | null): GeminiLiveUI {
       const pendingReview = orch.getPendingReview();
       setPedagogicalAction(plan.action);
       setPedagogicalReason(plan.actionReason || (reviewIntent ? 'review_session' : 'session_start'));
-      setTargetPhrase(pendingReview?.german ?? plan.target?.german ?? null);
+      // targetPhrase: sincronizado após fala do professor (syncTargetFromOrchestrator)
       const stages = plan.training?.stages?.length ?? 0;
       const minutes = plan.training?.totalMinutes ?? profile.dailyMinutes ?? 20;
       const zeroMode = !!(live as { zeroLanguageMode?: boolean }).zeroLanguageMode;
@@ -314,6 +358,21 @@ export function useGeminiLive(profile: UserProfile | null): GeminiLiveUI {
   const wireHandlers = useCallback((): GeminiVoiceHandlers => ({
     onStateChange: (s) => setState(s),
     onMicState: (s) => setMicState(s),
+    onTeacherAudio: () => {
+      const turnId = turnIdsRef.current.assistant || `assistant-audio-${Date.now()}`;
+      if (teacherAudioLoggedForTurnRef.current === turnId) return;
+      teacherAudioLoggedForTurnRef.current = turnId;
+      const plan = orchRef.current?.getPlan();
+      logTeacherAudio(
+        {
+          sessionGeneration: sessionGenRef.current,
+          turnId,
+          targetId: plan?.target?.id ?? null,
+          targetText: plan?.target?.german ?? null,
+        },
+        'GEMINI_LIVE',
+      );
+    },
     onTranscript: (role, text) => {
       const turn = accRef.current.applyChunk(role, text);
       const ids = turnIdsRef.current;
@@ -333,6 +392,15 @@ export function useGeminiLive(profile: UserProfile | null): GeminiLiveUI {
         setAssistantText(turn.text);
         setTeacherTurnStatus(turn.status);
         setAssistantSpeaking(turn.status === 'RECEIVING');
+        logTeacherTranscript(
+          {
+            sessionGeneration: sessionGenRef.current,
+            turnId: turn.id,
+            targetId: orchRef.current?.getPlan().target?.id ?? null,
+            targetText: orchRef.current?.getPlan().target?.german ?? null,
+          },
+          turn.text,
+        );
       } else if (turn.text) {
         setUserText(turn.text);
         setUserTurnStatus(turn.status);
@@ -361,6 +429,8 @@ export function useGeminiLive(profile: UserProfile | null): GeminiLiveUI {
       if (text && current.status !== 'COMPLETE') accRef.current.applyChunk(r, text);
       const done = accRef.current.complete(r);
       if (r === 'assistant') {
+        naturalTeacherResponseExpectedRef.current = false;
+        teacherAudioLoggedForTurnRef.current = '';
         setAssistantText(done.text);
         setTeacherTurnStatus('COMPLETE');
         setAssistantSpeaking(false);
@@ -369,15 +439,18 @@ export function useGeminiLive(profile: UserProfile | null): GeminiLiveUI {
         else if (done.text) list.push(done.text);
         if (done.text.trim() && orchRef.current) {
           const text = done.text;
+          const turnId = turnIdsRef.current.assistant || done.id;
           orchQueueRef.current = orchQueueRef.current
             .then(async () => {
               if (!orchRef.current) return;
               const d = await orchRef.current.handle({ type: 'TEACHER_UTTERANCE', text });
               await applyDecision(d);
+              syncTargetFromOrchestrator(turnId);
             })
             .catch(() => { /* não quebrar a fila */ });
         }
       } else {
+        naturalTeacherResponseExpectedRef.current = true;
         setUserText(done.text);
         setUserTurnStatus('COMPLETE');
         const list = transcriptRef.current.user;
@@ -398,7 +471,7 @@ export function useGeminiLive(profile: UserProfile | null): GeminiLiveUI {
     },
     onMicLevel: (lvl) => setMicLevel(lvl),
     onMicDevice: (label) => setMicDevice(label),
-  }), [applyDecision, processUserTurnComplete]);
+  }), [applyDecision, processUserTurnComplete, syncTargetFromOrchestrator]);
 
   const resetSessionLocals = () => {
     endedRef.current = false;
@@ -409,6 +482,9 @@ export function useGeminiLive(profile: UserProfile | null): GeminiLiveUI {
     turnIdsRef.current = { assistant: '', user: '' };
     userTurnMetaRef.current = null;
     orchQueueRef.current = Promise.resolve();
+    naturalTeacherResponseExpectedRef.current = false;
+    teacherAudioLoggedForTurnRef.current = '';
+    setTargetPhrase(null);
     setAssistantText('');
     setUserText('');
     setTeacherTurnStatus('IDLE');
@@ -453,6 +529,7 @@ export function useGeminiLive(profile: UserProfile | null): GeminiLiveUI {
     if (startingRef.current) return;
     startingRef.current = true;
     const sessionGen = beginLiveSession();
+    sessionGenRef.current = sessionGen;
     audioStreamPlayer.setGeneration(sessionGen);
     stopAllAudio();
     resetSessionLocals();
@@ -510,6 +587,7 @@ export function useGeminiLive(profile: UserProfile | null): GeminiLiveUI {
     if (startingRef.current) return;
     startingRef.current = true;
     const sessionGen = beginLiveSession();
+    sessionGenRef.current = sessionGen;
     audioStreamPlayer.setGeneration(sessionGen);
     stopAllAudio();
     resetSessionLocals();
@@ -717,6 +795,7 @@ export function useGeminiLive(profile: UserProfile | null): GeminiLiveUI {
   const end = useCallback((status: 'COMPLETED' | 'PAUSED' | 'ABANDONED' = 'COMPLETED') => {
     persistEnd(status);
     const gen = invalidateLiveSession();
+    sessionGenRef.current = gen;
     audioStreamPlayer.setGeneration(gen);
     disposeActiveService();
     setMicActive(false);
@@ -728,6 +807,7 @@ export function useGeminiLive(profile: UserProfile | null): GeminiLiveUI {
     return () => {
       persistEnd('ABANDONED');
       const gen = invalidateLiveSession();
+      sessionGenRef.current = gen;
       audioStreamPlayer.setGeneration(gen);
       disposeActiveService();
     };

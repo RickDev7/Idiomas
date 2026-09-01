@@ -60,6 +60,8 @@ export interface GeminiVoiceHandlers {
   onMicLevel?: (level: number) => void;
   onMicDevice?: (label: string) => void;
   onMicState?: (state: MicCaptureState) => void;
+  /** Primeiro chunk PCM do professor neste turno (diagnóstico). */
+  onTeacherAudio?: () => void;
 }
 
 export class GeminiVoiceService implements VoiceServiceInterface {
@@ -109,6 +111,7 @@ export class GeminiVoiceService implements VoiceServiceInterface {
               ? float
               : resampleLinearPcm(float, rate, PLAYBACK_PCM_RATE);
           this.speaking = true;
+          this.handlers.onTeacherAudio?.();
           audioStreamPlayer.enqueue(chunk24k, this.sessionGen);
         },
         onTranscript: (role, text, meta) => {
