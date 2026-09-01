@@ -1,21 +1,10 @@
 /**
- * Utilitários compartilhados do pipeline Web Audio (captura + playback PCM).
+ * Utilitários compartilhados do pipeline Web Audio (captura + decode PCM).
  * Taxas alinhadas às APIs de voz Gemini: 16 kHz entrada, 24 kHz saída.
  */
 
 export const MIC_PCM_RATE = 16_000;
 export const PLAYBACK_PCM_RATE = 24_000;
-export const CHUNK_FADE_MS = 8;
-/** Máximo de chunks na fila antes de descartar (evita estática por overflow). */
-export const MAX_PLAYBACK_QUEUE_CHUNKS = 20;
-/** Atraso máximo agendado / gap entre pacotes antes de flush (ms). */
-export const MAX_PLAYBACK_LAG_MS = 500;
-
-export type QueuedPcmChunk = {
-  buf: ArrayBuffer;
-  mime?: string;
-  receivedAt: number;
-};
 
 type AudioContextCtor = typeof AudioContext;
 
@@ -75,27 +64,6 @@ export async function resumeAudioContextIfNeeded(ctx: AudioContext | null): Prom
   }
 }
 
-/** Fade-in / fade-out curto para eliminar cliques entre fragmentos PCM. */
-export function applyChunkFade(
-  gain: GainNode,
-  startTime: number,
-  durationSec: number,
-): void {
-  const fadeSec = Math.min(CHUNK_FADE_MS / 1000, durationSec / 4);
-  if (fadeSec <= 0) {
-    gain.gain.setValueAtTime(1, startTime);
-    return;
-  }
-  gain.gain.cancelScheduledValues(startTime);
-  gain.gain.setValueAtTime(0, startTime);
-  gain.gain.linearRampToValueAtTime(1, startTime + fadeSec);
-  const fadeOutStart = startTime + durationSec - fadeSec;
-  if (fadeOutStart > startTime + fadeSec) {
-    gain.gain.setValueAtTime(1, fadeOutStart);
-    gain.gain.linearRampToValueAtTime(0, startTime + durationSec);
-  }
-}
-
 export function parsePcmSampleRate(mime?: string, fallback = PLAYBACK_PCM_RATE): number {
   if (mime) {
     const m = mime.match(/rate[=:](\d+)/i);
@@ -132,60 +100,6 @@ export function decodePcm16LE(pcm: ArrayBuffer): Float32Array {
     float[i] = view.getInt16(i * 2, true) / 0x8000;
   }
   return float;
-}
-
-/**
- * Converte PCM 16-bit LE em AudioBuffer alinhado ao sample rate REAL do contexto.
- * Evita voz acelerada ("chipmunk") quando o hardware ignora sampleRate: 24000.
- */
-export function pcmToAudioBuffer(
-  ctx: AudioContext,
-  pcm: ArrayBuffer,
-  sourceRate: number,
-): AudioBuffer {
-  const parsed = sourceRate > 0 ? sourceRate : PLAYBACK_PCM_RATE;
-  const float = decodePcm16LE(pcm);
-  const ctxRate = ctx.sampleRate;
-  const channel =
-    parsed === ctxRate ? float : resampleLinearPcm(float, parsed, ctxRate);
-  const audioBuf = ctx.createBuffer(1, channel.length, ctxRate);
-  audioBuf.copyToChannel(channel, 0);
-  return audioBuf;
-}
-
-/** AudioContext de saída — usa taxa NATIVA do dispositivo (sem forçar 24 kHz). */
-export async function createNativePlaybackAudioContext(
-  existing: AudioContext | null,
-): Promise<AudioContext> {
-  const Ctx = getAudioContextCtor();
-  if (existing && existing.state !== 'closed') {
-    try {
-      await existing.close();
-    } catch {
-      /* ignore */
-    }
-  }
-  const ctx = new Ctx();
-  if (ctx.state === 'suspended') {
-    try {
-      await ctx.resume();
-    } catch {
-      /* ignore */
-    }
-  }
-  return ctx;
-}
-
-/** @deprecated Use GeminiPcmPlayer.initOnUserGesture() */
-export async function createPlaybackAudioContext(
-  existing: AudioContext | null,
-): Promise<AudioContext> {
-  return createNativePlaybackAudioContext(existing);
-}
-
-/** Atraso entre o relógio de áudio e o próximo chunk agendado (ms). */
-export function playbackScheduleLagMs(ctx: AudioContext, nextStartTime: number): number {
-  return Math.max(0, (nextStartTime - ctx.currentTime) * 1000);
 }
 
 export const MIC_CONSTRAINTS: MediaTrackConstraints = {

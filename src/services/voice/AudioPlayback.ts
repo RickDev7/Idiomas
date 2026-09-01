@@ -1,18 +1,7 @@
 /**
  * Controle global de reprodução — evita sobreposição entre TTS, PCM Gemini e filas.
  */
-
-type StopHandler = () => void;
-
-let geminiStopHandler: StopHandler | null = null;
-
-/** Registra handler para parar playback PCM do Gemini Live. */
-export function registerGeminiPlaybackStop(handler: StopHandler): () => void {
-  geminiStopHandler = handler;
-  return () => {
-    if (geminiStopHandler === handler) geminiStopHandler = null;
-  };
-}
+import { audioStreamPlayer } from '@/services/voice/AudioStreamPlayer';
 
 /** Para apenas TTS do navegador (Web Speech API). */
 export function stopBrowserAudio(): void {
@@ -25,10 +14,10 @@ export function stopBrowserAudio(): void {
   }
 }
 
-/** Para playback PCM do Gemini (fila + fontes ativas). */
+/** Para playback PCM do Gemini (fila sequencial + fonte ativa). */
 export function stopGeminiPlayback(): void {
   try {
-    geminiStopHandler?.();
+    audioStreamPlayer.stopAll();
   } catch {
     /* ignore */
   }

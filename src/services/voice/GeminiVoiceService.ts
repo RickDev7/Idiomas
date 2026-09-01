@@ -3,15 +3,15 @@ import { GeminiLiveService, type LiveProfile, type LiveSessionState } from '@/se
 import {
   MIC_PCM_RATE,
   MIC_CONSTRAINTS,
+  PLAYBACK_PCM_RATE,
   createOrResumeAudioContext,
   resumeAudioContextIfNeeded,
   resampleLinearPcm,
+  decodePcm16LE,
+  parsePcmSampleRate,
 } from '@/services/voice/AudioPipeline';
-import {
-  registerGeminiPlaybackStop,
-  stopAllAudio,
-} from '@/services/voice/AudioPlayback';
-import { GeminiPcmPlayer } from '@/services/voice/GeminiPcmPlayer';
+import { stopAllAudio } from '@/services/voice/AudioPlayback';
+import { audioStreamPlayer } from '@/services/voice/AudioStreamPlayer';
 
 const DEV = typeof import.meta !== 'undefined' && !!(import.meta as { env?: { DEV?: boolean } }).env?.DEV;
 
@@ -63,7 +63,6 @@ export interface GeminiVoiceHandlers {
 
 export class GeminiVoiceService implements VoiceServiceInterface {
   private live: GeminiLiveService;
-  private pcmPlayer = new GeminiPcmPlayer();
   private micContext: AudioContext | null = null;
   private mediaStream: MediaStream | null = null;
   private sourceNode: MediaStreamAudioSourceNode | null = null;
@@ -79,7 +78,6 @@ export class GeminiVoiceService implements VoiceServiceInterface {
   private bytesSent = 0;
   private visibilityHandler: (() => void) | null = null;
   private backgroundSuspended = false;
-  private unregisterGeminiStop: (() => void) | null = null;
 
   setMicDeviceId(id: string | null): void {
     this.preferredDeviceId = id;
@@ -87,16 +85,23 @@ export class GeminiVoiceService implements VoiceServiceInterface {
 
   constructor(profile: LiveProfile, handlers: GeminiVoiceHandlers, backendUrl?: string) {
     this.handlers = handlers;
-    this.pcmPlayer.setOnSpeakingChange((s) => {
-      this.speaking = s;
-    });
     this.live = new GeminiLiveService(
       profile,
       {
         onStateChange: (s) => {
           this.handlers.onStateChange?.(s);
         },
-        onAudio: (b64, mime) => this.pcmPlayer.enqueue(base64ToArrayBuffer(b64), mime),
+        onAudio: (b64, mime) => {
+          const pcm = base64ToArrayBuffer(b64);
+          const float = decodePcm16LE(pcm);
+          const rate = parsePcmSampleRate(mime, PLAYBACK_PCM_RATE);
+          const chunk24k =
+            rate === PLAYBACK_PCM_RATE
+              ? float
+              : resampleLinearPcm(float, rate, PLAYBACK_PCM_RATE);
+          this.speaking = true;
+          audioStreamPlayer.enqueue(chunk24k);
+        },
         onTranscript: (role, text, meta) => {
           if (role === 'assistant') this.speaking = true;
           this.handlers.onTranscript?.(role, text, meta);
@@ -114,7 +119,6 @@ export class GeminiVoiceService implements VoiceServiceInterface {
       },
       backendUrl,
     );
-    this.unregisterGeminiStop = registerGeminiPlaybackStop(() => this.pcmPlayer.stop());
     this.bindVisibilityHandling();
   }
 
@@ -148,12 +152,11 @@ export class GeminiVoiceService implements VoiceServiceInterface {
   }
 
   isSpeaking(): boolean {
-    return this.speaking || this.pcmPlayer.isSpeaking();
+    return this.speaking || audioStreamPlayer.getIsPlaying();
   }
 
-  /** Destrói e recria AudioContext de saída — exclusivo no gesto do usuário. */
   async preparePlaybackOnGesture(): Promise<void> {
-    await this.pcmPlayer.initOnUserGesture();
+    audioStreamPlayer.resetForSession();
   }
 
   async connect(): Promise<void> {
@@ -312,25 +315,22 @@ export class GeminiVoiceService implements VoiceServiceInterface {
 
   stopSpeaking(): void {
     this.live.interrupt();
-    this.pcmPlayer.stop();
+    audioStreamPlayer.stopAll();
     this.speaking = false;
   }
 
   interrupt(): void {
     this.live.interrupt();
-    this.pcmPlayer.stop();
+    audioStreamPlayer.stopAll();
     this.speaking = false;
   }
 
   disconnect(): void {
-    this.unregisterGeminiStop?.();
-    this.unregisterGeminiStop = null;
     this.unbindVisibilityHandling();
     this.stopMic();
-    this.pcmPlayer.stop();
+    audioStreamPlayer.stopAll();
     this.live.disconnect();
     void this.micContext?.close();
-    void this.pcmPlayer.destroyContext();
     this.micContext = null;
   }
 
@@ -354,17 +354,15 @@ export class GeminiVoiceService implements VoiceServiceInterface {
   }
 
   private handleTabHidden(): void {
-    this.pcmPlayer.stop();
+    audioStreamPlayer.stopAll();
     this.speaking = false;
     this.backgroundSuspended = true;
     void this.micContext?.suspend();
-    void this.pcmPlayer.suspend();
   }
 
   private async handleTabVisible(): Promise<void> {
     if (!this.backgroundSuspended) return;
     this.backgroundSuspended = false;
     await resumeAudioContextIfNeeded(this.micContext);
-    await this.pcmPlayer.resumeIfSuspended();
   }
 }
