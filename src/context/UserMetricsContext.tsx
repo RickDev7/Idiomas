@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { DailyGoalStore, DAILY_GOAL_STORAGE_KEY } from '@/services/learning/DailyGoalStore';
 import {
   UserMetricsStore,
   USER_METRICS_STORAGE_KEY,
@@ -12,6 +13,8 @@ import { useProfile } from '@/hooks/useProfile';
 type UserMetricsContextValue = UserMetricsView & {
   state: UserMetricsState;
   refreshFromLearning: () => Promise<void>;
+  setDailyGoal: (minutes: number) => void;
+  dismissMorningPrompt: () => void;
 };
 
 const UserMetricsContext = createContext<UserMetricsContextValue | null>(null);
@@ -19,13 +22,16 @@ const UserMetricsContext = createContext<UserMetricsContextValue | null>(null);
 export function UserMetricsProvider({ children }: { children: ReactNode }) {
   const { profile } = useProfile();
   const [state, setState] = useState<UserMetricsState>(() => UserMetricsStore.getState());
+  const [dailyTick, setDailyTick] = useState(0);
 
   useEffect(() => UserMetricsStore.subscribe(setState), []);
+  useEffect(() => DailyGoalStore.subscribe(() => setDailyTick((n) => n + 1)), []);
 
   useEffect(() => {
     const onStorage = (e: StorageEvent) => {
-      if (e.key === USER_METRICS_STORAGE_KEY) {
+      if (e.key === USER_METRICS_STORAGE_KEY || e.key === DAILY_GOAL_STORAGE_KEY) {
         setState(UserMetricsStore.getState());
+        setDailyTick((n) => n + 1);
       }
     };
     window.addEventListener('storage', onStorage);
@@ -52,15 +58,25 @@ export function UserMetricsProvider({ children }: { children: ReactNode }) {
     return () => window.removeEventListener('focus', onFocus);
   }, [refreshFromLearning]);
 
-  const view = useMemo(() => computeMetricsView(state), [state]);
+  const setDailyGoal = useCallback((minutes: number) => {
+    UserMetricsStore.setDailyGoal(minutes);
+  }, []);
+
+  const dismissMorningPrompt = useCallback(() => {
+    UserMetricsStore.dismissMorningPrompt();
+  }, []);
+
+  const view = useMemo(() => computeMetricsView(state), [state, dailyTick]);
 
   const value = useMemo<UserMetricsContextValue>(
     () => ({
       ...view,
       state,
       refreshFromLearning,
+      setDailyGoal,
+      dismissMorningPrompt,
     }),
-    [view, state, refreshFromLearning],
+    [view, state, refreshFromLearning, setDailyGoal, dismissMorningPrompt],
   );
 
   return <UserMetricsContext.Provider value={value}>{children}</UserMetricsContext.Provider>;

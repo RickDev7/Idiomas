@@ -1,36 +1,32 @@
 /**
- * Métricas do usuário — tempo de estudo, chunks, variações e fala autônoma.
- * Persistência: @deutsch_turbo:user_metrics
+ * Métricas do usuário — chunks, variações e fala autônoma.
+ * Tempo/meta diária: DailyGoalStore (@deutsch_turbo:daily_goal)
  */
 import type { UserLearningProfile } from '@/services/learning/ConfidenceService';
+import {
+  DailyGoalStore,
+  type DailyGoalView,
+} from '@/services/learning/DailyGoalStore';
 import {
   L0_CHUNK_GRAPH,
   isZeroLanguagePhraseAccepted,
 } from '@/services/teacher/ZeroLanguageMode';
 
 export const USER_METRICS_STORAGE_KEY = '@deutsch_turbo:user_metrics';
-export const DEFAULT_DAILY_GOAL_MINUTES = 30;
+export { DEFAULT_DAILY_GOAL_MINUTES } from '@/services/learning/DailyGoalStore';
 
 export type UserMetricsState = {
   date: string;
-  dailyGoalMinutes: number;
-  /** Segundos estudados hoje (precisão para barra de progresso). */
-  secondsStudiedToday: number;
   learnedChunkIds: string[];
   totalVariationsCreated: number;
   speechPromptsTotal: number;
   speechPromptsCorrectNoHint: number;
 };
 
-export type UserMetricsView = {
-  dailyGoalMinutes: number;
-  minutesStudiedToday: number;
-  minutesRemaining: number;
-  dailyProgressPct: number;
+export type UserMetricsView = DailyGoalView & {
   learnedChunksCount: number;
   totalVariationsCreated: number;
   autonomousSpeechPct: number;
-  minutesStudiedLabel: string;
 };
 
 type Listener = (state: UserMetricsState) => void;
@@ -42,8 +38,6 @@ function todayKey(): string {
 function defaultState(): UserMetricsState {
   return {
     date: todayKey(),
-    dailyGoalMinutes: DEFAULT_DAILY_GOAL_MINUTES,
-    secondsStudiedToday: 0,
     learnedChunkIds: [],
     totalVariationsCreated: 0,
     speechPromptsTotal: 0,
@@ -57,12 +51,6 @@ function normalizeState(raw: Partial<UserMetricsState> | null): UserMetricsState
   if (raw.date !== todayKey()) return defaultState();
   return {
     date: todayKey(),
-    dailyGoalMinutes:
-      typeof raw.dailyGoalMinutes === 'number' && raw.dailyGoalMinutes > 0
-        ? raw.dailyGoalMinutes
-        : base.dailyGoalMinutes,
-    secondsStudiedToday:
-      typeof raw.secondsStudiedToday === 'number' ? Math.max(0, raw.secondsStudiedToday) : 0,
     learnedChunkIds: Array.isArray(raw.learnedChunkIds)
       ? [...new Set(raw.learnedChunkIds.filter((id) => typeof id === 'string'))]
       : [],
@@ -97,29 +85,20 @@ function saveState(state: UserMetricsState): void {
   }
 }
 
-export function computeMetricsView(state: UserMetricsState): UserMetricsView {
-  const minutesStudiedToday = state.secondsStudiedToday / 60;
-  const minutesRounded = Math.max(0, Math.round(minutesStudiedToday));
-  const goal = state.dailyGoalMinutes;
-  const minutesRemaining = Math.max(0, Math.ceil(goal - minutesStudiedToday));
-  const dailyProgressPct = Math.min(
-    100,
-    Math.round((minutesStudiedToday / Math.max(1, goal)) * 100),
-  );
+export function computeMetricsView(
+  state: UserMetricsState,
+  daily: DailyGoalView = DailyGoalStore.getView(),
+): UserMetricsView {
   const autonomousSpeechPct =
     state.speechPromptsTotal > 0
       ? Math.round((state.speechPromptsCorrectNoHint / state.speechPromptsTotal) * 100)
       : 0;
 
   return {
-    dailyGoalMinutes: goal,
-    minutesStudiedToday: minutesRounded,
-    minutesRemaining,
-    dailyProgressPct,
+    ...daily,
     learnedChunksCount: state.learnedChunkIds.length,
     totalVariationsCreated: state.totalVariationsCreated,
     autonomousSpeechPct,
-    minutesStudiedLabel: `${minutesRounded} min`,
   };
 }
 
@@ -153,6 +132,10 @@ class UserMetricsStoreImpl {
   private listeners = new Set<Listener>();
   private state: UserMetricsState = loadState();
 
+  constructor() {
+    DailyGoalStore.subscribe(() => this.emit());
+  }
+
   getState(): UserMetricsState {
     this.state = normalizeState(this.state);
     return this.state;
@@ -179,11 +162,7 @@ class UserMetricsStoreImpl {
   }
 
   addStudySeconds(seconds: number): void {
-    if (seconds <= 0) return;
-    this.touch();
-    this.state.secondsStudiedToday += seconds;
-    saveState(this.state);
-    this.emit();
+    DailyGoalStore.addStudySeconds(seconds);
   }
 
   recordSpeechOutcome(input: { correct: boolean; withHint: boolean }): void {
@@ -216,10 +195,11 @@ class UserMetricsStoreImpl {
   }
 
   setDailyGoal(minutes: number): void {
-    this.touch();
-    this.state.dailyGoalMinutes = Math.max(5, Math.min(120, minutes));
-    saveState(this.state);
-    this.emit();
+    DailyGoalStore.setDailyGoal(minutes);
+  }
+
+  dismissMorningPrompt(): void {
+    DailyGoalStore.dismissMorningPrompt();
   }
 }
 

@@ -13,6 +13,11 @@ import {
   playbackScheduleLagMs,
   type QueuedPcmChunk,
 } from '@/services/voice/AudioPipeline';
+import {
+  registerGeminiPlaybackStop,
+  stopAllAudio,
+  stopBrowserAudio,
+} from '@/services/voice/AudioPlayback';
 
 const DEV = typeof import.meta !== 'undefined' && !!(import.meta as { env?: { DEV?: boolean } }).env?.DEV;
 
@@ -105,6 +110,7 @@ export class GeminiVoiceService implements VoiceServiceInterface {
   private lastPacketAt = 0;
   private visibilityHandler: (() => void) | null = null;
   private backgroundSuspended = false;
+  private unregisterGeminiStop: (() => void) | null = null;
 
   setMicDeviceId(id: string | null): void {
     this.preferredDeviceId = id;
@@ -136,6 +142,7 @@ export class GeminiVoiceService implements VoiceServiceInterface {
       },
       backendUrl,
     );
+    this.unregisterGeminiStop = registerGeminiPlaybackStop(() => this.flushPlaybackQueue('stop_all'));
     this.bindVisibilityHandling();
   }
 
@@ -334,6 +341,8 @@ export class GeminiVoiceService implements VoiceServiceInterface {
   }
 
   speak(text: string, _lang = 'de-DE'): Promise<void> {
+    stopAllAudio();
+    this.speaking = false;
     return this.live.sendText(text);
   }
 
@@ -349,9 +358,13 @@ export class GeminiVoiceService implements VoiceServiceInterface {
 
   interrupt(): void {
     this.live.interrupt();
+    this.flushPlaybackQueue('interrupt');
+    this.speaking = false;
   }
 
   disconnect(): void {
+    this.unregisterGeminiStop?.();
+    this.unregisterGeminiStop = null;
     this.unbindVisibilityHandling();
     this.stopMic();
     this.flushPlaybackQueue('disconnect');
@@ -427,6 +440,9 @@ export class GeminiVoiceService implements VoiceServiceInterface {
 
   private enqueueAudio(buf: ArrayBuffer, mime?: string) {
     const now = performance.now();
+    if (this.playbackQueue.length === 0 && !this.playing && this.activeNodes.length === 0) {
+      stopBrowserAudio();
+    }
     if (this.shouldFlushForJitter(now)) {
       this.flushPlaybackQueue('jitter');
     }

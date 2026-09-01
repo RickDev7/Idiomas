@@ -8,6 +8,7 @@ import { toast } from '@/components/ui/Toast';
 import { haptic } from '@/services/ui/UiPrefsService';
 import { SoundService } from '@/services/ui/SoundService';
 import { getVoiceService } from '@/services/voice/VoiceService';
+import { stopAllAudio } from '@/services/voice/AudioPlayback';
 import {
   TeacherCard, StudentResponseCard, ActionGrid, VoiceArea, SessionProgress,
   ConversationProgressBar, SequenceDots,
@@ -223,6 +224,7 @@ export function GeminiConversation({ profile, onFinish }: { profile: UserProfile
     const text = (live.targetPhrase || shownGerman).trim();
     if (!text) return;
     haptic(8);
+    stopAllAudio();
     const voice = getVoiceService();
     voice.setSpeed(profile.speechSpeed || 'normal');
     void voice.speak(text, 'de-DE').catch(() => {

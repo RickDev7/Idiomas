@@ -12,6 +12,7 @@ import {
   ChunksOfDay,
   ProgressSection,
 } from '@/components/home/HomeSections';
+import { DailyGoalSheet } from '@/components/home/DailyGoalSheet';
 import { BottomNav } from '@/components/layout/BottomNav';
 import { IconCube, IconPuzzle, IconWave, IconClock } from '@/components/ui/Icons';
 import {
@@ -29,7 +30,9 @@ export function HomePage() {
   const [course, setCourse] = useState<CourseProgress | null>(null);
   const [incomplete, setIncomplete] = useState(() => getIncompleteSession());
   const metrics = useUserMetrics();
-  const { refreshFromLearning } = metrics;
+  const { refreshFromLearning, setDailyGoal, dismissMorningPrompt } = metrics;
+  const [goalSheetOpen, setGoalSheetOpen] = useState(false);
+  const [goalSheetMode, setGoalSheetMode] = useState<'edit' | 'morning'>('edit');
 
   useEffect(() => {
     if (loading) return;
@@ -49,16 +52,36 @@ export function HomePage() {
     return () => window.removeEventListener('focus', refresh);
   }, [profile?.diagnosticLevel, profile?.selfReportedLevel, profile?.currentDay, refreshFromLearning]);
 
+  useEffect(() => {
+    if (metrics.showMorningPrompt) {
+      setGoalSheetMode('morning');
+      setGoalSheetOpen(true);
+    }
+  }, [metrics.showMorningPrompt]);
+
   if (loading || !profile || !profile.onboardingComplete) {
     return <LoadingScreen />;
   }
 
   const greeting = greetingForNow();
   const currentLevel = getCurrentLevel(profile, course);
-  const remainingLabel =
-    metrics.minutesRemaining <= 0
-      ? 'Meta concluída!'
-      : `${metrics.minutesRemaining} min restantes`;
+
+  const openGoalEditor = () => {
+    setGoalSheetMode('edit');
+    setGoalSheetOpen(true);
+  };
+
+  const handleGoalSelect = (minutes: number) => {
+    setDailyGoal(minutes);
+    dismissMorningPrompt();
+  };
+
+  const handleGoalSheetClose = () => {
+    setGoalSheetOpen(false);
+    if (goalSheetMode === 'morning') {
+      dismissMorningPrompt();
+    }
+  };
 
   const startTraining = async () => {
     await getTodaySession(profile);
@@ -115,8 +138,10 @@ export function HomePage() {
         <LevelTrack current={levelId} />
         <TrainingHero
           totalMinutes={metrics.dailyGoalMinutes}
-          remainingLabel={remainingLabel}
+          remainingLabel={metrics.heroBadgeLabel}
           progressPct={metrics.dailyProgressPct}
+          goalReached={metrics.goalReached}
+          onBadgeClick={openGoalEditor}
           onStart={startTraining}
           title={incomplete ? t('home.continue') : 'Continuar treino'}
           ariaLabel={incomplete ? t('home.continue') : 'Continuar treino'}
@@ -126,6 +151,13 @@ export function HomePage() {
         <ProgressSection metrics={progressMetrics} />
       </main>
       <BottomNav />
+      <DailyGoalSheet
+        open={goalSheetOpen}
+        mode={goalSheetMode}
+        currentGoal={metrics.dailyGoalMinutes}
+        onSelect={handleGoalSelect}
+        onClose={handleGoalSheetClose}
+      />
     </div>
   );
 }

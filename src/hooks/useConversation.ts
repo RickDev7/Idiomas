@@ -3,6 +3,7 @@ import type { ConversationContext, ConversationMessage, AIResponse } from '@/typ
 import { createConversationMessage } from '@/services/ai/MockAIService';
 import { getConfiguredAIService } from '@/services/ai/AIService';
 import { getVoiceService } from '@/services/voice/VoiceService';
+import { stopAllAudio } from '@/services/voice/AudioPlayback';
 import { StorageService } from '@/services/storage/StorageService';
 import { generateId } from '@/utils/reviewUtils';
 
@@ -17,6 +18,7 @@ export function useConversation({ context, autoSpeak = true }: UseConversationOp
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [currentResponse, setCurrentResponse] = useState<AIResponse | null>(null);
+  const [sessionStarted, setSessionStarted] = useState(false);
   const [conversationId] = useState(() => generateId());
   const ai = useRef(getConfiguredAIService());
   const voice = useRef(getVoiceService());
@@ -24,6 +26,7 @@ export function useConversation({ context, autoSpeak = true }: UseConversationOp
 
   const speak = useCallback(async (text: string) => {
     if (!text) return;
+    stopAllAudio();
     setIsSpeaking(true);
     try {
       voice.current.setSpeed(context.userProfile.speechSpeed);
@@ -42,6 +45,7 @@ export function useConversation({ context, autoSpeak = true }: UseConversationOp
   const start = useCallback(async () => {
     if (started.current) return;
     started.current = true;
+    setSessionStarted(true);
     setIsProcessing(true);
 
     try {
@@ -124,7 +128,7 @@ export function useConversation({ context, autoSpeak = true }: UseConversationOp
   const startListening = useCallback(async () => {
     if (isListening || isSpeaking) return '';
     setIsListening(true);
-    voice.current.stopSpeaking();
+    stopAllAudio();
     try {
       voice.current.setLanguage('de-DE');
       const transcript = await voice.current.listen();
@@ -142,7 +146,7 @@ export function useConversation({ context, autoSpeak = true }: UseConversationOp
   }, []);
 
   const stopSpeaking = useCallback(() => {
-    voice.current.stopSpeaking();
+    stopAllAudio();
     setIsSpeaking(false);
   }, []);
 
@@ -156,6 +160,7 @@ export function useConversation({ context, autoSpeak = true }: UseConversationOp
     isSpeaking,
     isProcessing,
     currentResponse,
+    sessionStarted,
     start,
     sendMessage,
     startListening,

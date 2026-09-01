@@ -1,3 +1,5 @@
+import { stopAllAudio, stopBrowserAudio } from '@/services/voice/AudioPlayback';
+
 export type SpeechSpeed = 'slow' | 'normal' | 'natural';
 
 export interface VoiceServiceInterface {
@@ -134,7 +136,8 @@ export class BrowserVoiceService implements VoiceServiceInterface {
 
   speak(text: string, lang = 'de-DE'): Promise<void> {
     return new Promise((resolve, reject) => {
-      this.stopSpeaking();
+      stopAllAudio();
+      this.speaking = false;
 
       const utterance = new SpeechSynthesisUtterance(text);
       utterance.lang = lang;
@@ -158,10 +161,8 @@ export class BrowserVoiceService implements VoiceServiceInterface {
   }
 
   stopSpeaking(): void {
-    if (this.synthesis.speaking) {
-      this.synthesis.cancel();
-      this.speaking = false;
-    }
+    stopBrowserAudio();
+    this.speaking = false;
   }
 }
 

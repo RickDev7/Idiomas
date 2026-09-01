@@ -24,6 +24,7 @@ import {
   type SupportLevel,
 } from '@/services/learning/ScaffoldingEngine';
 import { computeSessionRealUse, type SessionRealUseOutcome } from '@/services/learning/RealUseEngine';
+import { stopAllAudio } from '@/services/voice/AudioPlayback';
 
 export type Phase = 'idle' | 'speaking' | 'listening' | 'grading' | 'feedback';
 
@@ -35,6 +36,7 @@ export interface UseLessonResult {
   feedback: string;
   showTranslation: boolean;
   helpLevel: number;
+  sessionStarted: boolean;
   start: () => Promise<void>;
   next: () => void;
   listen: () => Promise<void>;
@@ -94,12 +96,14 @@ export function useLesson(type: string, profile: UserProfile | null): UseLessonR
   const openingRef = useRef<{ german: string; kind: string; topic: string } | null>(null);
   const lessonRef = useRef(lesson);
   const savedRef = useRef(false);
+  const [sessionStarted, setSessionStarted] = useState(false);
   lessonRef.current = lesson;
 
   const interaction = lesson.interactions[index] ?? null;
 
   const speak = useCallback(async (text: string, slow = false) => {
     if (!text) return;
+    stopAllAudio();
     setPhase('speaking');
     const v = voice.current;
     if (slow) v.setSpeed('slow');
@@ -175,6 +179,7 @@ export function useLesson(type: string, profile: UserProfile | null): UseLessonR
   const start = useCallback(async () => {
     if (started.current) return;
     started.current = true;
+    setSessionStarted(true);
     sessionStartRef.current = Date.now();
     await EventStore.record({ type: 'SESSION_STARTED' as LearningEventType });
     const built = await buildLesson();
@@ -294,7 +299,7 @@ export function useLesson(type: string, profile: UserProfile | null): UseLessonR
     setFeedback('');
     setPhase('listening');
     listenStart.current = Date.now();
-    voice.current.stopSpeaking();
+    stopAllAudio();
     voice.current.setLanguage('de-DE');
     try {
       const transcript = await voice.current.listen();
@@ -501,6 +506,7 @@ export function useLesson(type: string, profile: UserProfile | null): UseLessonR
     feedback,
     showTranslation,
     helpLevel,
+    sessionStarted,
     start,
     next,
     listen,

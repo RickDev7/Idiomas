@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useStudySession } from '@/hooks/useStudySession';
 import { createOrResumeAudioContext, MIC_CONSTRAINTS, MIC_PCM_RATE } from '@/services/voice/AudioPipeline';
+import { stopAllAudio, stopGeminiPlayback } from '@/services/voice/AudioPlayback';
 import { GeminiVoiceService, type GeminiVoiceHandlers, type MicCaptureState } from '@/services/voice/GeminiVoiceService';
 import type { LiveSessionState } from '@/services/ai/GeminiLiveService';
 import type { UserProfile } from '@/types';
@@ -307,6 +308,9 @@ export function useGeminiLive(profile: UserProfile | null): GeminiLiveUI {
       const ids = turnIdsRef.current;
       const list = role === 'assistant' ? transcriptRef.current.assistant : transcriptRef.current.user;
       if (ids[role] !== turn.id) {
+        if (role === 'assistant') {
+          stopGeminiPlayback();
+        }
         ids[role] = turn.id;
         list.push(turn.text);
       } else if (list.length) {
@@ -571,6 +575,7 @@ export function useGeminiLive(profile: UserProfile | null): GeminiLiveUI {
   }, [applyDecision]);
 
   const interrupt = useCallback(() => {
+    stopAllAudio();
     serviceRef.current?.interrupt();
   }, []);
 

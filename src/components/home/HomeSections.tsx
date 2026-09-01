@@ -137,7 +137,9 @@ export interface TrainingHeroProps {
   totalMinutes: number;
   remainingLabel?: string;
   progressPct?: number;
+  goalReached?: boolean;
   onStart: () => void;
+  onBadgeClick?: () => void;
   title?: string;
   ariaLabel?: string;
   continueMode?: boolean;
@@ -147,19 +149,18 @@ export function TrainingHero({
   totalMinutes,
   remainingLabel,
   progressPct = 42,
+  goalReached = false,
   onStart,
+  onBadgeClick,
   title = 'Continuar treino',
   ariaLabel = 'Continuar treino',
 }: TrainingHeroProps) {
   const rem = remainingLabel || `${totalMinutes} min restantes`;
+  const barWidth = goalReached ? 100 : Math.min(100, Math.max(8, progressPct));
+
   return (
     <section className="px-5 pt-5 animate-slide-up">
-      <button
-        type="button"
-        onClick={onStart}
-        aria-label={ariaLabel}
-        className="group relative w-full text-left rounded-[28px] p-5 overflow-hidden active:scale-[0.98] transition-transform dt-hero-train"
-      >
+      <div className="group relative w-full rounded-[28px] p-5 overflow-hidden dt-hero-train">
         <span className="absolute -top-24 -right-10 w-64 h-64 rounded-full bg-white/15 blur-3xl pointer-events-none" />
         <span className="absolute -bottom-16 -left-8 w-40 h-40 rounded-full bg-[#FF512F]/30 blur-2xl pointer-events-none" />
         <div className="relative flex items-center gap-3">
@@ -170,11 +171,29 @@ export function TrainingHero({
             <p className="text-[24px] text-white font-bold leading-tight font-[family-name:var(--font-display)]">
               {title}
             </p>
-            <span className="inline-flex mt-3 px-3 py-1 rounded-full text-[12px] font-semibold text-white/95 bg-black/20 border border-white/25 backdrop-blur-sm">
+            <button
+              type="button"
+              onClick={onBadgeClick}
+              aria-label="Ajustar meta diária de estudo"
+              className="inline-flex mt-3 px-3 py-1 rounded-full text-[12px] font-semibold text-white/95 bg-black/20 border border-white/25 backdrop-blur-sm active:scale-[0.97] transition-transform hover:bg-black/30"
+              style={
+                goalReached
+                  ? {
+                      borderColor: 'rgba(0,242,254,0.55)',
+                      boxShadow: '0 0 14px rgba(0,242,254,0.35), 0 0 24px rgba(16,185,129,0.2)',
+                    }
+                  : undefined
+              }
+            >
               {rem}
-            </span>
+            </button>
           </div>
-          <span className="relative shrink-0 w-[80px] h-[80px] flex items-center justify-center">
+          <button
+            type="button"
+            onClick={onStart}
+            aria-label={ariaLabel}
+            className="relative shrink-0 w-[80px] h-[80px] flex items-center justify-center active:scale-[0.96] transition-transform"
+          >
             <span className="absolute inset-0 rounded-full border border-white/30 animate-pulse" style={{ animationDuration: '2.4s' }} />
             <span className="absolute inset-[-8px] rounded-full border border-white/15" />
             <span
@@ -183,18 +202,20 @@ export function TrainingHero({
             >
               <span className="w-0 h-0 border-y-[11px] border-y-transparent border-l-[18px] border-l-[#DD2476] ml-1" />
             </span>
-          </span>
+          </button>
         </div>
         <div className="relative mt-5 h-[6px] rounded-full bg-black/25 overflow-hidden">
           <div
-            className="h-full rounded-full bg-white/90"
+            className={`h-full rounded-full transition-all duration-500 ${goalReached ? 'dt-hero-progress-done' : 'bg-white/90'}`}
             style={{
-              width: `${Math.min(100, Math.max(8, progressPct))}%`,
-              boxShadow: '0 0 10px rgba(255,255,255,0.5)',
+              width: `${barWidth}%`,
+              boxShadow: goalReached
+                ? undefined
+                : '0 0 10px rgba(255,255,255,0.5)',
             }}
           />
         </div>
-      </button>
+      </div>
     </section>
   );
 }

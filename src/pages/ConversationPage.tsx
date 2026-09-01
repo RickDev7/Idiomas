@@ -79,11 +79,8 @@ export function ConversationPage() {
     if (loading || !profile) return;
     if (!profile.onboardingComplete) {
       navigate('/onboarding');
-      return;
     }
-    if (isFree) free.start();
-    else lesson.start();
-  }, [loading, profile]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [loading, profile, navigate]);
 
   const finish = async () => {
     if (profile) {
@@ -127,7 +124,28 @@ export function ConversationPage() {
   }
 
   if (isFree) {
+    if (!free.sessionStarted) {
+      return (
+        <SessionStartGate
+          title="Conversa livre"
+          subtitle="Toque em começar quando estiver pronto para ouvir o professor."
+          onStart={() => { haptic(); void free.start(); }}
+          onBack={() => navigate('/')}
+        />
+      );
+    }
     return <FreeConversation free={free} onClose={() => navigate('/')} onEncerrar={finish} />;
+  }
+
+  if (!lesson.sessionStarted) {
+    return (
+      <SessionStartGate
+        title="Treino de hoje"
+        subtitle="Toque em começar para iniciar a sessão com áudio."
+        onStart={() => { haptic(); void lesson.start(); }}
+        onBack={() => navigate('/')}
+      />
+    );
   }
 
   const i = lesson.interaction;
@@ -244,6 +262,43 @@ export function ConversationPage() {
             </span>
           </PrimaryButton>
         )}
+      </div>
+    </div>
+  );
+}
+
+function SessionStartGate({
+  title,
+  subtitle,
+  onStart,
+  onBack,
+}: {
+  title: string;
+  subtitle: string;
+  onStart: () => void;
+  onBack: () => void;
+}) {
+  return (
+    <div className="flex flex-col h-full bg-background max-w-md mx-auto">
+      <header className="flex items-center px-4 pt-5 pb-2 safe-top">
+        <IconButton label="Voltar" className="min-h-11" onClick={onBack}>
+          <IconBack size={20} />
+        </IconButton>
+      </header>
+      <div className="flex-1 flex flex-col items-center justify-center px-8 text-center min-h-0">
+        <div className="mb-8">
+          <VoiceOrb state="idle" size={180} />
+        </div>
+        <p className="text-eyebrow text-text-faint mb-3">Deutsch Coach</p>
+        <h1 className="text-display font-bold leading-tight">{title}</h1>
+        <p className="text-secondary text-text-muted mt-3 max-w-[280px]">{subtitle}</p>
+      </div>
+      <div className="px-8 pb-10 safe-bottom">
+        <PrimaryButton full size="xl" onClick={onStart}>
+          <span className="inline-flex items-center gap-2">
+            <IconPlay size={18} /> Começar
+          </span>
+        </PrimaryButton>
       </div>
     </div>
   );
