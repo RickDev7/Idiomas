@@ -1,5 +1,8 @@
+import { useNavigate } from 'react-router-dom';
 import type { CSSProperties, ReactNode } from 'react';
 import { IconBell, IconClock, IconHouse, IconBriefcase, IconDrop } from '@/components/ui/Icons';
+import { useChunkTracker } from '@/hooks/useChunkTracker';
+import type { ChunkVisualIcon } from '@/services/learning/ChunkTrackerStore';
 import mascotImg from '@/assets/mascot/deutsch-turbo-mascot.png';
 
 const LEVELS = [
@@ -196,13 +199,19 @@ export function TrainingHero({
   );
 }
 
-const CHUNK_BRANCHES = [
-  { de: 'Ich möchte Wasser.', Icon: IconDrop, tint: '#38bdf8' },
-  { de: 'Ich möchte arbeiten.', Icon: IconBriefcase, tint: '#10B981' },
-  { de: 'Ich möchte nach Hause.', Icon: IconHouse, tint: '#FF512F' },
-] as const;
+const CHUNK_ICON_MAP: Record<ChunkVisualIcon, typeof IconDrop> = {
+  drop: IconDrop,
+  briefcase: IconBriefcase,
+  house: IconHouse,
+  default: IconDrop,
+};
 
-export function ChunksOfDay({ hook = 'Ich möchte...', pt = 'Quero...' }: { hook?: string; pt?: string }) {
+export function ChunksOfDay() {
+  const navigate = useNavigate();
+  const { activeChunk, displaySlots, hasPracticedToday } = useChunkTracker();
+  const hook = activeChunk.german;
+  const pt = activeChunk.portuguese;
+
   return (
     <section className="px-5 pt-7 animate-fade-in">
       <p className="text-[11px] uppercase tracking-[0.16em] font-semibold text-[#64748b] mb-4">
@@ -221,33 +230,78 @@ export function ChunksOfDay({ hook = 'Ich möchte...', pt = 'Quero...' }: { hook
           <p className="text-[15px] font-bold text-white leading-tight">{hook}</p>
           <p className="text-[12px] text-white/75 mt-0.5">{pt}</p>
         </div>
-        {/* Linhas finas azuis do grafo */}
-        <svg className="w-full h-9 overflow-visible" viewBox="0 0 300 36" aria-hidden>
-          <path d="M150 0 V14" stroke="#38bdf8" strokeOpacity="0.55" strokeWidth="1.6" fill="none" />
-          <path d="M50 14 H250" stroke="#38bdf8" strokeOpacity="0.4" strokeWidth="1.6" fill="none" />
-          <path d="M50 14 V36 M150 14 V36 M250 14 V36" stroke="#38bdf8" strokeOpacity="0.4" strokeWidth="1.6" fill="none" />
+
+        <svg className="w-full h-9 mt-1 overflow-visible" viewBox="0 0 300 36" aria-hidden>
+          <defs>
+            <linearGradient id="chunkLineGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+              <stop offset="0%" stopColor="#00F2FE" stopOpacity="0.2" />
+              <stop offset="50%" stopColor="#38bdf8" stopOpacity="0.55" />
+              <stop offset="100%" stopColor="#8B5CF6" stopOpacity="0.35" />
+            </linearGradient>
+          </defs>
+          <path d="M150 0 V14" stroke="url(#chunkLineGrad)" strokeWidth="1.6" fill="none" />
+          <path d="M50 14 H250" stroke="url(#chunkLineGrad)" strokeWidth="1.6" fill="none" />
+          <path d="M50 14 V36 M150 14 V36 M250 14 V36" stroke="url(#chunkLineGrad)" strokeWidth="1.6" fill="none" />
         </svg>
+
         <div className="grid grid-cols-3 gap-2.5 w-full">
-          {CHUNK_BRANCHES.map((b) => (
-            <div
-              key={b.de}
-              className="rounded-[18px] p-3 text-center min-h-[108px] flex flex-col items-center justify-center gap-2"
-              style={GLASS}
-            >
-              <span
-                className="w-10 h-10 rounded-full flex items-center justify-center"
+          {displaySlots.map((slot) => {
+            const Icon = CHUNK_ICON_MAP[slot.kind === 'variation' ? slot.data.icon : slot.icon];
+            const isPlaceholder = slot.kind === 'placeholder';
+            const tint = slot.kind === 'variation' ? slot.data.tint : slot.tint;
+            const validated = slot.kind === 'variation' && slot.data.status === 'validated';
+
+            return (
+              <button
+                key={slot.kind === 'variation' ? slot.data.phraseId : `ph-${slot.index}`}
+                type="button"
+                onClick={() => { if (isPlaceholder) navigate('/sessao'); }}
+                className={`rounded-[18px] p-3 text-center min-h-[108px] flex flex-col items-center justify-center gap-2 transition-transform ${
+                  isPlaceholder ? 'active:scale-[0.97] cursor-pointer' : ''
+                }`}
                 style={{
-                  background: `${b.tint}22`,
-                  color: b.tint,
-                  boxShadow: `0 0 14px ${b.tint}44`,
+                  ...GLASS,
+                  border: validated
+                    ? '1px solid rgba(16,185,129,0.45)'
+                    : isPlaceholder
+                      ? '1px dashed rgba(148,163,184,0.35)'
+                      : GLASS.border,
+                  boxShadow: validated ? '0 0 14px rgba(16,185,129,0.25)' : undefined,
                 }}
               >
-                <b.Icon size={18} />
-              </span>
-              <p className="text-[11px] font-semibold text-white leading-snug">{b.de}</p>
-            </div>
-          ))}
+                <span
+                  className="w-10 h-10 rounded-full flex items-center justify-center"
+                  style={{
+                    background: `${tint}22`,
+                    color: validated ? '#10B981' : tint,
+                    boxShadow: `0 0 14px ${tint}33`,
+                  }}
+                >
+                  <Icon size={18} />
+                </span>
+                {slot.kind === 'variation' ? (
+                  <>
+                    <p className="text-[11px] font-semibold text-white leading-snug">{slot.data.german}</p>
+                    <p className="text-[10px] leading-snug" style={{ color: validated ? '#10B981' : '#94A3B8' }}>
+                      {validated ? '✓ Validado' : slot.data.portuguese}
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <p className="text-[11px] font-semibold text-[#64748b] leading-snug">[ ... ]</p>
+                    <p className="text-[10px] text-[#64748b] leading-snug">{slot.hint}</p>
+                  </>
+                )}
+              </button>
+            );
+          })}
         </div>
+
+        {!hasPracticedToday && (
+          <p className="mt-3 text-[11px] text-[#64748b] text-center leading-snug px-2">
+            Toque em um slot e pratique no Live para montar suas variações.
+          </p>
+        )}
       </div>
     </section>
   );

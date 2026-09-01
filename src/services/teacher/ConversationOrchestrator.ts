@@ -50,6 +50,7 @@ import {
 import { decideReviewOrConverse, decideSpontaneousOpportunity } from '@/services/teacher/TeacherEngine';
 import { EventStore, type LearningEventType } from '@/services/learning/EventStore';
 import { MemoryService } from '@/services/learning/MemoryService';
+import { ChunkTrackerStore } from '@/services/learning/ChunkTrackerStore';
 import {
   planTodaysTraining,
   suggestConversationTopic,
@@ -2679,6 +2680,10 @@ export class ConversationOrchestrator {
           });
         }
         this.refreshPlan(targetId);
+        ChunkTrackerStore.recordCorrect({
+          phraseId: targetId,
+          nextPhraseId: this.plan.target?.id ?? null,
+        });
       } else {
         this.refreshPlan();
       }

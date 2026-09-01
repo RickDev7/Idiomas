@@ -52,9 +52,9 @@ export function SessionProgress({ current, total }: { current: number; total: nu
     <span
       className="inline-flex items-center px-3 py-1.5 rounded-full text-[12px] font-semibold text-[#94A3B8] truncate max-w-[52vw]"
       style={{
-        background: 'rgba(15,23,42,0.75)',
-        border: '1px solid rgba(255,255,255,0.12)',
-        backdropFilter: 'blur(10px)',
+        background: 'rgba(15, 23, 42, 0.65)',
+        border: '1px solid rgba(255, 255, 255, 0.08)',
+        backdropFilter: 'blur(16px)',
       }}
       aria-label={`Conversa ${filled} de ${safeTotal}`}
     >

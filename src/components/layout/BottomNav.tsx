@@ -4,11 +4,14 @@ import { IconHome, IconMic, IconPuzzle, IconChart } from '@/components/ui/Icons'
 import { UiPrefsService } from '@/services/ui/UiPrefsService';
 import { t } from '@/services/ui/LocaleService';
 
+const ACTIVE_CYAN = '#00F2FE';
+const ACTIVE_GLOW = 'rgba(0,242,254,0.4)';
+
 const navItems = [
-  { to: '/', Icon: IconHome, labelKey: 'nav.home', end: true, active: '#FF512F', glow: 'rgba(255,81,47,0.35)' },
-  { to: '/conversar', Icon: IconMic, labelKey: 'nav.talk', end: false, active: '#00F2FE', glow: 'rgba(0,242,254,0.35)' },
-  { to: '/revisar', Icon: IconPuzzle, labelKey: 'nav.review', end: false, active: '#8B5CF6', glow: 'rgba(139,92,246,0.4)' },
-  { to: '/progresso', Icon: IconChart, labelKey: 'nav.progress', end: false, active: '#F59E0B', glow: 'rgba(245,158,11,0.35)' },
+  { to: '/', Icon: IconHome, labelKey: 'nav.home', end: true },
+  { to: '/conversar', Icon: IconMic, labelKey: 'nav.talk', end: false },
+  { to: '/revisar', Icon: IconPuzzle, labelKey: 'nav.review', end: false },
+  { to: '/progresso', Icon: IconChart, labelKey: 'nav.progress', end: false },
 ];
 
 export function BottomNav() {
@@ -26,7 +29,7 @@ export function BottomNav() {
       aria-label="Navegação principal"
     >
       <div className="flex justify-around items-center h-[72px] px-1">
-        {navItems.map(({ to, Icon, labelKey, end, active, glow }) => (
+        {navItems.map(({ to, Icon, labelKey, end }) => (
           <NavLink
             key={to}
             to={to}
@@ -39,9 +42,9 @@ export function BottomNav() {
                 style={
                   isActive
                     ? {
-                        background: `${active}18`,
-                        color: active,
-                        boxShadow: `0 0 20px ${glow}`,
+                        background: `${ACTIVE_CYAN}18`,
+                        color: ACTIVE_CYAN,
+                        boxShadow: `0 0 20px ${ACTIVE_GLOW}`,
                       }
                     : { color: '#64748b' }
                 }

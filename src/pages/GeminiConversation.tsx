@@ -300,7 +300,7 @@ export function GeminiConversation({ profile, onFinish }: { profile: UserProfile
   const showUserCard = !!live.userText && responseStatus !== 'none';
 
   return (
-    <div className="flex flex-col h-full max-w-md mx-auto overflow-hidden" style={{ background: '#0B0F19' }}>
+    <div className="flex flex-col h-full max-w-md mx-auto overflow-hidden" style={{ background: '#070A12' }}>
       <header
         className="flex items-center justify-between gap-2 px-3 pb-2 shrink-0"
         style={{ paddingTop: 'calc(0.75rem + env(safe-area-inset-top, 0px))' }}

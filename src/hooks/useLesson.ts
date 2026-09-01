@@ -7,6 +7,7 @@ import {
 } from '@/services/teacher/LessonEngine';
 import { similarityScore } from '@/utils/reviewUtils';
 import { MemoryService } from '@/services/learning/MemoryService';
+import { ChunkTrackerStore } from '@/services/learning/ChunkTrackerStore';
 import { detectBottleneck } from '@/services/learning/BottleneckDetector';
 import type { PlannedActivity } from '@/services/learning/NextBestActivityEngine';
 import { buildAdaptiveLesson } from '@/services/teacher/AdaptiveLessonBuilder';
@@ -279,6 +280,7 @@ export function useLesson(type: string, profile: UserProfile | null): UseLessonR
     }
     if (correct) {
       reinforcedRef.current += 1;
+      ChunkTrackerStore.recordCorrect({ phraseId });
       if (fast && !withHelp) await EventStore.record({ type: 'RAPID_RESPONSE_SUCCESS', phraseId, responseTimeMs: responseMs });
     } else {
       await EventStore.record({ type: 'RAPID_RESPONSE_FAILURE', phraseId, responseTimeMs: responseMs });

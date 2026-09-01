@@ -92,7 +92,7 @@ export function HomePage() {
           ariaLabel={incomplete ? t('home.continue') : 'Continuar treino'}
           continueMode
         />
-        <ChunksOfDay hook="Ich möchte..." pt="Quero..." />
+        <ChunksOfDay />
         <ProgressSection metrics={metrics} />
       </main>
       <BottomNav />
