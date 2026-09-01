@@ -98,10 +98,66 @@ export function applyChunkFade(
 
 export function parsePcmSampleRate(mime?: string, fallback = PLAYBACK_PCM_RATE): number {
   if (mime) {
-    const m = mime.match(/rate=(\d+)/i);
+    const m = mime.match(/rate[=:](\d+)/i);
     if (m) return parseInt(m[1], 10);
   }
   return fallback;
+}
+
+/** Resample linear mono Float32. */
+export function resampleLinearPcm(
+  input: Float32Array,
+  origRate: number,
+  destRate: number,
+): Float32Array {
+  if (origRate === destRate || input.length === 0) return input;
+  const ratio = origRate / destRate;
+  const outLen = Math.floor(input.length / ratio);
+  const out = new Float32Array(outLen);
+  for (let i = 0; i < outLen; i++) {
+    const srcPos = i * ratio;
+    const i0 = Math.floor(srcPos);
+    const i1 = Math.min(i0 + 1, input.length - 1);
+    const frac = srcPos - i0;
+    out[i] = input[i0] * (1 - frac) + input[i1] * frac;
+  }
+  return out;
+}
+
+export function decodePcm16LE(pcm: ArrayBuffer): Float32Array {
+  const view = new DataView(pcm);
+  const samples = pcm.byteLength / 2;
+  const float = new Float32Array(samples);
+  for (let i = 0; i < samples; i++) {
+    float[i] = view.getInt16(i * 2, true) / 0x8000;
+  }
+  return float;
+}
+
+/**
+ * Converte PCM 16-bit LE em AudioBuffer alinhado ao sample rate REAL do contexto.
+ * Evita voz acelerada ("chipmunk") quando o hardware ignora sampleRate: 24000.
+ */
+export function pcmToAudioBuffer(
+  ctx: AudioContext,
+  pcm: ArrayBuffer,
+  sourceRate: number,
+): AudioBuffer {
+  const parsed = sourceRate > 0 ? sourceRate : PLAYBACK_PCM_RATE;
+  const float = decodePcm16LE(pcm);
+  const ctxRate = ctx.sampleRate;
+  const channel =
+    parsed === ctxRate ? float : resampleLinearPcm(float, parsed, ctxRate);
+  const audioBuf = ctx.createBuffer(1, channel.length, ctxRate);
+  audioBuf.copyToChannel(channel, 0);
+  return audioBuf;
+}
+
+/** AudioContext de saída fixado em 24 kHz (voz Gemini). */
+export async function createPlaybackAudioContext(
+  existing: AudioContext | null,
+): Promise<AudioContext> {
+  return createOrResumeAudioContext(existing, PLAYBACK_PCM_RATE);
 }
 
 /** Atraso entre o relógio de áudio e o próximo chunk agendado (ms). */

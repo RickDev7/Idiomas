@@ -142,12 +142,17 @@ export function useGeminiLive(profile: UserProfile | null): GeminiLiveUI {
     }
     const svc = serviceRef.current;
     if (decision.geminiNudge && svc) {
+      const isOpeningTurn =
+        decision.reason === 'sessão iniciada com plano TeacherEngine' ||
+        decision.reason?.startsWith('review_started:') ||
+        decision.reason === 'follow_up_real_world_event';
       const shouldSend =
-        decision.flow === 'intervenePedagogically' ||
-        decision.flow === 'startMicroPractice' ||
-        decision.flow === 'resumeConversation' ||
-        (decision.flow === 'continueConversation' &&
-          decision.geminiNudge.includes('INSTRUÇÃO INTERNA'));
+        !isOpeningTurn &&
+        (decision.flow === 'intervenePedagogically' ||
+          decision.flow === 'startMicroPractice' ||
+          decision.flow === 'resumeConversation' ||
+          (decision.flow === 'continueConversation' &&
+            decision.geminiNudge.includes('INSTRUÇÃO INTERNA')));
       if (shouldSend) {
         if (DEV) {
           console.debug(
@@ -456,6 +461,7 @@ export function useGeminiLive(profile: UserProfile | null): GeminiLiveUI {
     if (!profile) return;
     if (startingRef.current) return;
     startingRef.current = true;
+    stopAllAudio();
     resetSessionLocals();
     disposeActiveService();
 
@@ -490,6 +496,7 @@ export function useGeminiLive(profile: UserProfile | null): GeminiLiveUI {
       svc.attachAcquiredMic(earlyCtx, earlyStream);
       earlyCtx = null;
       earlyStream = null;
+      await svc.preparePlaybackOnGesture();
       await svc.connect();
       svc.beginSending();
       setMicActive(true);

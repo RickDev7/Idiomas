@@ -364,18 +364,7 @@ app.post('/api/gemini/token', async (req, res) => {
     entry.session = session;
     logSession(profile);
 
-    // Kickoff ANTES do cliente conectar — senão o modelo cumprimenta sozinho.
-    if (!profile.skipKickoff) {
-      entry.kickoffSent = true;
-      try {
-        session.sendClientContent({
-          turns: [{ role: 'user', parts: [{ text: buildSessionKickoff(profile) }] }],
-          turnComplete: true,
-        });
-      } catch {}
-    }
-
-    // Auto-expira se não conectado em TTL
+    // Kickoff adiado até o WebSocket do cliente conectar (evita áudio perdido/sobreposto).
     setTimeout(() => {
       const s = sessions.get(token);
       if (s && !s.clientWs) {
@@ -662,11 +651,10 @@ wss.on('connection', (ws, req) => {
   ws.send(JSON.stringify({ type: 'ready' }));
   console.log(`[ws] connect OK (token ${token.slice(0, 8)})`);
 
-  // Kickoff pedagógico — uma vez por token. NÃO usar saudação genérica.
-  if (!s.kickoffSent) {
+  // Kickoff pedagógico — após cliente conectar (evita áudio antes do player estar pronto).
+  if (!s.kickoffSent && !s.profile?.skipKickoff) {
     s.kickoffSent = true;
     const profile = s.profile || {};
-    logSession(profile);
     try {
       s.session.sendClientContent({
         turns: [{ role: 'user', parts: [{ text: buildSessionKickoff(profile) }] }],

@@ -7,10 +7,13 @@ import {
   MAX_PLAYBACK_LAG_MS,
   MIC_CONSTRAINTS,
   createOrResumeAudioContext,
+  createPlaybackAudioContext,
   resumeAudioContextIfNeeded,
   applyChunkFade,
   parsePcmSampleRate,
   playbackScheduleLagMs,
+  pcmToAudioBuffer,
+  resampleLinearPcm,
   type QueuedPcmChunk,
 } from '@/services/voice/AudioPipeline';
 import {
@@ -40,18 +43,7 @@ function floatTo16BitPCM(float32: Float32Array): ArrayBuffer {
 }
 
 function resampleLinear(input: Float32Array, origRate: number, destRate: number): Float32Array {
-  if (origRate === destRate) return input;
-  const ratio = origRate / destRate;
-  const outLen = Math.floor(input.length / ratio);
-  const out = new Float32Array(outLen);
-  for (let i = 0; i < outLen; i++) {
-    const srcPos = i * ratio;
-    const i0 = Math.floor(srcPos);
-    const i1 = Math.min(i0 + 1, input.length - 1);
-    const frac = srcPos - i0;
-    out[i] = input[i0] * (1 - frac) + input[i1] * frac;
-  }
-  return out;
+  return resampleLinearPcm(input, origRate, destRate);
 }
 
 function arrayBufferToBase64(buffer: ArrayBuffer): string {
@@ -112,6 +104,8 @@ export class GeminiVoiceService implements VoiceServiceInterface {
   private backgroundSuspended = false;
   private unregisterGeminiStop: (() => void) | null = null;
 
+  private lastPacketMime: string | undefined;
+
   setMicDeviceId(id: string | null): void {
     this.preferredDeviceId = id;
   }
@@ -134,7 +128,7 @@ export class GeminiVoiceService implements VoiceServiceInterface {
           this.handlers.onTurnComplete?.(role, text);
         },
         onInterrupted: (text) => {
-          this.flushPlaybackQueue('interrupted');
+          stopAllAudio();
           this.speaking = false;
           this.handlers.onTurnComplete?.('assistant', text);
         },
@@ -179,7 +173,17 @@ export class GeminiVoiceService implements VoiceServiceInterface {
     return this.speaking;
   }
 
+  /** Pré-aquece AudioContext de saída (24 kHz) no gesto do usuário — evita chipmunk no PWA. */
+  async preparePlaybackOnGesture(): Promise<void> {
+    this.playbackContext = await createPlaybackAudioContext(this.playbackContext);
+    if (DEV) {
+      console.log('[VOICE OUTPUT] prepared playback ctx sampleRate =', this.playbackContext.sampleRate);
+    }
+  }
+
   async connect(): Promise<void> {
+    stopAllAudio();
+    this.flushPlaybackQueue('pre_connect');
     await this.live.connect();
   }
 
@@ -430,6 +434,7 @@ export class GeminiVoiceService implements VoiceServiceInterface {
     this.playing = false;
     this.nextStartTime = 0;
     this.lastPacketAt = 0;
+    this.lastPacketMime = undefined;
     for (const node of this.activeNodes) {
       try { node.source.stop(); } catch { /* ignore */ }
       try { node.source.disconnect(); } catch { /* ignore */ }
@@ -440,6 +445,7 @@ export class GeminiVoiceService implements VoiceServiceInterface {
 
   private enqueueAudio(buf: ArrayBuffer, mime?: string) {
     const now = performance.now();
+    if (mime) this.lastPacketMime = mime;
     if (this.playbackQueue.length === 0 && !this.playing && this.activeNodes.length === 0) {
       stopBrowserAudio();
     }
@@ -460,10 +466,15 @@ export class GeminiVoiceService implements VoiceServiceInterface {
     this.playing = true;
 
     try {
-      this.playbackContext = await createOrResumeAudioContext(
-        this.playbackContext,
-        PLAYBACK_PCM_RATE,
-      );
+      this.playbackContext = await createPlaybackAudioContext(this.playbackContext);
+      if (DEV) {
+        console.log(
+          '[VOICE OUTPUT] playback AudioContext sampleRate =',
+          this.playbackContext.sampleRate,
+          'target =',
+          PLAYBACK_PCM_RATE,
+        );
+      }
 
       while (this.playbackQueue.length > 0) {
         if (this.playbackContext && this.shouldFlushForJitter(performance.now())) {
@@ -472,7 +483,10 @@ export class GeminiVoiceService implements VoiceServiceInterface {
         }
 
         const item = this.playbackQueue.shift()!;
-        const rate = parsePcmSampleRate(item.mime, PLAYBACK_PCM_RATE);
+        const rate = parsePcmSampleRate(
+          item.mime ?? this.lastPacketMime,
+          PLAYBACK_PCM_RATE,
+        );
         this.schedulePcmChunk(item.buf, rate);
       }
     } finally {
@@ -486,20 +500,14 @@ export class GeminiVoiceService implements VoiceServiceInterface {
   private schedulePcmChunk(pcm: ArrayBuffer, rate: number) {
     if (!this.playbackContext) return;
 
-    const view = new DataView(pcm);
     const samples = pcm.byteLength / 2;
     if (samples <= 0) return;
 
-    const float = new Float32Array(samples);
-    for (let i = 0; i < samples; i++) {
-      float[i] = view.getInt16(i * 2, true) / 0x8000;
-    }
-
-    const audioBuf = this.playbackContext.createBuffer(1, float.length, rate);
-    audioBuf.copyToChannel(float, 0);
+    const audioBuf = pcmToAudioBuffer(this.playbackContext, pcm, rate);
 
     const src = this.playbackContext.createBufferSource();
     src.buffer = audioBuf;
+    src.playbackRate.value = 1;
 
     const gain = this.playbackContext.createGain();
     src.connect(gain);
