@@ -19,17 +19,9 @@ import type {
   SimulatorTrainingStyle,
 } from '@/services/teacher/SimulatorTypes';
 import { buildImmersionSimulatorKickoff } from '@/services/teacher/ImmersionPolicy';
+import { UNIFIED_SIMULATOR_SCENARIOS } from '@/services/teacher/ProfessorCore/SituationCatalog';
 
-const SCENARIOS: SimulatorScenario[] = [
-  { id: 'meet', emoji: '👋', titlePt: 'Conhecer alguém', titleDe: 'Jemanden kennenlernen', topic: 'identity', settingDe: 'Du triffst eine neue Person.', roleDe: 'Ich bin dein Gesprächspartner.' },
-  { id: 'work', emoji: '💼', titlePt: 'Trabalho', titleDe: 'Arbeit', topic: 'work', settingDe: 'Ihr seid bei der Arbeit.', roleDe: 'Ich bin dein Kollege.' },
-  { id: 'food', emoji: '🍽', titlePt: 'Restaurante', titleDe: 'Restaurant', topic: 'food', settingDe: 'Ihr seid im Restaurant.', roleDe: 'Ich bin der Kellner.' },
-  { id: 'needs', emoji: '🛒', titlePt: 'Compras', titleDe: 'Einkaufen', topic: 'needs', settingDe: 'Ihr seid im Laden.', roleDe: 'Ich bin im Geschäft.' },
-  { id: 'routine', emoji: '⏰', titlePt: 'Rotina', titleDe: 'Alltag', topic: 'routine', settingDe: 'Es ist ein normaler Tag.', roleDe: 'Ich frage nach deinem Tag.' },
-  { id: 'help', emoji: '🆘', titlePt: 'Pedir ajuda', titleDe: 'Hilfe', topic: 'requests', settingDe: 'Du brauchst Hilfe.', roleDe: 'Ich kann dir helfen.' },
-  { id: 'home', emoji: '🏠', titlePt: 'Casa', titleDe: 'Zuhause', topic: 'places', settingDe: 'Ihr sprecht über Zuhause.', roleDe: 'Ich frage über dein Zuhause.' },
-  { id: 'cafe', emoji: '☕', titlePt: 'Café', titleDe: 'Café', topic: 'food', settingDe: 'Ihr seid im Café.', roleDe: 'Ich bin im Café.' },
-];
+const SCENARIOS = UNIFIED_SIMULATOR_SCENARIOS;
 
 const TOPIC_FOR_BASE: Record<string, string> = {
   'survival-arbeite': 'work',

@@ -1,8 +1,13 @@
 /**
  * Política de imersão — Simulador e Mini Prova.
  * Simulador = conversa natural. Mini Prova = avaliação objetiva.
+ * Alinhada ao Professor Core (ModePolicies).
  */
 import type { SimulatorContext } from '@/services/teacher/SimulatorTypes';
+import { MODE_POLICIES } from '@/services/teacher/ProfessorCore/ModePolicies';
+
+const SIM_POLICY = MODE_POLICIES.SIMULATOR;
+const MP_POLICY = MODE_POLICIES.MINI_PROVA;
 
 export const GERMAN_PROGRESSIVE_HELP = [
   'Stufe 1: Wiederhole die Frage auf Deutsch.',
@@ -49,7 +54,10 @@ export function buildImmersionSimulatorKickoff(opts: {
   return [
     '[INTERNE ANWEISUNG — nicht vorlesen]',
     'SIMULATOR — NATÜRLICHES GESPRÄCH. KEIN Unterricht. KEIN Test. KEINE Note.',
+    `ZIEL: ${SIM_POLICY.goal}`,
     'SPRACHE: NUR DEUTSCH.',
+    `TEACHER_TALK_RATIO ≤ ${Math.round(SIM_POLICY.teacherTalkRatioMax * 100)}% — kurze Fragen, Schüler spricht mehr.`,
+    `Inhalt: ≥${Math.round(SIM_POLICY.knownContentMinRatio * 100)}% bekannt, ≤${Math.round(SIM_POLICY.newContentMaxRatio * 100)}% neu.`,
     `Situation: ${opts.settingDe}`,
     `Rolle: ${opts.roleDe}`,
     `Dauer: ca. ${opts.durationMinutes} Minuten.`,
@@ -58,6 +66,7 @@ export function buildImmersionSimulatorKickoff(opts: {
     '- Situation → Frage → Schüler antwortet → kurze Reaktion → neue Frage/Situation.',
     '- Reagiere auf das, was der Schüler sagt ("Gut!", "Ah, verstehe!", "Und du?").',
     '- Wechsle Kontexte und Formulierungen — nie dieselbe Frage zweimal hintereinander.',
+    '- TRANSFER: gleiche Struktur, neuer Kontext (Restaurant / Alltag / Arbeit).',
     opts.conversationHints.length
       ? `Mögliche Richtungen (variieren, nicht aufzählen): ${opts.conversationHints.join(' | ')}`
       : '',
@@ -78,6 +87,7 @@ export function buildSimulatorDirective(ctx: SimulatorContext): string {
     `Situation: ${ctx.scenario.settingDe}`,
     `Thema: ${ctx.scenario.titleDe}`,
     'MODUS: freies Gespräch auf Deutsch — KEIN Unterricht.',
+    `TEACHER_TALK_RATIO ≤ ${Math.round(SIM_POLICY.teacherTalkRatioMax * 100)}%.`,
     'Nach jeder Antwort: kurz reagieren, dann neue Frage in neuem Kontext.',
     'Schwächen durch Situationen abfragen, nicht durch Wiederholung derselben Frage.',
     SIMULATOR_FORBIDDEN,
@@ -138,7 +148,9 @@ export function buildImmersionMiniProvaKickoff(opts: {
   return [
     '[INTERNE ANWEISUNG — nicht vorlesen]',
     'MINI-PRÜFUNG — objektive Bewertung. KEIN Gespräch. KEIN Unterricht.',
+    `ZIEL: ${MP_POLICY.goal}`,
     'SPRACHE: NUR DEUTSCH.',
+    `TEACHER_TALK_RATIO ≤ ${Math.round(MP_POLICY.teacherTalkRatioMax * 100)}%.`,
     `Frage ${opts.index + 1} von ${opts.total}.`,
     `Stelle NUR diese Frage: "${opts.questionGerman}"`,
     'Dann WARTEN. Schweigen ist erlaubt (5–8 Sekunden).',

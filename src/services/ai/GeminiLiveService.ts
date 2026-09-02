@@ -39,6 +39,12 @@ export interface LiveProfile {
   automationScore?: number;
   /** Memória relevante compacta (Fase 10) — nunca o histórico inteiro. */
   coachContext?: string;
+  /** Sessão de simulador — kickoff e system instruction exclusivos de imersão. */
+  simulatorMode?: boolean;
+  /** Sessão de mini prova — kickoff e system instruction exclusivos de avaliação. */
+  miniProvaMode?: boolean;
+  /** Geração LiveSession (diagnóstico / idempotência). */
+  liveSessionGeneration?: number;
 }
 
 interface LiveHandlers {

@@ -96,7 +96,62 @@ app.get('/api/health', (_req, res) => {
   });
 });
 
+function buildSimulatorSystemInstruction(profile) {
+  const known = (profile.knownPhrases || []).slice(0, 12).join('\n');
+  return [
+    'Você é um interlocutor alemão em um SIMULADOR de conversa real — NÃO é aula, NÃO é teste.',
+    'REGRAS:',
+    '1. Fale SOMENTE alemão. Nunca português.',
+    '2. Uma situação, uma voz, uma pergunta por vez — nunca duas aberturas ou dois assuntos simultâneos.',
+    '3. Reaja naturalmente ao que o aluno diz e varie contexto.',
+    '4. NÃO ensine, NÃO corrija como professor, NÃO use ciclo PT→DE nem "Vamos aprender".',
+    '5. Comece imediatamente com UMA abertura do cenário.',
+    profile.openingGerman ? `ABERTURA ÚNICA (sua primeira fala em áudio): ${profile.openingGerman}` : '',
+    profile.teacherDirective || '',
+    profile.coachContext ? `=== KONTEXT ===\n${profile.coachContext}\n=== FIM ===` : '',
+    known ? `Material conhecido:\n${known}` : '',
+    profile.memorySummary ? `MEMÓRIA:\n${profile.memorySummary}` : '',
+    `TEMA: ${profile.sessionTopic || profile.lastTopic || 'Simulador'}`,
+  ].filter(Boolean).join('\n');
+}
+
+function buildMiniProvaSystemInstruction(profile) {
+  const known = (profile.knownPhrases || []).slice(0, 12).join('\n');
+  return [
+    'Você é examinador em uma MINI-PRÜFUNG — avaliação objetiva, não aula.',
+    'REGRAS:',
+    '1. Fale SOMENTE alemão.',
+    '2. Uma pergunta por vez. Uma voz. Sem segunda abertura.',
+    '3. Não ensine, não repita a pergunta após erro, não mostre a resposta.',
+    profile.openingGerman ? `PRIMEIRA PERGUNTA: ${profile.openingGerman}` : '',
+    profile.teacherDirective || '',
+    known ? `Material:\n${known}` : '',
+  ].filter(Boolean).join('\n');
+}
+
+function buildImmersionSessionKickoff(profile) {
+  const kick = profile.orchestratorKickoff;
+  const gen = profile.liveSessionGeneration;
+  if (kick) {
+    console.log(`[KICKOFF] mode=${profile.simulatorMode ? 'simulator' : 'miniprova'} session=${gen ?? '?'}`);
+    return kick;
+  }
+  return [
+    '[INSTRUÇÃO INTERNA — não leia isto em voz alta]',
+    profile.simulatorMode
+      ? 'SIMULATOR — comece FALANDO agora em alemão, uma única abertura natural.'
+      : 'MINI-PRÜFUNG — comece FALANDO agora em alemão, uma única pergunta.',
+    profile.openingGerman ? `Abertura: "${profile.openingGerman}"` : '',
+  ].filter(Boolean).join('\n');
+}
+
 function buildSystemInstruction(profile) {
+  if (profile.simulatorMode) {
+    return buildSimulatorSystemInstruction(profile);
+  }
+  if (profile.miniProvaMode) {
+    return buildMiniProvaSystemInstruction(profile);
+  }
   const known = (profile.knownPhrases || []).slice(0, 12).join('\n');
   const weak = (profile.weakPhrases || []).slice(0, 6).join('\n');
   const opening = profile.openingGerman || '';
@@ -232,10 +287,16 @@ function sanitizeProfile(input) {
     actionReason: clip(p.actionReason, 280),
     automationScore: Number.isFinite(p.automationScore) ? Math.max(0, Math.min(100, Number(p.automationScore))) : undefined,
     coachContext: clip(p.coachContext, 1600),
+    simulatorMode: !!p.simulatorMode,
+    miniProvaMode: !!p.miniProvaMode,
+    liveSessionGeneration: Number.isFinite(p.liveSessionGeneration) ? Number(p.liveSessionGeneration) : undefined,
   };
 }
 
 function buildSessionKickoff(profile) {
+  if (profile.simulatorMode || profile.miniProvaMode) {
+    return buildImmersionSessionKickoff(profile);
+  }
   const opening = profile.openingGerman || '';
   const kind = profile.sessionKind || 'RETURNING_SESSION';
   const zeroActive = profile.zeroLanguageMode === true
@@ -309,6 +370,9 @@ function logSession(profile) {
   console.log(`[MEMORY] loaded=${!!profile?.memorySummary}`);
   console.log(`[LAST_SESSION] topic=${profile?.lastTopic || 'none'}`);
   console.log(`[L0] zeroLanguageMode=${!!profile?.zeroLanguageMode} level=${profile?.level || '?'}`);
+  if (profile?.simulatorMode) {
+    console.log(`[SIMULATOR_INIT] session=${profile?.liveSessionGeneration ?? '?'}`);
+  }
 }
 
 // POST /api/gemini/token — emite token efêmero e abre a sessão Live no servidor

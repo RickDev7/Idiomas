@@ -68,7 +68,12 @@ import {
   scenarioLabel,
 } from '@/services/teacher/SimulatorEngine';
 import type { SimulatorContext } from '@/services/teacher/SimulatorTypes';
+import { tryClaimSimulatorKickoff } from '@/services/teacher/SimulatorKickoffGuard';
 import { isSimulatorActive, recordSimulatorDeferred } from '@/services/teacher/SimulatorSession';
+import {
+  buildProfessorContext,
+  formatProfessorContextForGemini,
+} from '@/services/teacher/ProfessorCore';
 import {
   buildImmersionMiniProvaKickoff,
   buildMiniProvaDirective,
@@ -731,6 +736,8 @@ export interface OrchestratorDeps {
   conversationIntent?: ConversationTopicContext;
   simulatorIntent?: SimulatorContext;
   miniProvaSnapshot?: MiniProvaSnapshot | null;
+  /** Geração LiveSession — idempotência do kickoff do simulador. */
+  liveSessionGeneration?: number;
 }
 
 export class ConversationOrchestrator {
@@ -767,8 +774,10 @@ export class ConversationOrchestrator {
   private briefCorrectionsLast10 = 0;
   private microStartsLast10 = 0;
   private coachContextText = '';
+  private professorContextCache: import('@/services/teacher/ProfessorCore').ProfessorContext | null = null;
   private simulatorMode = false;
   private simulatorContext: SimulatorContext | null = null;
+  private simulatorKickoffSuppressed = false;
   private simulatorTurnIndex = 0;
   private simulatorConversationHints: string[] = [];
   private miniProvaSnapshot: MiniProvaSnapshot | null = null;
@@ -921,7 +930,7 @@ export class ConversationOrchestrator {
       orch.miniProvaSnapshot = merged.miniProvaSnapshot;
       orch.applyMiniProvaQuestion(0);
     } else if (merged.simulatorIntent) {
-      orch.applySimulatorIntent(merged.simulatorIntent);
+      orch.applySimulatorIntent(merged.simulatorIntent, merged.liveSessionGeneration ?? 0);
     } else if (merged.conversationIntent) {
       orch.applyConversationTopicIntent(merged.conversationIntent);
     }
@@ -940,7 +949,31 @@ export class ConversationOrchestrator {
       orch.followUpOpening = rel.followUpOpening;
       orch.followUpEventId = rel.followUpEventId;
     } catch { /* coach memory opcional */ }
+
+    try {
+      const professorCtx = buildProfessorContext({
+        profile: merged.profile,
+        learning: merged.learning,
+        phrases,
+        simulator: !!merged.simulatorIntent || orch.simulatorMode,
+        miniProva: !!merged.miniProvaSnapshot || orch.miniProvaMode,
+        review: !!merged.reviewIntent || !!merged.reviewSessionSnapshot || orch.reviewSession,
+        conversation: !!merged.conversationIntent,
+        targetPhraseId: orch.plan.target?.id ?? null,
+        recentErrors: orch.ctx.recentMistakes,
+        helpLevelAllowed: orch.sessionSupport,
+        dueReview: !!merged.reviewIntent || !!merged.reviewSessionSnapshot,
+      });
+      const professorBlock = formatProfessorContextForGemini(professorCtx, 900);
+      orch.coachContextText = [orch.coachContextText, professorBlock].filter(Boolean).join('\n\n');
+      orch.professorContextCache = professorCtx;
+    } catch { /* Professor Core opcional — não quebra sessão */ }
+
     return orch;
+  }
+
+  getProfessorContext(): import('@/services/teacher/ProfessorCore').ProfessorContext | null {
+    return this.professorContextCache;
   }
 
   getContext(): ConversationContext {
@@ -988,7 +1021,9 @@ export class ConversationOrchestrator {
   }
 
   /** Simulador — produção real em cenário baseado no aprendizado. */
-  applySimulatorIntent(intent: SimulatorContext) {
+  applySimulatorIntent(intent: SimulatorContext, liveSessionGeneration = 0): boolean {
+    const claimed = tryClaimSimulatorKickoff(intent.id, liveSessionGeneration);
+    this.simulatorKickoffSuppressed = !claimed;
     this.simulatorMode = true;
     this.simulatorContext = intent;
     this.simulatorTurnIndex = 0;
@@ -1023,6 +1058,11 @@ export class ConversationOrchestrator {
     this.plan.teacherDirective = buildSimulatorDirective(intent);
     this.coachContextText = buildSimulatorCoachContext(intent, this.simulatorConversationHints);
     this.ctx.targetItem = opening;
+    return claimed;
+  }
+
+  wasSimulatorKickoffClaimed(): boolean {
+    return this.simulatorMode && !this.simulatorKickoffSuppressed;
   }
 
   isSimulatorMode(): boolean {
@@ -1608,7 +1648,9 @@ export class ConversationOrchestrator {
       scaffoldLevel: this.sessionSupport,
       sessionTopic: this.plan.topic,
       trainingStage: this.plan.stageId,
-      orchestratorKickoff: this.plan.actionKickoff,
+      orchestratorKickoff: (this.simulatorMode && this.simulatorKickoffSuppressed)
+        ? undefined
+        : this.plan.actionKickoff,
       scaffoldHint: hint?.displayText || '',
       actionReason: this.plan.actionReason || '',
       automationScore: conf ? readAutomationScore(conf) : undefined,

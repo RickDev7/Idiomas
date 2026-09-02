@@ -55,4 +55,13 @@ export type SimulatorResult = {
   needsPractice: Array<{ phraseId: string; german: string }>;
   deferredToReview: Array<{ phraseId: string; german: string }>;
   completedAt: string;
+  /** Métricas de turnos (só se TeacherTalkMetrics confiável). */
+  teacherTalkRatio?: number;
+  studentTalkRatio?: number;
+  teacherTurns?: number;
+  studentTurns?: number;
+  teacherSpeechDurationMs?: number;
+  studentSpeechDurationMs?: number;
+  /** Sinal adaptativo — não altera mastery. */
+  teacherTalkTooHigh?: boolean;
 };

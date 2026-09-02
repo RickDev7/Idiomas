@@ -54,6 +54,8 @@ export function testImmersion() {
 
   assert(useGemini.includes('immersionMode'), 'useGeminiLive expõe immersionMode');
   assert(useGemini.includes('miniProvaMode'), 'useGeminiLive expõe miniProvaMode');
+  assert(useGemini.includes('simulatorMode: true'), 'perfil simulador explícito');
+  assert(useGemini.includes('zeroLanguageMode: false'), 'L0 desligado em imersão');
   assert(useGemini.includes('titleDe'), 'label cenário em alemão');
 
   const simKick = buildImmersionSimulatorKickoff({

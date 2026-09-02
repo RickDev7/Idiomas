@@ -8,6 +8,12 @@ import type {
   SimulatorTurnKind,
   SimulatorTurnRecord,
 } from '@/services/teacher/SimulatorTypes';
+import {
+  beginTeacherTalkSession,
+  endTeacherTalkSession,
+  talkMetricsForSimulatorResult,
+} from '@/services/teacher/TeacherTalkMetrics';
+import { getLiveSessionGeneration } from '@/services/voice/LiveSessionRegistry';
 
 const SESSION_KEY = 'dt_simulator_session';
 
@@ -20,6 +26,7 @@ type ActiveSession = {
   deferredIds: string[];
   contentsUsed: Set<string>;
   needsPractice: Map<string, string>;
+  liveSessionGeneration: number;
 };
 
 let memorySession: ActiveSession | null = null;
@@ -31,6 +38,7 @@ function resolveGerman(phraseId: string | null, fallback: string): string {
 }
 
 export function startSimulatorSession(ctx: SimulatorContext): void {
+  const liveSessionGeneration = getLiveSessionGeneration();
   memorySession = {
     startedAt: Date.now(),
     endsAt: ctx.endsAt,
@@ -40,7 +48,9 @@ export function startSimulatorSession(ctx: SimulatorContext): void {
     deferredIds: [],
     contentsUsed: new Set(),
     needsPractice: new Map(),
+    liveSessionGeneration,
   };
+  beginTeacherTalkSession(liveSessionGeneration, 'SIMULATOR');
   if (typeof sessionStorage !== 'undefined') {
     try {
       sessionStorage.setItem(
@@ -54,6 +64,7 @@ export function startSimulatorSession(ctx: SimulatorContext): void {
           deferredIds: [],
           contentsUsed: [],
           needsPractice: [],
+          liveSessionGeneration,
         }),
       );
     } catch {
@@ -133,6 +144,7 @@ export function recordSimulatorDeferred(phraseId: string): void {
 export function finalizeSimulatorSession(): SimulatorResult | null {
   if (!memorySession) return null;
   const ctx = memorySession.context;
+  const gen = memorySession.liveSessionGeneration;
   const elapsedMinutes = Math.max(1, Math.round((Date.now() - memorySession.startedAt) / 60_000));
   const autonomousCount = memorySession.turns.filter(
     (t) => t.correct && (t.kind === 'fully_independent' || t.kind === 'partial_independent'),
@@ -141,6 +153,7 @@ export function finalizeSimulatorSession(): SimulatorResult | null {
     (t) => t.kind === 'with_hint' || t.kind === 'with_model',
   ).length;
   const correctionCount = memorySession.turns.filter((t) => !t.correct).length;
+  const talk = talkMetricsForSimulatorResult(gen);
 
   const result: SimulatorResult = {
     mode: ctx.simulatorMode,
@@ -163,8 +176,10 @@ export function finalizeSimulatorSession(): SimulatorResult | null {
       german: resolveGerman(id, id),
     })),
     completedAt: new Date().toISOString(),
+    ...talk,
   };
 
+  endTeacherTalkSession(gen);
   memorySession = null;
   if (typeof sessionStorage !== 'undefined') {
     try {
@@ -177,6 +192,9 @@ export function finalizeSimulatorSession(): SimulatorResult | null {
 }
 
 export function clearSimulatorSession(): void {
+  if (memorySession) {
+    endTeacherTalkSession(memorySession.liveSessionGeneration);
+  }
   memorySession = null;
   if (typeof sessionStorage !== 'undefined') {
     try {
