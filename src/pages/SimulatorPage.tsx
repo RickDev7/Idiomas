@@ -1,7 +1,13 @@
-import { useEffect, useState, type CSSProperties } from 'react';
+/**
+ * Simulator — redesign visual Fase 2.
+ * Preserva SimulatorEngine / ImmersionPolicy / sessão Live existente.
+ */
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { BottomNav } from '@/components/layout/BottomNav';
+import { GlassCard, glassStyle } from '@/components/ui/GlassCard';
 import { LoadingScreen } from '@/components/ui/LoadingScreen';
+import { LiveAudioOrb } from '@/components/ui/VoiceOrb';
 import { IconBack } from '@/components/ui/Icons';
 import { useProfile } from '@/hooks/useProfile';
 import { MemoryService } from '@/services/learning/MemoryService';
@@ -14,20 +20,14 @@ import { storeSimulatorContext } from '@/services/teacher/SimulatorIntent';
 import type {
   SimulatorDurationMinutes,
   SimulatorMode,
+  SimulatorScenario,
   SimulatorTrainingStyle,
 } from '@/services/teacher/SimulatorTypes';
 
-const GLASS: CSSProperties = {
-  background: 'rgba(15, 23, 42, 0.65)',
-  border: '1px solid rgba(255, 255, 255, 0.08)',
-  backdropFilter: 'blur(16px)',
-  WebkitBackdropFilter: 'blur(16px)',
-};
-
-const MODES: Array<{ id: SimulatorMode; emoji: string; title: string; subtitle: string }> = [
-  { id: 'learned', emoji: '📚', title: 'Gelerntes üben', subtitle: 'Neue Inhalte wiederholen' },
-  { id: 'weak', emoji: '🔄', title: 'Schwächen', subtitle: 'Was noch schwer fällt' },
-  { id: 'free', emoji: '🗣️', title: 'Freies Sprechen', subtitle: 'Alles was du schon kannst' },
+const MODES: Array<{ id: SimulatorMode; title: string; subtitle: string; tint: string }> = [
+  { id: 'learned', title: 'Gelerntes üben', subtitle: 'Neue Inhalte wiederholen', tint: '#00F2FE' },
+  { id: 'weak', title: 'Schwächen', subtitle: 'Was noch schwer fällt', tint: '#F97316' },
+  { id: 'free', title: 'Freies Sprechen', subtitle: 'Alles was du schon kannst', tint: '#8B5CF6' },
 ];
 
 const DURATIONS: SimulatorDurationMinutes[] = [10, 20, 30, 60];
@@ -36,7 +36,7 @@ export function SimulatorPage() {
   const { profile, loading } = useProfile();
   const navigate = useNavigate();
   const [ready, setReady] = useState(false);
-  const [hasContent, setHasContent] = useState(false);
+  const [scenarios, setScenarios] = useState<SimulatorScenario[]>([]);
   const [mode, setMode] = useState<SimulatorMode>('learned');
   const [duration, setDuration] = useState<SimulatorDurationMinutes>(10);
   const [trainingStyle, setTrainingStyle] = useState<SimulatorTrainingStyle>('training');
@@ -47,11 +47,12 @@ export function SimulatorPage() {
     if (!profile) return;
     void (async () => {
       const learning = await MemoryService.loadProfile(profile);
-      const scenarios = listCompatibleScenarios(learning);
-      setHasContent(scenarios.length > 0);
+      setScenarios(listCompatibleScenarios(learning));
       setReady(true);
     })();
   }, [profile]);
+
+  const preview = useMemo(() => scenarios[0] || null, [scenarios]);
 
   if (loading || !profile || !ready) return <LoadingScreen />;
 
@@ -81,34 +82,70 @@ export function SimulatorPage() {
   };
 
   return (
-    <div className="flex flex-col h-full max-w-md mx-auto" style={{ background: '#070A12' }}>
+    <div className="flex flex-col h-full max-w-md mx-auto dt-page">
       <header className="px-5 pt-4 safe-top shrink-0 flex items-center gap-3">
         <button
           type="button"
           onClick={() => navigate(-1)}
           aria-label="Zurück"
           className="w-10 h-10 rounded-full flex items-center justify-center text-white shrink-0"
-          style={GLASS}
+          style={glassStyle}
         >
           <IconBack size={18} />
         </button>
         <div className="min-w-0 flex-1">
-          <h1 className="text-[17px] font-bold text-white leading-tight font-[family-name:var(--font-display)]">
+          <h1 className="text-[18px] font-bold text-white font-[family-name:var(--font-display)]">
             SIMULATOR
           </h1>
-          <p className="text-[12px] text-[#94A3B8] mt-0.5">Sprich so viel Deutsch wie möglich.</p>
+          <p className="text-[12px] text-[#CBD5E1]">
+            {preview ? preview.titleDe : 'Sprich so viel Deutsch wie möglich.'}
+          </p>
         </div>
       </header>
 
       <main className="flex-1 overflow-y-auto scrollbar-hide px-5 pt-4 pb-28 space-y-5">
-        {!hasContent ? (
-          <div className="rounded-[22px] p-5 text-center" style={GLASS}>
-            <p className="text-[14px] text-[#94A3B8] leading-relaxed">
+        {scenarios.length === 0 ? (
+          <GlassCard className="p-5 text-center">
+            <p className="text-[14px] text-[#CBD5E1] leading-relaxed">
               Noch nicht genug Inhalte. Lerne zuerst einige L0-Lektionen.
             </p>
-          </div>
+            <button
+              type="button"
+              onClick={() => navigate('/aprender')}
+              className="mt-4 px-5 py-2.5 rounded-full text-[13px] font-bold text-white"
+              style={{
+                background: 'linear-gradient(135deg, #00F2FE, #8B5CF6)',
+              }}
+            >
+              Ir para Aprender
+            </button>
+          </GlassCard>
         ) : (
           <>
+            <GlassCard variant="cyan" className="p-5 relative overflow-hidden">
+              <span
+                className="absolute -right-10 -top-10 w-40 h-40 rounded-full pointer-events-none"
+                style={{ background: 'radial-gradient(circle, rgba(0,242,254,0.25), transparent 70%)' }}
+              />
+              <p className="dt-label relative">Szenario</p>
+              <p className="relative mt-2 text-[22px] font-bold text-white font-[family-name:var(--font-display)]">
+                {preview?.emoji} {preview?.titleDe}
+              </p>
+              <p className="relative mt-2 text-[14px] text-[#CBD5E1] leading-snug">
+                {preview?.settingDe}
+                {preview?.roleDe ? ` ${preview.roleDe}` : ''}
+              </p>
+              <div className="relative mt-4 flex justify-center">
+                <LiveAudioOrb state="idle" size={160} />
+              </div>
+              <p className="relative mt-2 text-center text-[12px] text-[#64748B]">
+                Estados ao vivo: Zuhören · Du sprichst · Professor spricht · Thinking…
+              </p>
+              <p className="relative mt-1 text-center text-[11px] text-[#64748B]">
+                Immersion: nur Deutsch — keine Übersetzung.
+              </p>
+            </GlassCard>
+
             <section className="space-y-2.5">
               {MODES.map((m) => {
                 const active = mode === m.id;
@@ -117,16 +154,14 @@ export function SimulatorPage() {
                     key={m.id}
                     type="button"
                     onClick={() => setMode(m.id)}
-                    className="w-full rounded-[20px] px-4 py-4 text-left transition-transform active:scale-[0.98]"
+                    className="w-full rounded-[20px] px-4 py-4 text-left transition-transform duration-200 active:scale-[0.98]"
                     style={{
-                      ...GLASS,
-                      border: active ? '1px solid rgba(0,242,254,0.45)' : GLASS.border,
-                      boxShadow: active ? '0 0 20px rgba(0,242,254,0.15)' : undefined,
+                      ...glassStyle,
+                      border: active ? `1px solid ${m.tint}88` : glassStyle.border,
+                      boxShadow: active ? `0 0 18px ${m.tint}33` : undefined,
                     }}
                   >
-                    <p className="text-[15px] font-bold text-white">
-                      {m.emoji} {m.title}
-                    </p>
+                    <p className="text-[15px] font-bold text-white">{m.title}</p>
                     <p className="text-[12px] text-[#94A3B8] mt-1">{m.subtitle}</p>
                   </button>
                 );
@@ -134,20 +169,18 @@ export function SimulatorPage() {
             </section>
 
             <section>
-              <p className="text-[11px] uppercase tracking-[0.16em] font-semibold text-[#64748b] mb-2">
-                Dauer
-              </p>
+              <p className="dt-label mb-2">Dauer</p>
               <div className="flex gap-2">
                 {DURATIONS.map((d) => (
                   <button
                     key={d}
                     type="button"
                     onClick={() => setDuration(d)}
-                    className="flex-1 py-3 rounded-[14px] text-[14px] font-bold"
+                    className="flex-1 py-3 rounded-[14px] text-[14px] font-bold transition-colors duration-200"
                     style={{
-                      ...GLASS,
+                      ...glassStyle,
                       color: duration === d ? '#00F2FE' : '#94A3B8',
-                      border: duration === d ? '1px solid rgba(0,242,254,0.45)' : GLASS.border,
+                      border: duration === d ? '1px solid rgba(0,242,254,0.45)' : glassStyle.border,
                     }}
                   >
                     {d} min
@@ -157,33 +190,31 @@ export function SimulatorPage() {
             </section>
 
             <section>
-              <p className="text-[11px] uppercase tracking-[0.16em] font-semibold text-[#64748b] mb-2">
-                Stil
-              </p>
+              <p className="dt-label mb-2">Stil</p>
               <div className="flex gap-2">
                 <button
                   type="button"
                   onClick={() => setTrainingStyle('training')}
                   className="flex-1 py-3 rounded-[14px] text-[13px] font-semibold"
                   style={{
-                    ...GLASS,
+                    ...glassStyle,
                     color: trainingStyle === 'training' ? '#A855F7' : '#94A3B8',
-                    border: trainingStyle === 'training' ? '1px solid rgba(168,85,247,0.45)' : GLASS.border,
+                    border: trainingStyle === 'training' ? '1px solid rgba(168,85,247,0.45)' : glassStyle.border,
                   }}
                 >
-                  🧠 Mit Hilfe
+                  Mit Hilfe
                 </button>
                 <button
                   type="button"
                   onClick={() => setTrainingStyle('real_test')}
                   className="flex-1 py-3 rounded-[14px] text-[13px] font-semibold"
                   style={{
-                    ...GLASS,
-                    color: trainingStyle === 'real_test' ? '#FF512F' : '#94A3B8',
-                    border: trainingStyle === 'real_test' ? '1px solid rgba(255,81,47,0.45)' : GLASS.border,
+                    ...glassStyle,
+                    color: trainingStyle === 'real_test' ? '#F97316' : '#94A3B8',
+                    border: trainingStyle === 'real_test' ? '1px solid rgba(249,115,22,0.45)' : glassStyle.border,
                   }}
                 >
-                  🔥 Echter Test
+                  Echter Test
                 </button>
               </div>
             </section>
@@ -193,27 +224,27 @@ export function SimulatorPage() {
               onClick={() => setSurprise((v) => !v)}
               className="w-full rounded-[16px] px-4 py-3 text-left"
               style={{
-                ...GLASS,
-                border: surprise ? '1px dashed rgba(251,191,36,0.5)' : GLASS.border,
+                ...glassStyle,
+                border: surprise ? '1px dashed rgba(251,191,36,0.5)' : glassStyle.border,
               }}
             >
               <p className="text-[14px] font-semibold text-white">
-                🎲 Überraschung {surprise ? '· an' : ''}
+                Überraschung {surprise ? '· an' : ''}
               </p>
-              <p className="text-[11px] text-[#64748b] mt-0.5">Das System wählt ein passendes Szenario</p>
+              <p className="text-[11px] text-[#64748B] mt-0.5">Das System wählt ein passendes Szenario</p>
             </button>
 
             <button
               type="button"
               disabled={starting}
               onClick={() => void startSimulation()}
-              className="w-full py-4 rounded-[18px] text-[15px] font-bold text-[#070A12] disabled:opacity-60"
+              className="w-full py-4 rounded-[20px] text-[15px] font-bold text-[#050816] disabled:opacity-60 active:scale-[0.98] transition-transform duration-200"
               style={{
-                background: 'linear-gradient(135deg, #00F2FE 0%, #8B5CF6 55%, #FF512F 100%)',
-                boxShadow: '0 0 24px rgba(0,242,254,0.35)',
+                background: 'linear-gradient(135deg, #00F2FE 0%, #8B5CF6 55%, #F97316 100%)',
+                boxShadow: '0 0 28px rgba(0,242,254,0.35)',
               }}
             >
-              {starting ? 'Vorbereiten…' : '🎙️ Simulation starten'}
+              {starting ? 'Vorbereiten…' : 'Simulation starten'}
             </button>
           </>
         )}

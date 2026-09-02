@@ -1,46 +1,120 @@
-import { useEffect, useState, type CSSProperties, type ReactNode } from 'react';
+/**
+ * Progresso — redesign visual Fase 3 (Dein Dominium).
+ * Dados: getRealProgress / Learning State.
+ */
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { BottomNav } from '@/components/layout/BottomNav';
-import { LevelRing } from '@/components/ui/LevelRing';
-import { IconCube, IconPuzzle, IconWave, IconTarget, IconClock } from '@/components/ui/Icons';
+import { GlassCard, glassStyle } from '@/components/ui/GlassCard';
+import { ProgressRing } from '@/components/ui/ProgressRing';
+import { IconCube, IconPuzzle, IconWave, IconBriefcase } from '@/components/ui/Icons';
+import { LoadingScreen } from '@/components/ui/LoadingScreen';
 import { useProfile } from '@/hooks/useProfile';
 import { MemoryService } from '@/services/learning/MemoryService';
 import {
   getCurrentLevel,
   getLevelPresentation,
   getStoredCourseProgress,
-  type CourseLevelId,
 } from '@/services/course';
 import { getRealProgress, type RealProgress } from '@/services/learning/RealProgress';
-import { getLevelAvailability } from '@/services/course/CourseUnlockService';
+import { UNIFIED_SIMULATOR_SCENARIOS } from '@/services/teacher/ProfessorCore/SituationCatalog';
+import { L0_CHUNK_GRAPH } from '@/services/teacher/ZeroLanguageMode';
+import { readAutomationScore } from '@/services/learning/AutomationScoreEngine';
+import type { UserLearningProfile } from '@/services/learning/ConfidenceService';
 
-const GLASS: CSSProperties = {
-  background: 'rgba(15, 23, 42, 0.65)',
-  border: '1px solid rgba(255, 255, 255, 0.08)',
-  backdropFilter: 'blur(16px)',
-  WebkitBackdropFilter: 'blur(16px)',
+const TOPIC_HINTS: Record<string, string[]> = {
+  work: ['arbeit'],
+  home: ['wohn', 'hause'],
+  needs: ['brauch'],
+  food: ['moecht', 'essen'],
+  places: ['wohn'],
+  identity: ['heiss', 'komm'],
+  routine: ['muss'],
+  requests: ['kannst', 'hilfe'],
+  help: ['hilfe'],
 };
 
-const MAP_TOP: CourseLevelId[] = ['L0', 'A1', 'A2', 'B1', 'B2'];
-const MAP_BOTTOM: CourseLevelId[] = ['C1', 'C2'];
+function countActiveDomains(learning: UserLearningProfile): number {
+  let n = 0;
+  for (const scenario of UNIFIED_SIMULATOR_SCENARIOS) {
+    const hints = TOPIC_HINTS[scenario.topic] || [];
+    const hit = Object.values(learning.phrases).some((c) => {
+      if (!c || (c.timesSeen <= 0 && c.timesCorrect <= 0 && c.confidence <= 0)) return false;
+      const id = c.phraseId.toLowerCase();
+      return hints.some((h) => id.includes(h));
+    });
+    if (hit) n += 1;
+  }
+  return n;
+}
 
-const METRIC_HELP = {
-  dominio:
-    'Percentual médio de confiança dos itens L0 que você já estudou (produziu ou acertou). Itens não estudados não entram no cálculo.',
-  chunks:
-    'Ganchos L0 com pelo menos uma produção correta registrada (critério isZeroLanguagePhraseAccepted: timesCorrect ≥ 1).',
-  variacoes:
-    'Variações e perguntas do currículo L0 que você praticou e o sistema aceitou — não conta o que só foi apresentado.',
-  autonomia:
-    'Produções corretas sem ajuda imediata ÷ total de oportunidades de fala. Se não houver dados de fala, usa produções independentes do perfil.',
-  revisao: 'Mesma fila usada pela tela Revisar (getReviewQueue).',
-} as const;
+function ActivityChart({ days }: { days: RealProgress['activityDays'] }) {
+  if (days.length === 0) {
+    return (
+      <GlassCard className="p-5 text-center">
+        <p className="text-[13px] text-[#64748B]">Noch keine Aktivitätsdaten — starte eine Session.</p>
+      </GlassCard>
+    );
+  }
+
+  const values = days.map((d) => d.productions + d.reviews + d.chunksGained);
+  const max = Math.max(1, ...values);
+  const w = 280;
+  const h = 96;
+  const pad = 8;
+  const points = values.map((v, i) => {
+    const x = pad + (i / Math.max(1, values.length - 1)) * (w - pad * 2);
+    const y = h - pad - (v / max) * (h - pad * 2);
+    return `${x},${y}`;
+  });
+
+  return (
+    <GlassCard className="p-4 overflow-hidden">
+      <svg viewBox={`0 0 ${w} ${h}`} className="w-full h-24" aria-label="Aktivitätsverlauf">
+        <defs>
+          <linearGradient id="actStroke" x1="0%" y1="0%" x2="100%" y2="0%">
+            <stop offset="0%" stopColor="#00F2FE" />
+            <stop offset="100%" stopColor="#8B5CF6" />
+          </linearGradient>
+          <linearGradient id="actFill" x1="0%" y1="0%" x2="0%" y2="100%">
+            <stop offset="0%" stopColor="rgba(0,242,254,0.35)" />
+            <stop offset="100%" stopColor="rgba(0,242,254,0)" />
+          </linearGradient>
+        </defs>
+        <polygon
+          points={`${pad},${h - pad} ${points.join(' ')} ${w - pad},${h - pad}`}
+          fill="url(#actFill)"
+        />
+        <polyline
+          points={points.join(' ')}
+          fill="none"
+          stroke="url(#actStroke)"
+          strokeWidth="2.5"
+          strokeLinejoin="round"
+          strokeLinecap="round"
+        />
+        {values.map((v, i) => {
+          const x = pad + (i / Math.max(1, values.length - 1)) * (w - pad * 2);
+          const y = h - pad - (v / max) * (h - pad * 2);
+          return <circle key={days[i].date} cx={x} cy={y} r="3.5" fill="#00F2FE" />;
+        })}
+      </svg>
+      <div className="flex justify-between mt-1 px-1">
+        {days.map((d) => (
+          <span key={d.date} className="text-[9px] text-[#64748B] truncate max-w-[48px]">
+            {d.label}
+          </span>
+        ))}
+      </div>
+    </GlassCard>
+  );
+}
 
 export function ProgressPage() {
   const navigate = useNavigate();
-  const { profile } = useProfile();
+  const { profile, loading } = useProfile();
   const [progress, setProgress] = useState<RealProgress | null>(null);
-  const [helpOpen, setHelpOpen] = useState(false);
+  const [learning, setLearning] = useState<UserLearningProfile | null>(null);
   const course = getStoredCourseProgress();
   const currentLevel = profile ? getCurrentLevel(profile, course) : 'L0';
   const levelView = getLevelPresentation(currentLevel);
@@ -48,361 +122,176 @@ export function ProgressPage() {
   useEffect(() => {
     if (!profile) return;
     let cancelled = false;
-    MemoryService.loadProfile(profile)
-      .then((learning) => getRealProgress(learning, currentLevel))
-      .then((p) => { if (!cancelled) setProgress(p); })
-      .catch(() => { if (!cancelled) setProgress(null); });
-    return () => { cancelled = true; };
+    void MemoryService.loadProfile(profile)
+      .then(async (lp) => {
+        const p = await getRealProgress(lp, currentLevel);
+        if (!cancelled) {
+          setLearning(lp);
+          setProgress(p);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setProgress(null);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [profile, currentLevel]);
 
-  const domainPct = progress?.masteryPercent ?? 0;
-  const domainDisplay = progress?.masteryPercent != null ? `${domainPct}` : '—';
-  const autonomyDisplay =
-    progress?.autonomousSpeechPercent != null
-      ? `${progress.autonomousSpeechPercent}%`
-      : '—';
+  const situationsCount = useMemo(
+    () => (learning ? countActiveDomains(learning) : null),
+    [learning],
+  );
 
-  const shareProgress = async () => {
-    const text =
-      progress?.masteryPercent != null
-        ? `Meu domínio no Deutsch Turbo: ${domainPct}% · Nível ${currentLevel}`
-        : `Deutsch Turbo · Nível ${currentLevel}`;
-    try {
-      if (navigator.share) await navigator.share({ title: 'Deutsch Turbo', text });
-      else await navigator.clipboard?.writeText(text);
-    } catch {
-      /* ignore cancel */
-    }
-  };
+  const structureCount = useMemo(() => {
+    if (!learning) return null;
+    return Object.keys(L0_CHUNK_GRAPH).filter((id) => {
+      const c = learning.phrases[id];
+      return c && (c.timesCorrect > 0 || c.confidence > 0 || readAutomationScore(c) > 0);
+    }).length;
+  }, [learning]);
 
-  const dailyGoalPct = progress
-    ? Math.min(
-        100,
-        Math.round(
-          (progress.studyMinutesToday / Math.max(1, progress.dailyGoalMinutes)) * 100,
-        ),
-      )
-    : 0;
+  if (loading || !profile) return <LoadingScreen />;
+
+  const mastery = progress?.masteryPercent ?? null;
 
   return (
-    <div className="flex flex-col h-full max-w-md mx-auto" style={{ background: '#070A12' }}>
+    <div className="flex flex-col h-full max-w-md mx-auto dt-page">
       <header className="px-5 pt-4 safe-top shrink-0 flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <h1 className="text-[17px] font-bold text-white leading-tight font-[family-name:var(--font-display)]">
-            PROGRESSO
+          <h1 className="text-[18px] font-bold text-white font-[family-name:var(--font-display)]">
+            Progresso
           </h1>
-          <p className="text-[12px] text-[#94A3B8] mt-0.5">Seu mapa de domínio</p>
+          <p className="text-[12px] text-[#CBD5E1]">Dein Dominium</p>
         </div>
-        <div className="flex gap-2 shrink-0">
-          <button
-            type="button"
-            onClick={() => setHelpOpen((v) => !v)}
-            aria-label="Explicar métricas"
-            className="w-10 h-10 rounded-full flex items-center justify-center text-[#94A3B8] text-[15px] font-bold"
-            style={GLASS}
-          >
-            ?
-          </button>
-          <button
-            type="button"
-            onClick={shareProgress}
-            aria-label="Compartilhar"
-            className="w-10 h-10 rounded-full flex items-center justify-center text-[#94A3B8]"
-            style={GLASS}
-          >
-            <ShareIcon />
-          </button>
-        </div>
+        <button
+          type="button"
+          onClick={() => navigate('/lernweg')}
+          className="px-3 py-2 rounded-full text-[11px] font-bold text-white"
+          style={{
+            ...glassStyle,
+            border: '1px solid rgba(0,242,254,0.35)',
+            color: '#00F2FE',
+          }}
+        >
+          Lernweg
+        </button>
       </header>
 
-      {helpOpen && (
-        <div className="px-5 pb-2 animate-slide-up">
-          <div className="rounded-[18px] p-4 text-[12px] text-[#94A3B8] leading-relaxed space-y-2" style={GLASS}>
-            <p><strong className="text-white">Domínio:</strong> {METRIC_HELP.dominio}</p>
-            <p><strong className="text-white">Chunks aprendidos:</strong> {METRIC_HELP.chunks}</p>
-            <p><strong className="text-white">Variações praticadas:</strong> {METRIC_HELP.variacoes}</p>
-            <p><strong className="text-white">Fala autônoma:</strong> {METRIC_HELP.autonomia}</p>
-            <p><strong className="text-white">Revisão:</strong> {METRIC_HELP.revisao}</p>
-          </div>
-        </div>
-      )}
-
-      <main className="flex-1 overflow-y-auto scrollbar-hide px-5 pt-5 pb-28">
-        <div className="rounded-[28px] p-6 flex flex-col items-center animate-slide-up" style={GLASS}>
-          <LevelRing
-            value={progress?.masteryPercent ?? 0}
-            levelDisplay={currentLevel === 'L0' ? 'L0' : currentLevel}
-            areaLabel="de domínio"
-            badge={levelView.label || 'Iniciante'}
-            badgeClass="bg-success/15 text-success"
-            gradientFrom="#00F2FE"
-            gradientMid="#3B82F6"
-            gradientTo="#8B5CF6"
-            centerIcon={<span aria-hidden>🌱</span>}
+      <main className="flex-1 overflow-y-auto scrollbar-hide px-5 pt-4 pb-28 space-y-5">
+        <GlassCard variant="violet" className="p-6 flex flex-col items-center relative overflow-hidden">
+          <span
+            className="absolute -top-20 w-56 h-56 rounded-full pointer-events-none"
+            style={{ background: 'radial-gradient(circle, rgba(139,92,246,0.4), transparent 70%)' }}
           />
-          <p className="mt-3 text-center text-[12px] text-[#94A3B8] leading-snug px-2">
-            {progress?.masteryPercent != null ? (
-              <>
-                <span className="text-[22px] font-bold text-white">{domainDisplay}%</span>
-                {' · '}
-                {progress.masteryDetail}
-              </>
-            ) : (
-              <span className="text-[#64748b]">Em construção — comece a praticar para ver seu domínio</span>
-            )}
-          </p>
-        </div>
-
-        <section className="mt-5 space-y-2.5">
-          <p className="text-[11px] uppercase tracking-[0.16em] font-semibold text-[#64748b] mb-1">Resumo geral</p>
-          <SummaryRow
-            icon={<IconCube size={20} />}
+          <ProgressRing
+            value={mastery ?? 0}
+            size={140}
+            stroke={11}
             color="#8B5CF6"
+            label={mastery != null ? `${mastery}%` : '—'}
+          />
+          <p className="relative mt-3 dt-label">Dein Dominium</p>
+          <p className="relative text-[20px] font-bold text-white mt-1">
+            {currentLevel} · {levelView.label}
+          </p>
+          {progress?.masteryDetail && (
+            <p className="relative text-[12px] text-[#94A3B8] text-center mt-2 px-2">
+              {progress.masteryDetail}
+            </p>
+          )}
+        </GlassCard>
+
+        <div className="grid grid-cols-2 gap-2.5">
+          <StatTile
+            icon={<IconCube size={18} />}
+            tint="#8B5CF6"
+            label="Chunks"
             value={progress ? String(progress.learnedChunks) : '—'}
-            label={
-              progress
-                ? `Chunks aprendidos (${progress.learnedChunks}/${progress.learnedChunksTotal})`
-                : 'Chunks aprendidos'
+            onClick={() => navigate('/chunks')}
+          />
+          <StatTile
+            icon={<IconPuzzle size={18} />}
+            tint="#00F2FE"
+            label="Strukturen"
+            value={structureCount != null ? String(structureCount) : '—'}
+            onClick={() => navigate('/chunks')}
+          />
+          <StatTile
+            icon={<IconBriefcase size={18} />}
+            tint="#F97316"
+            label="Situationen"
+            value={situationsCount != null ? String(situationsCount) : '—'}
+            onClick={() => navigate('/situacoes')}
+          />
+          <StatTile
+            icon={<IconWave size={18} />}
+            tint="#EC4899"
+            label="Autonomie"
+            value={
+              progress?.autonomousSpeechPercent != null
+                ? `${progress.autonomousSpeechPercent}%`
+                : '—'
             }
           />
-          <SummaryRow
-            icon={<IconPuzzle size={20} />}
-            color="#10B981"
-            value={progress ? String(progress.variationsPracticed) : '—'}
-            label={
-              progress
-                ? `Variações praticadas (${progress.variationsPracticed}/${progress.variationsTotal})`
-                : 'Variações praticadas'
-            }
-          />
-          <SummaryRow
-            icon={<IconWave size={20} />}
-            color="#FF512F"
-            value={autonomyDisplay}
-            label={
-              progress?.autonomousSpeechPercent == null
-                ? 'Fala autônoma — dados insuficientes'
-                : 'Fala autônoma'
-            }
-            sub={progress?.autonomousSpeechDetail}
-          />
-          {progress && progress.reviewQueueCount > 0 && (
-            <button
-              type="button"
-              onClick={() => navigate('/revisao')}
-              className="w-full text-left"
-            >
-              <SummaryRow
-                icon={<IconTarget size={20} />}
-                color="#FBBF24"
-                value={String(progress.reviewQueueCount)}
-                label="itens precisam de revisão"
-                interactive
-              />
-            </button>
-          )}
-          {progress && (
-            <SummaryRow
-              icon={<IconClock size={20} />}
-              color="#38bdf8"
-              value={`${progress.studyMinutesToday} min`}
-              label={`Estudados hoje · total ${progress.studyMinutesTotal} min`}
-            />
-          )}
+        </div>
+
+        <section>
+          <p className="dt-label mb-2">Aktivität</p>
+          <ActivityChart days={progress?.activityDays ?? []} />
         </section>
 
         {progress && progress.recentAdvances.length > 0 && (
-          <section className="mt-6">
-            <p className="text-[11px] uppercase tracking-[0.16em] font-semibold text-[#64748b] mb-3">
-              Seus últimos avanços
-            </p>
-            <div className="rounded-[22px] p-4 space-y-2" style={GLASS}>
+          <section>
+            <p className="dt-label mb-2">Letzte Fortschritte</p>
+            <GlassCard className="p-4 space-y-2">
               {progress.recentAdvances.map((a) => (
-                <p key={a.phraseId} className="text-[14px] text-white flex items-center gap-2">
-                  <span className="text-[#10B981]">✓</span>
+                <button
+                  key={a.phraseId}
+                  type="button"
+                  onClick={() => navigate(`/estrutura/${encodeURIComponent(a.phraseId)}`)}
+                  className="w-full text-left text-[14px] text-white flex items-center gap-2 active:opacity-80"
+                >
+                  <span className="text-[#22C55E]">+</span>
                   <span className="truncate">{a.german}</span>
-                </p>
+                </button>
               ))}
-              {progress.newChunksThisWeek != null && progress.newChunksThisWeek > 0 && (
-                <p className="text-[12px] text-[#94A3B8] pt-1">
-                  Você aprendeu {progress.newChunksThisWeek} novo{progress.newChunksThisWeek > 1 ? 's' : ''} chunk{progress.newChunksThisWeek > 1 ? 's' : ''} esta semana.
-                </p>
-              )}
-            </div>
+            </GlassCard>
           </section>
         )}
 
         {progress && progress.weakAreas.length > 0 && (
-          <section className="mt-6">
-            <p className="text-[11px] uppercase tracking-[0.16em] font-semibold text-[#64748b] mb-3">
-              Precisa de mais prática
-            </p>
-            <div className="rounded-[22px] p-4 space-y-2" style={GLASS}>
+          <section>
+            <p className="dt-label mb-2">Noch üben</p>
+            <GlassCard className="p-4 space-y-2">
               {progress.weakAreas.map((w) => (
                 <button
                   key={w.phraseId}
                   type="button"
-                  onClick={() => navigate('/revisao')}
-                  className="w-full text-left text-[14px] text-white flex items-center gap-2 active:opacity-80"
+                  onClick={() => navigate('/revisar')}
+                  className="w-full text-left text-[14px] text-white flex items-center gap-2"
                 >
-                  <span className="text-[#FBBF24]">⚠</span>
+                  <span className="text-[#EC4899]">⚠</span>
                   <span className="truncate flex-1">{w.german}</span>
-                  <span className="text-[10px] text-[#64748b] shrink-0">{w.reason}</span>
+                  <span className="text-[10px] text-[#64748B] shrink-0">{w.reason}</span>
                 </button>
               ))}
-            </div>
+            </GlassCard>
           </section>
         )}
 
-        <section className="mt-6">
-          <p className="text-[11px] uppercase tracking-[0.16em] font-semibold text-[#64748b] mb-3">Mapa de níveis</p>
-          <div className="rounded-[24px] p-5" style={GLASS}>
-            <div className="flex items-center justify-between">
-              {MAP_TOP.map((lvl, i) => {
-                const entry = progress?.levelProgress.find((l) => l.level === lvl);
-                const availability = entry?.availability ?? getLevelAvailability(lvl, currentLevel);
-                const isActive = availability === 'current';
-                const isDone = availability === 'completed';
-                const locked = availability === 'locked';
-                return (
-                  <div key={lvl} className="flex items-center flex-1 last:flex-none">
-                    <div className="flex flex-col items-center min-w-[42px]">
-                      <span
-                        className="w-10 h-10 rounded-full flex items-center justify-center text-[11px] font-bold"
-                        style={
-                          isActive
-                            ? {
-                                background: 'linear-gradient(145deg, #A855F7, #8B5CF6)',
-                                color: '#fff',
-                                boxShadow: '0 0 20px rgba(139,92,246,0.65)',
-                                border: '1px solid rgba(196,181,253,0.55)',
-                              }
-                            : isDone
-                              ? {
-                                  background: 'rgba(16,185,129,0.2)',
-                                  color: '#10B981',
-                                  border: '1px solid rgba(16,185,129,0.45)',
-                                }
-                              : {
-                                  background: 'rgba(255,255,255,0.04)',
-                                  color: '#64748b',
-                                  border: '1px solid rgba(255,255,255,0.1)',
-                                }
-                        }
-                      >
-                        {locked ? '🔒' : isDone ? '✓' : lvl}
-                      </span>
-                      <span className={`text-[9px] mt-1.5 font-semibold ${isActive ? 'text-[#c4b5fd]' : 'text-[#64748b]'}`}>
-                        {lvl}
-                      </span>
-                      {isActive && entry?.progressPercent != null && (
-                        <span className="text-[8px] text-[#94A3B8] mt-0.5">{entry.progressPercent}%</span>
-                      )}
-                    </div>
-                    {i < MAP_TOP.length - 1 && (
-                      <div
-                        className="flex-1 h-0 mx-0.5 mb-4 border-t border-dashed"
-                        style={{ borderColor: 'rgba(148,163,184,0.3)' }}
-                      />
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-            <div className="mt-5 flex justify-center gap-12">
-              {MAP_BOTTOM.map((lvl) => {
-                const availability = getLevelAvailability(lvl, currentLevel);
-                const locked = availability === 'locked';
-                return (
-                  <div key={lvl} className="flex flex-col items-center">
-                    <span
-                      className="w-9 h-9 rounded-full flex items-center justify-center text-[10px] font-bold"
-                      style={{
-                        background: locked ? 'rgba(255,255,255,0.04)' : 'rgba(16,185,129,0.15)',
-                        color: locked ? '#64748b' : '#10B981',
-                        border: `1px solid ${locked ? 'rgba(255,255,255,0.1)' : 'rgba(16,185,129,0.35)'}`,
-                      }}
-                    >
-                      {locked ? '🔒' : '✓'}
-                    </span>
-                    <span className="text-[9px] mt-1.5 font-semibold text-[#64748b]">{lvl}</span>
-                  </div>
-                );
-              })}
-            </div>
-            {progress && (
-              <p className="mt-4 text-[11px] text-[#64748b] text-center leading-snug">
-                {progress.levelProgress.find((l) => l.level === 'L0')?.detail}
-              </p>
-            )}
-          </div>
-        </section>
-
-        {progress && progress.activityDays.length > 0 && (
-          <section className="mt-6">
-            <p className="text-[11px] uppercase tracking-[0.16em] font-semibold text-[#64748b] mb-3">
-              Atividade recente
-            </p>
-            <div className="rounded-[22px] p-4 space-y-3" style={GLASS}>
-              {progress.activityDays.map((day) => (
-                <div key={day.date}>
-                  <p className="text-[13px] font-semibold text-white">{day.label}</p>
-                  <p className="text-[12px] text-[#94A3B8] mt-0.5">
-                    {[
-                      day.chunksGained > 0 && `+${day.chunksGained} chunk${day.chunksGained > 1 ? 's' : ''}`,
-                      day.productions > 0 && `+${day.productions} produç${day.productions > 1 ? 'ões' : 'ão'}`,
-                      day.reviews > 0 && `${day.reviews} revis${day.reviews > 1 ? 'ões' : 'ão'}`,
-                    ]
-                      .filter(Boolean)
-                      .join(' · ') || '—'}
-                  </p>
-                </div>
-              ))}
-            </div>
-          </section>
-        )}
-
-        {progress && (
-          <section className="mt-6 rounded-[22px] p-4" style={GLASS}>
-            <div className="flex items-center gap-3 mb-3">
-              <span
-                className="w-10 h-10 rounded-xl flex items-center justify-center"
-                style={{
-                  background: 'rgba(139,92,246,0.22)',
-                  color: '#A855F7',
-                  boxShadow: '0 0 14px rgba(139,92,246,0.35)',
-                }}
-              >
-                <IconTarget size={18} />
-              </span>
-              <div className="min-w-0 flex-1">
-                <p className="text-[11px] uppercase tracking-[0.12em] font-semibold text-[#64748b]">Tempo de estudo hoje</p>
-                <p className="text-[14px] font-bold text-white mt-0.5">
-                  {progress.studyMinutesToday} min estudados
-                </p>
-              </div>
-              {progress.streak > 0 && (
-                <span className="text-[13px] font-bold text-[#FF512F]">
-                  🔥 {progress.streak}d
-                </span>
-              )}
-            </div>
-            <div className="h-2.5 rounded-full bg-white/10 overflow-hidden">
-              <div
-                className="h-full rounded-full"
-                style={{
-                  width: `${dailyGoalPct}%`,
-                  background: 'linear-gradient(90deg, #8B5CF6, #A855F7)',
-                  boxShadow: '0 0 10px rgba(139,92,246,0.5)',
-                }}
-              />
-            </div>
-            {progress.variationsToday > 0 && (
-              <p className="text-[12px] text-[#94A3B8] mt-2">
-                {progress.variationsToday} variação{progress.variationsToday > 1 ? 'ões' : ''} praticada{progress.variationsToday > 1 ? 's' : ''} hoje
-              </p>
-            )}
-          </section>
+        {progress && progress.reviewQueueCount > 0 && (
+          <button
+            type="button"
+            onClick={() => navigate('/revisar')}
+            className="w-full py-3.5 rounded-[18px] text-[14px] font-bold text-white"
+            style={{
+              background: 'linear-gradient(135deg, #F97316, #EC4899)',
+              boxShadow: '0 0 20px rgba(249,115,22,0.3)',
+            }}
+          >
+            {progress.reviewQueueCount} Itens zur Revision
+          </button>
         )}
       </main>
       <BottomNav />
@@ -410,43 +299,35 @@ export function ProgressPage() {
   );
 }
 
-function ShareIcon() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-      <circle cx="18" cy="5" r="3" />
-      <circle cx="6" cy="12" r="3" />
-      <circle cx="18" cy="19" r="3" />
-      <path d="M8.6 13.5 15.4 17.5M15.4 6.5 8.6 10.5" />
-    </svg>
-  );
-}
-
-function SummaryRow({
-  icon, color, value, label, sub, interactive,
+function StatTile({
+  icon,
+  tint,
+  label,
+  value,
+  onClick,
 }: {
   icon: ReactNode;
-  color: string;
-  value: string;
+  tint: string;
   label: string;
-  sub?: string;
-  interactive?: boolean;
+  value: string;
+  onClick?: () => void;
 }) {
+  const Comp = onClick ? 'button' : 'div';
   return (
-    <div
-      className={`rounded-[18px] px-4 py-3.5 flex items-center gap-3 ${interactive ? 'active:scale-[0.98] transition-transform' : ''}`}
-      style={GLASS}
+    <Comp
+      type={onClick ? 'button' : undefined}
+      onClick={onClick}
+      className="rounded-[20px] p-4 text-left active:scale-[0.98] transition-transform duration-200"
+      style={glassStyle}
     >
       <span
-        className="w-11 h-11 rounded-[14px] flex items-center justify-center shrink-0"
-        style={{ background: `${color}22`, color, boxShadow: `0 0 16px ${color}33` }}
+        className="w-9 h-9 rounded-xl flex items-center justify-center mb-2"
+        style={{ background: `${tint}22`, color: tint, boxShadow: `0 0 12px ${tint}33` }}
       >
         {icon}
       </span>
-      <div className="min-w-0 flex-1">
-        <p className="text-[18px] font-bold text-white leading-none">{value}</p>
-        <p className="text-[12px] text-[#94A3B8] mt-1">{label}</p>
-        {sub && <p className="text-[10px] text-[#64748b] mt-0.5">{sub}</p>}
-      </div>
-    </div>
+      <p className="text-[20px] font-bold text-white tabular-nums">{value}</p>
+      <p className="text-[11px] text-[#64748B] mt-0.5 uppercase tracking-wide">{label}</p>
+    </Comp>
   );
 }

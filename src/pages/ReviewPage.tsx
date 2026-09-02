@@ -1,76 +1,60 @@
-import { useEffect, useMemo, useState, type CSSProperties } from 'react';
+/**
+ * Revisão — redesign visual Fase 2.
+ * Fila única: getDueReviews → beginReviewSessionFromQueue(queue).
+ */
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { BottomNav } from '@/components/layout/BottomNav';
+import { GlassCard, glassStyle } from '@/components/ui/GlassCard';
 import {
   IconBack,
-  IconBolt,
-  IconCheck,
-  IconHelp,
   IconPlay,
   IconPuzzle,
 } from '@/components/ui/Icons';
-import { beginReviewSessionFromQueue, getDueReviews } from '@/services/learning/ReviewRepository';
-import type { ReviewQueueItem } from '@/services/learning/ReviewEngine';
-import { useProfile } from '@/hooks/useProfile';
-import { MemoryService } from '@/services/learning/MemoryService';
-import { computeProgress } from '@/services/learning/ProgressEngine';
-import type { UserLearningProfile } from '@/services/learning/ConfidenceService';
+import { LoadingScreen } from '@/components/ui/LoadingScreen';
+import {
+  beginReviewSessionFromQueue,
+  getDueReviews,
+} from '@/services/learning/ReviewRepository';
+import {
+  REVIEW_TYPE_COLORS,
+  REVIEW_TYPE_LABELS,
+  type ReviewQueueItem,
+} from '@/services/learning/ReviewEngine';
 
-const GLASS: CSSProperties = {
-  background: 'rgba(15, 23, 42, 0.65)',
-  border: '1px solid rgba(255, 255, 255, 0.08)',
-  backdropFilter: 'blur(16px)',
-  WebkitBackdropFilter: 'blur(16px)',
-};
+const NEON = ['#00F2FE', '#8B5CF6', '#EC4899', '#F97316', '#22C55E', '#FF8A00'] as const;
 
-const SLOT_OPTIONS = [
-  { id: 'wasser', de: 'Wasser.', pt: 'Água.', color: '#38bdf8', bg: 'rgba(56,189,248,0.16)', emoji: '💧' },
-  { id: 'arbeiten', de: 'arbeiten.', pt: 'trabalhar.', color: '#10B981', bg: 'rgba(16,185,129,0.14)', emoji: '💼' },
-  { id: 'hause', de: 'nach Hause.', pt: 'para casa.', color: '#FF512F', bg: 'rgba(255,81,47,0.14)', emoji: '🏠' },
-] as const;
-
-function recentReviewHits(learning: UserLearningProfile | null, limit = 8): Array<boolean | null> {
-  if (!learning) return Array(limit).fill(null);
-  const entries = Object.values(learning.phrases)
-    .flatMap((p) => (p.reviewHistory || []).map((h) => ({ ...h, phraseId: p.phraseId })))
-    .sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp))
-    .slice(0, limit);
-  if (!entries.length) return Array(limit).fill(null);
-  const hits: Array<boolean | null> = entries.map((e) => e.result === 'SUCCESS');
-  while (hits.length < limit) hits.push(null);
-  return hits.slice(0, limit);
+function itemKind(item: ReviewQueueItem): 'Frage' | 'Struktur' {
+  const g = (item.german || '').trim();
+  if (g.endsWith('?')) return 'Frage';
+  return 'Struktur';
 }
 
-function automationLabel(score: number): string {
-  if (score >= 70) return 'Muito bom!';
-  if (score >= 45) return 'Em progresso';
-  return 'Continue praticando';
+function priorityLabel(priority: number): string {
+  if (priority >= 80) return 'Alta';
+  if (priority >= 50) return 'Média';
+  return 'Baixa';
 }
 
 export function ReviewPage() {
   const navigate = useNavigate();
-  const { profile } = useProfile();
-  const [queue, setQueue] = useState<ReviewQueueItem[]>([]);
-  const [selected, setSelected] = useState<string | null>(null);
-  const [automation, setAutomation] = useState(0);
-  const [learning, setLearning] = useState<UserLearningProfile | null>(null);
+  const [queue, setQueue] = useState<ReviewQueueItem[] | null>(null);
 
   useEffect(() => {
-    getDueReviews(12).then(setQueue).catch(() => setQueue([]));
+    let cancelled = false;
+    void getDueReviews(12)
+      .then((q) => {
+        if (!cancelled) setQueue(q);
+      })
+      .catch(() => {
+        if (!cancelled) setQueue([]);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
-  useEffect(() => {
-    if (!profile) return;
-    MemoryService.loadProfile(profile)
-      .then((lp) => {
-        setLearning(lp);
-        setAutomation(Math.round(computeProgress(lp).automationScore || 0));
-      })
-      .catch(() => {});
-  }, [profile]);
-
-  const hits = useMemo(() => recentReviewHits(learning), [learning]);
-  const featured = queue[0];
+  if (queue === null) return <LoadingScreen />;
 
   const startReview = () => {
     if (queue.length > 0) {
@@ -79,200 +63,138 @@ export function ReviewPage() {
     navigate('/sessao?type=review');
   };
 
-  const filled = SLOT_OPTIONS.find((o) => o.id === selected);
-
   return (
-    <div className="flex flex-col h-full max-w-md mx-auto" style={{ background: '#070A12' }}>
+    <div className="flex flex-col h-full max-w-md mx-auto dt-page">
       <header className="px-5 pt-4 safe-top shrink-0 flex items-center gap-3">
         <button
           type="button"
           onClick={() => navigate(-1)}
           aria-label="Voltar"
           className="w-10 h-10 rounded-full flex items-center justify-center text-white shrink-0"
-          style={GLASS}
+          style={glassStyle}
         >
           <IconBack size={18} />
         </button>
         <div className="min-w-0 flex-1">
-          <h1 className="text-[17px] font-bold text-white leading-tight font-[family-name:var(--font-display)]">
-            REVISÃO
+          <h1 className="text-[18px] font-bold text-white font-[family-name:var(--font-display)]">
+            Revisão
           </h1>
-          <p className="text-[12px] text-[#94A3B8] mt-0.5 truncate">Consolide suas estruturas</p>
+          <p className="text-[12px] text-[#CBD5E1]">Reforce o que você aprendeu.</p>
         </div>
-        <button
-          type="button"
-          aria-label="Informações"
-          className="w-10 h-10 rounded-full flex items-center justify-center text-[#94A3B8] shrink-0"
-          style={GLASS}
-        >
-          <IconHelp size={18} />
-        </button>
       </header>
 
-      <main className="flex-1 overflow-y-auto scrollbar-hide px-5 pt-5 pb-28">
-        <div className="rounded-[24px] p-5 flex items-center gap-4" style={GLASS}>
-          <div className="min-w-0 flex-1">
-            <p className="text-[11px] uppercase tracking-[0.14em] font-semibold text-[#64748b] mb-1.5">
-              Próximo na fila
-            </p>
-            <p className="text-[28px] font-bold text-white leading-tight font-[family-name:var(--font-display)]">
-              {featured?.german || '—'}
-            </p>
-            <p className="text-[14px] text-[#94A3B8] mt-1">{featured?.portuguese || 'Carregando…'}</p>
-          </div>
+      <main className="flex-1 overflow-y-auto scrollbar-hide px-5 pt-4 pb-28 space-y-5">
+        <GlassCard
+          variant="violet"
+          className="p-6 text-center relative overflow-hidden"
+        >
           <span
-            className="shrink-0 w-[72px] h-[72px] rounded-2xl flex items-center justify-center text-white"
-            style={{
-              background: 'linear-gradient(145deg, #A855F7 0%, #8B5CF6 50%, #DD2476 100%)',
-              boxShadow: '0 0 36px rgba(139,92,246,0.75), 0 0 18px rgba(221,36,118,0.4)',
-            }}
-            aria-hidden
-          >
-            <IconPuzzle size={34} />
-          </span>
-        </div>
-
-        <section className="mt-6">
-          <p className="text-[11px] uppercase tracking-[0.16em] font-semibold text-[#64748b] mb-3">
-            Monte suas frases
+            className="absolute -top-20 left-1/2 -translate-x-1/2 w-56 h-56 rounded-full pointer-events-none"
+            style={{ background: 'radial-gradient(circle, rgba(139,92,246,0.4), transparent 70%)' }}
+          />
+          <p className="dt-label relative">Fila atual</p>
+          <p className="relative mt-2 text-[56px] font-bold leading-none text-white font-[family-name:var(--font-display)] tabular-nums">
+            {queue.length}
           </p>
-          <div
-            className="rounded-[20px] px-4 py-5 flex items-center justify-center gap-2.5 flex-wrap"
-            style={GLASS}
-          >
-            <span
-              className="px-3.5 py-2.5 rounded-xl text-[16px] font-bold text-white"
-              style={{ background: 'rgba(15,23,42,0.95)', border: '1px solid rgba(255,255,255,0.12)' }}
-            >
-              {featured?.german?.replace(/\.\.\.$/, '').replace(/\.$/, '') || 'Ich möchte'}
-            </span>
-            <span
-              className="min-w-[112px] px-4 py-2.5 rounded-xl border-2 border-dashed text-center text-[14px] font-semibold"
-              style={
-                filled
-                  ? { borderColor: `${filled.color}66`, background: filled.bg, color: filled.color }
-                  : {
-                      borderColor: 'rgba(148,163,184,0.5)',
-                      background: 'rgba(100,116,139,0.18)',
-                      color: '#64748b',
-                    }
-              }
-            >
-              {filled ? filled.de : '[ ... ]'}
-            </span>
-          </div>
+          <p className="relative mt-2 text-[12px] uppercase tracking-[0.16em] font-semibold text-[#CBD5E1]">
+            Itens para revisar
+          </p>
+        </GlassCard>
 
-          <div className="mt-3.5 grid grid-cols-3 gap-2.5">
-            {SLOT_OPTIONS.map((opt) => {
-              const active = selected === opt.id;
+        {queue.length === 0 ? (
+          <GlassCard className="p-5 text-center">
+            <p className="text-[14px] text-[#CBD5E1]">
+              Nada na fila agora. Pratique uma sessão e volte para reforçar.
+            </p>
+            <button
+              type="button"
+              onClick={() => navigate('/aprender')}
+              className="mt-4 px-5 py-2.5 rounded-full text-[13px] font-bold text-white"
+              style={{
+                background: 'linear-gradient(135deg, #8B5CF6, #EC4899)',
+                boxShadow: '0 0 20px rgba(139,92,246,0.4)',
+              }}
+            >
+              Ir para Aprender
+            </button>
+          </GlassCard>
+        ) : (
+          <section className="space-y-2.5" aria-label="Itens da fila de revisão">
+            {queue.map((item, i) => {
+              const tint = REVIEW_TYPE_COLORS[item.reviewType] || NEON[i % NEON.length];
+              const kind = itemKind(item);
+              const auto = Math.round(item.automationScore || 0);
               return (
-                <button
-                  key={opt.id}
-                  type="button"
-                  onClick={() => setSelected(opt.id)}
-                  className="rounded-[20px] p-3 min-h-[112px] flex flex-col items-center justify-center gap-1.5 active:scale-[0.97] transition-transform"
+                <div
+                  key={`${item.phraseId}-${i}`}
+                  className="rounded-[20px] p-3.5 transition-transform duration-200"
                   style={{
-                    background: opt.bg,
-                    border: active ? `1px solid ${opt.color}99` : `1px solid ${opt.color}33`,
-                    boxShadow: active ? `0 0 20px ${opt.color}55` : `0 0 10px ${opt.color}22`,
+                    ...glassStyle,
+                    border: `1px solid ${tint}55`,
+                    boxShadow: `0 0 16px ${tint}22`,
                   }}
                 >
-                  <span className="text-[22px] leading-none" aria-hidden>
-                    {opt.emoji}
-                  </span>
-                  <span className="text-[12px] font-bold text-white text-center leading-tight">{opt.de}</span>
-                  <span className="text-[10px] font-medium text-center leading-tight" style={{ color: opt.color }}>
-                    {opt.pt}
-                  </span>
-                </button>
+                  <div className="flex items-start gap-3">
+                    <span
+                      className="w-11 h-11 rounded-2xl flex items-center justify-center shrink-0 text-white"
+                      style={{
+                        background: `${tint}28`,
+                        boxShadow: `0 0 14px ${tint}40`,
+                        color: tint,
+                      }}
+                    >
+                      <IconPuzzle size={18} />
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span
+                          className="text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-md"
+                          style={{ background: `${tint}22`, color: tint }}
+                        >
+                          {kind}
+                        </span>
+                        <span className="text-[10px] font-semibold text-[#64748B]">
+                          {REVIEW_TYPE_LABELS[item.reviewType] || item.reviewType}
+                        </span>
+                      </div>
+                      <p className="mt-1.5 text-[15px] font-bold text-white truncate">
+                        {item.german || item.phraseId}
+                      </p>
+                      <div className="mt-2 flex items-center gap-3 text-[11px] text-[#64748B]">
+                        <span>Prioridade: {priorityLabel(item.priority)}</span>
+                        <span className="tabular-nums">{auto}%</span>
+                      </div>
+                      <div
+                        className="mt-2 h-[4px] rounded-full overflow-hidden"
+                        style={{ background: 'rgba(255,255,255,0.08)' }}
+                      >
+                        <div
+                          className="h-full rounded-full transition-all duration-300"
+                          style={{
+                            width: `${Math.max(4, Math.min(100, auto))}%`,
+                            background: `linear-gradient(90deg, ${tint}, #A855F7)`,
+                          }}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
               );
             })}
-          </div>
-        </section>
-
-        <section className="mt-6 rounded-[22px] p-4" style={GLASS}>
-          <div className="flex items-center gap-3 mb-3">
-            <span
-              className="w-9 h-9 rounded-full flex items-center justify-center"
-              style={{
-                background: 'rgba(255,81,47,0.2)',
-                color: '#FF512F',
-                boxShadow: '0 0 14px rgba(255,81,47,0.35)',
-              }}
-            >
-              <IconBolt size={18} />
-            </span>
-            <div className="min-w-0 flex-1">
-              <p className="text-[11px] uppercase tracking-[0.12em] font-semibold text-[#64748b]">
-                Nível de automatização
-              </p>
-              <p className="text-[15px] font-bold text-white mt-0.5">
-                {automation}% <span className="text-[13px] font-semibold text-[#FBBF24]">{automationLabel(automation)}</span>
-              </p>
-            </div>
-          </div>
-          <div className="h-3 rounded-full bg-white/10 overflow-hidden">
-            <div
-              className="h-full rounded-full"
-              style={{
-                width: `${Math.min(100, automation)}%`,
-                background: 'linear-gradient(90deg, #FBBF24 0%, #FF512F 55%, #DD2476 100%)',
-                boxShadow: '0 0 14px rgba(255,81,47,0.55)',
-              }}
-            />
-          </div>
-          <p className="text-[12px] text-[#94A3B8] mt-3 leading-snug">
-            Continue praticando para ficar automático!
-          </p>
-        </section>
-
-        <section className="mt-6">
-          <p className="text-[11px] uppercase tracking-[0.16em] font-semibold text-[#64748b] mb-3">
-            Histórico de acertos
-          </p>
-          <div className="flex items-center gap-2.5 overflow-x-auto scrollbar-hide py-1">
-            {hits.map((hit, i) => (
-              <span
-                key={i}
-                className="shrink-0 w-10 h-10 rounded-full flex items-center justify-center"
-                style={
-                  hit === true
-                    ? {
-                        background: 'rgba(16,185,129,0.22)',
-                        border: '1px solid rgba(16,185,129,0.55)',
-                        color: '#10B981',
-                        boxShadow: '0 0 12px rgba(16,185,129,0.35)',
-                      }
-                    : hit === false
-                      ? {
-                          background: 'rgba(239,68,68,0.12)',
-                          border: '1px solid rgba(239,68,68,0.35)',
-                          color: '#f87171',
-                        }
-                      : {
-                          background: 'transparent',
-                          border: '1.5px solid rgba(255,255,255,0.14)',
-                          color: '#64748b',
-                        }
-                }
-                aria-label={hit === true ? 'Acerto' : hit === false ? 'Erro' : 'Sem dados'}
-              >
-                {hit === true ? <IconCheck size={18} /> : null}
-              </span>
-            ))}
-          </div>
-        </section>
+          </section>
+        )}
 
         <button
           type="button"
           onClick={startReview}
-          className="mt-7 w-full min-h-14 rounded-[24px] text-white text-[15px] font-semibold active:scale-[0.98] transition-transform inline-flex items-center justify-center gap-2.5"
+          disabled={queue.length === 0}
+          className="w-full min-h-14 rounded-[24px] text-white text-[15px] font-bold active:scale-[0.98] transition-transform duration-200 inline-flex items-center justify-center gap-2.5 disabled:opacity-40"
           style={{
-            background: 'linear-gradient(180deg, #A855F7 0%, #8B5CF6 100%)',
-            boxShadow: '0 0 28px rgba(139,92,246,0.5)',
+            background: 'linear-gradient(135deg, #8B5CF6 0%, #EC4899 100%)',
+            boxShadow: '0 0 28px rgba(139,92,246,0.45)',
           }}
         >
-          <IconPlay size={20} /> {queue.length > 0 ? `Revisar ${queue.length} itens` : 'Praticar em voz'}
+          <IconPlay size={20} /> Iniciar revisão
         </button>
       </main>
       <BottomNav />

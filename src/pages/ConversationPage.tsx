@@ -14,17 +14,18 @@ import { useConversation } from '@/hooks/useConversation';
 import type { ConversationContext } from '@/types';
 import { createDefaultProfile } from '@/services/storage/initData';
 import { calculateCommunicationScore, updateStreak } from '@/utils/reviewUtils';
-import { EventStore } from '@/services/learning/EventStore';
 import { isGeminiLiveEnabled } from '@/services/voice/VoiceService';
 import { GeminiConversation } from '@/pages/GeminiConversation';
 import { haptic } from '@/services/ui/UiPrefsService';
 import { UiPrefsService, type TranslationMode } from '@/services/ui/UiPrefsService';
+import { storeSessionComplete } from '@/services/ui/SessionCompleteStore';
 import { TranslationPanel, AnswerSupportPanel, CorrectionPanel } from '@/components/voice/VoicePanels';
 import {
   loadCourseProgress, advanceToNextLevel, placeAtLevel, overallLevel,
   gradeAssessment, nextAssessmentTarget, LEVEL_BY_ID, levelIndex,
 } from '@/services/course';
 import type { CourseLevelId } from '@/services/course';
+import { GlassCard } from '@/components/ui/GlassCard';
 
 export function ConversationPage() {
   const { profile, updateProfile, loading } = useProfile();
@@ -121,7 +122,35 @@ export function ConversationPage() {
         communicationScore,
       });
     }
-    navigate('/');
+
+    // Tela premium de conclusão (dados reais quando disponíveis)
+    try {
+      const { getLastSession } = await import('@/services/teacher/sessionContinuity');
+      const last = getLastSession();
+      const lessonSummary = !useGemini && !isFree && !isAssessment ? lesson.summary : null;
+      storeSessionComplete({
+        name: profile?.name,
+        headline: type === 'review' ? 'REVISION BEENDET' : 'TRAINING ABGESCHLOSSEN',
+        minutes: last?.durationMinutes ?? null,
+        structures: lessonSummary?.newLearned ?? (last?.phrasesLearned?.length || null),
+        variations: lessonSummary?.realUse?.transferredItems ?? null,
+        autonomyPct: lessonSummary?.realUse
+          ? Math.round(
+              (lessonSummary.realUse.independentResponses /
+                Math.max(1, lessonSummary.spoken || lessonSummary.realUse.independentResponses || 1)) *
+                100,
+            )
+          : null,
+        improved: last?.phrasesLearned?.filter(Boolean).slice(0, 8) ?? [],
+        nextStep: last?.nextSuggestedStep ?? null,
+        streak: profile ? updateStreak(profile.lastStudyDate, profile.streak).streak : null,
+        spoken: lessonSummary?.spoken ?? null,
+      });
+      navigate('/sessao/concluida');
+      return;
+    } catch {
+      navigate('/');
+    }
   };
 
   if (loading || !profile) return <LoadingScreen />;
@@ -131,8 +160,14 @@ export function ConversationPage() {
   }
 
   if (!isFree && !isAssessment && lesson.finished) {
-    const s = lesson.summary;
-    return <SessionSummary s={s} streak={profile.streak} onFinish={finish} />;
+    return (
+      <LessonCompleteBridge
+        summary={lesson.summary}
+        name={profile.name}
+        streak={profile.streak}
+        onReady={finish}
+      />
+    );
   }
 
   if (isAssessment && lesson.finished) {
@@ -204,20 +239,20 @@ export function ConversationPage() {
           : 'idle';
 
   return (
-    <div className="flex flex-col h-full bg-background max-w-md mx-auto">
+    <div className="flex flex-col h-full max-w-md mx-auto dt-page">
       <header className="flex items-center justify-between px-4 pt-5 pb-2 safe-top">
         <IconButton label="Sair" className="min-h-11" onClick={() => navigate('/')}>
           <IconBack size={20} />
         </IconButton>
         <ProgressDots current={lesson.index} total={lesson.lesson.interactions.length} />
-        <button onClick={() => { lesson.persistSession(); void finish(); }} className="text-text-faint text-sm min-h-11 px-1">Encerrar</button>
+        <button type="button" onClick={() => { lesson.persistSession(); void finish(); }} className="text-[#64748B] text-sm min-h-11 px-1 hover:text-white transition-colors">Encerrar</button>
       </header>
 
       <div className="flex-1 flex flex-col items-center justify-center px-8 text-center min-h-0">
         <div className="mb-6">
           <VoiceOrb state={orbState} size={160} />
         </div>
-        <p className="text-eyebrow text-text-faint mb-4">Deutsch Coach</p>
+        <p className="dt-label mb-4">Deutsch Coach</p>
 
         <TranslationPanel
           german={i.german}
@@ -271,7 +306,11 @@ export function ConversationPage() {
             />
             <p className="text-secondary text-text-muted mt-4 h-5">{status}</p>
             {lesson.phase === 'feedback' && (
-              <button onClick={lesson.next} className="mt-3 px-7 py-3 rounded-[var(--radius-lg)] bg-primary text-white font-medium active:scale-[0.98] transition-transform">
+              <button
+                type="button"
+                onClick={lesson.next}
+                className="mt-3 px-7 py-3 rounded-[20px] dt-cta-primary text-[#050816] font-bold active:scale-[0.98] transition-transform"
+              >
                 Continuar
               </button>
             )}
@@ -301,7 +340,7 @@ function SessionStartGate({
   onBack: () => void;
 }) {
   return (
-    <div className="flex flex-col h-full bg-background max-w-md mx-auto">
+    <div className="flex flex-col h-full max-w-md mx-auto dt-page">
       <header className="flex items-center px-4 pt-5 pb-2 safe-top">
         <IconButton label="Voltar" className="min-h-11" onClick={onBack}>
           <IconBack size={20} />
@@ -311,9 +350,9 @@ function SessionStartGate({
         <div className="mb-8">
           <VoiceOrb state="idle" size={180} />
         </div>
-        <p className="text-eyebrow text-text-faint mb-3">Deutsch Coach</p>
-        <h1 className="text-display font-bold leading-tight">{title}</h1>
-        <p className="text-secondary text-text-muted mt-3 max-w-[280px]">{subtitle}</p>
+        <p className="dt-label mb-3">Deutsch Coach</p>
+        <h1 className="text-[28px] font-bold leading-tight text-white font-[family-name:var(--font-display)]">{title}</h1>
+        <p className="dt-body mt-3 max-w-[280px]">{subtitle}</p>
       </div>
       <div className="px-8 pb-10 safe-bottom">
         <PrimaryButton full size="xl" onClick={onStart}>
@@ -337,23 +376,23 @@ function FreeConversation({
 }) {
   const lastAssistant = [...free.messages].reverse().find((m) => m.role === 'assistant');
   return (
-    <div className="flex flex-col h-full bg-background max-w-md mx-auto">
+    <div className="flex flex-col h-full max-w-md mx-auto dt-page">
       <header className="flex items-center justify-between px-4 pt-5 pb-2 safe-top">
         <IconButton label="Fechar" className="min-h-11" onClick={onClose}>
           <IconBack size={20} />
         </IconButton>
-        <button onClick={onEncerrar} className="text-text-faint text-sm min-h-11 px-1">Encerrar</button>
+        <button type="button" onClick={onEncerrar} className="text-[#64748B] text-sm min-h-11 px-1 hover:text-white transition-colors">Encerrar</button>
       </header>
       <div className="flex-1 flex flex-col items-center justify-center px-8 text-center min-h-0">
         <div className="mb-7">
           <VoiceOrb state={free.isSpeaking ? 'speaking' : free.isListening ? 'listening' : free.isProcessing ? 'processing' : 'idle'} size={190} />
         </div>
-        <p className="text-eyebrow text-text-faint mb-4">Deutsch Coach</p>
-        <p className="text-display font-bold px-1" style={{ whiteSpace: 'normal', overflowWrap: 'anywhere', wordBreak: 'break-word', lineHeight: 1.25 }}>
+        <p className="dt-label mb-4">Deutsch Coach</p>
+        <p className="text-[24px] font-bold px-1 text-white font-[family-name:var(--font-display)]" style={{ whiteSpace: 'normal', overflowWrap: 'anywhere', wordBreak: 'break-word', lineHeight: 1.25 }}>
           {lastAssistant?.german || lastAssistant?.content || '…'}
         </p>
         {lastAssistant?.portuguese && (
-          <p className="mt-3 text-h2 text-text-muted" style={{ whiteSpace: 'normal', overflowWrap: 'anywhere' }}>{lastAssistant.portuguese}</p>
+          <p className="mt-3 text-[16px] text-[#CBD5E1]" style={{ whiteSpace: 'normal', overflowWrap: 'anywhere' }}>{lastAssistant.portuguese}</p>
         )}
       </div>
       <div className="flex flex-wrap justify-center gap-1.5 px-4 py-2">
@@ -436,26 +475,26 @@ function AssessmentResult({
   if (!state) return <LoadingScreen />;
 
   return (
-    <div className="flex flex-col h-full bg-background px-7 py-12 max-w-md mx-auto">
+    <div className="flex flex-col h-full max-w-md mx-auto dt-page px-7 py-12">
       <div className="mt-4 animate-scale-in">
         <div
           className={[
             'w-16 h-16 rounded-full flex items-center justify-center mb-5 border',
             state.passed
-              ? 'bg-success/15 border-success/30'
-              : 'bg-accent/15 border-accent/30',
+              ? 'bg-[rgba(34,197,94,0.15)] border-[rgba(34,197,94,0.35)]'
+              : 'bg-[rgba(249,115,22,0.15)] border-[rgba(249,115,22,0.35)]',
           ].join(' ')}
         >
           {state.passed ? (
-            <IconCheck size={32} className="text-success" />
+            <IconCheck size={32} className="text-[#22C55E]" />
           ) : (
-            <IconSparkle size={30} className="text-accent" />
+            <IconSparkle size={30} className="text-[#F97316]" />
           )}
         </div>
-        <h1 className="text-display leading-tight">
+        <h1 className="text-[28px] font-bold leading-tight text-white font-[family-name:var(--font-display)]">
           {state.passed ? 'Você conseguiu!' : 'Quase lá!'}
         </h1>
-        <p className="text-secondary text-text-muted mt-2">{state.reason}</p>
+        <p className="dt-body mt-2">{state.reason}</p>
       </div>
 
       <div className="mt-8 grid grid-cols-2 gap-3">
@@ -475,10 +514,12 @@ function AssessmentResult({
         )}
         {state.advancedTo && (
           <>
-            <div className="mb-4 p-4 rounded-[var(--radius-lg)] bg-surface border border-border/60 animate-fade-in text-center">
-              <p className="text-eyebrow text-text-faint mb-1">🎉 Novo nível</p>
-              <p className="text-h2">{LEVEL_BY_ID[state.advancedTo].emoji} {LEVEL_BY_ID[state.advancedTo].label}</p>
-            </div>
+            <GlassCard className="mb-4 p-4 animate-fade-in text-center">
+              <p className="dt-label mb-1">Novo nível</p>
+              <p className="text-[18px] font-bold text-white">
+                {LEVEL_BY_ID[state.advancedTo].emoji} {LEVEL_BY_ID[state.advancedTo].label}
+              </p>
+            </GlassCard>
             <PrimaryButton full size="xl" onClick={onFinish}>
               <span className="inline-flex items-center gap-2"><IconCheck size={20} /> Continuar</span>
             </PrimaryButton>
@@ -494,80 +535,30 @@ function AssessmentResult({
   );
 }
 
-function SessionSummary({ s, streak, onFinish }: { s: UseLessonResult['summary']; streak: number; onFinish: () => void }) {
-  const [rated, setRated] = useState(false);
-  const rate = async (level: 'easy' | 'ok' | 'hard' | 'fail') => {
-    haptic();
-    setRated(true);
-    try {
-      await EventStore.record({ type: 'SESSION_ENDED', context: `feedback:${level}` });
-    } catch {
-      /* ignore */
-    }
-  };
-  const ru = s.realUse;
-  const highlight = ru?.headline
-    || (s.spontaneous > 0
-      ? `🔥 Você usou alemão sem ajuda (${s.spontaneous}).`
-      : s.spoken > 0
-        ? '🗣️ Você falou alemão hoje.'
-        : null);
+function LessonCompleteBridge({
+  onReady,
+}: {
+  summary: UseLessonResult['summary'];
+  name?: string;
+  streak: number;
+  onReady: () => void;
+}) {
+  const once = useMemo(() => ({ done: false }), []);
+  useEffect(() => {
+    if (once.done) return;
+    once.done = true;
+    onReady();
+  }, [once, onReady]);
 
-  return (
-    <div className="flex flex-col h-full bg-background px-7 py-12 max-w-md mx-auto">
-      <div className="mt-4 animate-scale-in">
-        <div className="w-16 h-16 rounded-full bg-success/15 border border-success/30 flex items-center justify-center mb-5">
-          <IconCheck size={32} className="text-success" />
-        </div>
-        <h1 className="text-display leading-tight">Hoje você usou alemão</h1>
-        <p className="text-secondary text-text-muted mt-2">Treino concluído.</p>
-      </div>
-
-      <div className="mt-8 grid grid-cols-2 gap-3">
-        <SummaryStat icon="🗣️" value={ru?.independentResponses ?? s.spoken} label="sem ajuda" />
-        <SummaryStat icon="🔄" value={ru?.transferredItems ?? 0} label="variações" />
-        <SummaryStat icon="⚡" value={ru?.spontaneousUses ?? s.spontaneous} label="espontâneo" />
-        <SummaryStat icon="🔥" value={streak} label={streak === 1 ? 'dia seguido' : 'dias seguidos'} />
-      </div>
-
-      {highlight && (
-        <div className="mt-6 p-4 rounded-[var(--radius-lg)] bg-surface border border-border/60 animate-fade-in">
-          <p className="text-eyebrow text-text-faint inline-flex items-center gap-1.5 mb-1.5">
-            <IconSparkle size={14} className="text-accent" /> Seu destaque
-          </p>
-          <p className="text-secondary text-accent">{highlight}</p>
-        </div>
-      )}
-
-      {!rated ? (
-        <div className="mt-7">
-          <p className="text-secondary text-text-muted mb-3">Como foi?</p>
-          <div className="grid grid-cols-4 gap-2">
-            <button onClick={() => rate('easy')} className="py-3 rounded-[var(--radius-md)] bg-surface-light text-secondary hover:bg-surface-elevated transition-colors min-h-11">✅ Fácil</button>
-            <button onClick={() => rate('ok')} className="py-3 rounded-[var(--radius-md)] bg-surface-light text-secondary hover:bg-surface-elevated transition-colors min-h-11">🙂 Consegui</button>
-            <button onClick={() => rate('hard')} className="py-3 rounded-[var(--radius-md)] bg-surface-light text-secondary hover:bg-surface-elevated transition-colors min-h-11">😐 Difícil</button>
-            <button onClick={() => rate('fail')} className="py-3 rounded-[var(--radius-md)] bg-surface-light text-secondary hover:bg-surface-elevated transition-colors min-h-11">❌ Não</button>
-          </div>
-        </div>
-      ) : (
-        <p className="mt-7 text-secondary text-text-faint animate-fade-soft">Obrigado! Isso ajuda seu professor a ajustar o treino.</p>
-      )}
-
-      <div className="mt-auto pt-8">
-        <PrimaryButton full size="xl" onClick={onFinish}>
-          <span className="inline-flex items-center gap-2"><IconCheck size={20} /> Pronto</span>
-        </PrimaryButton>
-      </div>
-    </div>
-  );
+  return <LoadingScreen />;
 }
 
 function SummaryStat({ icon, value, label }: { icon: string; value: number; label: string }) {
   return (
-    <div className="p-4 rounded-[var(--radius-md)] bg-surface border border-border/60">
+    <GlassCard className="p-4">
       <p className="text-xl" aria-hidden>{icon}</p>
-      <p className="text-h2 mt-1.5">{value}</p>
-      <p className="text-caption text-text-faint mt-0.5">{label}</p>
-    </div>
+      <p className="text-[18px] font-bold text-white mt-1.5 tabular-nums">{value}</p>
+      <p className="dt-muted mt-0.5">{label}</p>
+    </GlassCard>
   );
 }

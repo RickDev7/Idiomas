@@ -49,7 +49,7 @@ export function LevelGlyph({ id, size = 18 }: { id: LevelIconId; size?: number }
 /* ---------- Shell ---------- */
 export function OnboardingShell({ children }: { children: ReactNode }) {
   return (
-    <div className="flex flex-col h-full max-w-md mx-auto bg-background text-text">
+    <div className="flex flex-col h-full max-w-md mx-auto dt-page text-white">
       {children}
     </div>
   );
@@ -60,17 +60,24 @@ export function OnboardingHeader({ onSkip }: { onSkip: () => void }) {
   return (
     <header className="flex items-center justify-between px-5 pt-3 safe-top shrink-0">
       <div className="flex items-center gap-2.5 min-h-11">
-        <span className="w-8 h-8 rounded-[10px] bg-gradient-to-br from-[#ff6b35] to-[#ff9a3c] flex items-end justify-center gap-[3px] pb-[5px] shadow-sm" aria-hidden>
+        <span
+          className="w-8 h-8 rounded-[10px] flex items-end justify-center gap-[3px] pb-[5px]"
+          style={{
+            background: 'linear-gradient(145deg, #00F2FE 0%, #8B5CF6 100%)',
+            boxShadow: '0 0 14px rgba(0,242,254,0.28)',
+          }}
+          aria-hidden
+        >
           <span className="w-[3px] h-[7px] bg-white/95 rounded-sm" />
           <span className="w-[3px] h-[13px] bg-white/95 rounded-sm" />
           <span className="w-[3px] h-[10px] bg-white/95 rounded-sm" />
         </span>
-        <span className="text-[11px] font-bold tracking-[0.14em] text-text">DEUTSCH TURBO</span>
+        <span className="dt-label !text-[#CBD5E1] tracking-[0.14em]">DEUTSCH TURBO</span>
       </div>
       <button
         type="button"
         onClick={onSkip}
-        className="text-sm font-semibold text-primary min-h-11 px-2 hover:opacity-80 transition-opacity"
+        className="text-sm font-semibold text-[#00F2FE] min-h-11 px-2 hover:opacity-80 transition-opacity"
       >
         Pular
       </button>

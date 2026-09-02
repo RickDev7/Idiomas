@@ -1,5 +1,6 @@
 import { useNavigate } from 'react-router-dom';
-import type { CSSProperties, ReactNode } from 'react';
+import type { ReactNode } from 'react';
+import { glassStyle } from '@/components/ui/GlassCard';
 import { IconBell, IconClock, IconHouse, IconBriefcase, IconDrop } from '@/components/ui/Icons';
 import { useChunkTracker } from '@/hooks/useChunkTracker';
 import type { ChunkVisualIcon } from '@/services/learning/ChunkTrackerStore';
@@ -12,13 +13,6 @@ const LEVELS = [
   { id: 'B1', label: 'B1' },
   { id: 'B2', label: 'B2' },
 ] as const;
-
-export const GLASS: CSSProperties = {
-  background: 'rgba(15, 23, 42, 0.65)',
-  border: '1px solid rgba(255, 255, 255, 0.08)',
-  backdropFilter: 'blur(16px)',
-  WebkitBackdropFilter: 'blur(16px)',
-};
 
 export function HomeGreetingHeader({
   greeting,
@@ -49,7 +43,7 @@ export function HomeGreetingHeader({
             <h1 className="text-[21px] font-bold leading-tight text-white truncate font-[family-name:var(--font-display)]">
               {title} <span aria-hidden>👋</span>
             </h1>
-            <p className="text-[13px] text-[#94A3B8] mt-0.5 leading-snug">Vamos dominar o alemão juntos!</p>
+            <p className="text-[13px] text-[#CBD5E1] mt-0.5 leading-snug">Heute ist ein guter Tag zum Lernen.</p>
           </div>
         </div>
         <div className="flex items-center gap-2 shrink-0 pt-0.5">
@@ -59,15 +53,15 @@ export function HomeGreetingHeader({
             aria-label={`${streak} dias de sequência`}
             className="inline-flex items-center gap-1 pl-2 pr-2.5 py-1.5 rounded-full active:scale-95 transition-transform"
             style={{
-              background: 'linear-gradient(135deg, rgba(255,81,47,0.28), rgba(221,36,118,0.22))',
-              border: '1px solid rgba(255,81,47,0.45)',
-              boxShadow: '0 0 16px rgba(255,81,47,0.25)',
+              background: 'linear-gradient(135deg, rgba(249,115,22,0.28), rgba(236,72,153,0.22))',
+              border: '1px solid rgba(249,115,22,0.45)',
+              boxShadow: '0 0 16px rgba(249,115,22,0.25)',
               backdropFilter: 'blur(16px)',
             }}
           >
             <span className="text-sm leading-none" aria-hidden>🔥</span>
             <span className="text-[11px] font-bold text-white whitespace-nowrap">
-              <span style={{ color: '#FF512F' }}>{streak}</span> Sequência
+              <span style={{ color: '#F97316' }}>{streak}</span> Sequenz
             </span>
           </button>
           <button
@@ -75,7 +69,7 @@ export function HomeGreetingHeader({
             onClick={onBell}
             aria-label="Notificações"
             className="w-10 h-10 rounded-full flex items-center justify-center text-[#94A3B8]"
-            style={GLASS}
+            style={glassStyle}
           >
             <IconBell size={18} />
           </button>
@@ -89,7 +83,7 @@ export function LevelTrack({ current = 'L0' }: { current?: string }) {
   const idx = Math.max(0, LEVELS.findIndex((l) => l.id === current));
   return (
     <section className="px-5 pt-5 animate-fade-in" aria-label="Nível atual">
-      <p className="text-[11px] uppercase tracking-[0.16em] font-semibold text-[#64748b] mb-3">Nível atual</p>
+      <p className="dt-label mb-3">Nível atual</p>
       <div className="flex items-start">
         {LEVELS.map((lvl, i) => {
           const active = i === idx;
@@ -103,11 +97,11 @@ export function LevelTrack({ current = 'L0' }: { current?: string }) {
                       ? {
                           background: 'linear-gradient(145deg, #A855F7 0%, #8B5CF6 55%, #7c3aed 100%)',
                           color: '#fff',
-                          border: '2px solid rgba(196,181,253,0.7)',
-                          boxShadow: '0 0 0 4px rgba(139,92,246,0.2), 0 0 28px rgba(139,92,246,0.7)',
+                          border: '2px solid rgba(196,181,253,0.55)',
+                          boxShadow: '0 0 0 3px rgba(139,92,246,0.16), 0 0 20px rgba(139,92,246,0.45)',
                         }
                       : {
-                          ...GLASS,
+                          ...glassStyle,
                           color: '#64748b',
                         }
                   }
@@ -148,7 +142,7 @@ export interface TrainingHeroProps {
 export function TrainingHero({
   totalMinutes,
   remainingLabel,
-  progressPct = 42,
+  progressPct = 0,
   goalReached = false,
   onStart,
   onBadgeClick,
@@ -166,10 +160,13 @@ export function TrainingHero({
         <div className="relative flex items-center gap-3">
           <div className="min-w-0 flex-1">
             <p className="text-[11px] uppercase tracking-[0.18em] font-bold text-white/80 mb-1.5">
-              Treino do dia
+              Training des Tages
             </p>
             <p className="text-[24px] text-white font-bold leading-tight font-[family-name:var(--font-display)]">
               {title}
+            </p>
+            <p className="text-[12px] text-white/85 mt-1.5 leading-snug">
+              Session personalisiert für dich
             </p>
             <button
               type="button"
@@ -200,7 +197,7 @@ export function TrainingHero({
               className="relative w-[58px] h-[58px] rounded-full flex items-center justify-center bg-white group-hover:scale-105 transition-transform"
               style={{ boxShadow: '0 0 32px rgba(255,255,255,0.65), 0 0 48px rgba(255,94,98,0.45)' }}
             >
-              <span className="w-0 h-0 border-y-[11px] border-y-transparent border-l-[18px] border-l-[#DD2476] ml-1" />
+              <span className="w-0 h-0 border-y-[11px] border-y-transparent border-l-[18px] border-l-[#EC4899] ml-1" />
             </span>
           </button>
         </div>
@@ -281,12 +278,12 @@ export function ChunksOfDay() {
                   isPlaceholder ? 'active:scale-[0.97] cursor-pointer' : ''
                 }`}
                 style={{
-                  ...GLASS,
+                  ...glassStyle,
                   border: validated
                     ? '1px solid rgba(16,185,129,0.45)'
                     : isPlaceholder
                       ? '1px dashed rgba(148,163,184,0.35)'
-                      : GLASS.border,
+                      : glassStyle.border,
                   boxShadow: validated ? '0 0 14px rgba(16,185,129,0.25)' : undefined,
                 }}
               >
@@ -340,7 +337,7 @@ export interface ProgressMetric {
 export function ProgressSection({ metrics }: { metrics: ProgressMetric[] }) {
   return (
     <section className="px-5 pt-7 pb-2 animate-fade-in">
-      <p className="text-[11px] uppercase tracking-[0.16em] font-semibold text-[#64748b] mb-3">Seu progresso</p>
+      <p className="text-[11px] uppercase tracking-[0.16em] font-semibold text-[#64748b] mb-3">Dein Fortschritt</p>
       <div className="grid grid-cols-2 gap-2.5">
         {metrics.map((m) => (
           <button
@@ -349,7 +346,7 @@ export function ProgressSection({ metrics }: { metrics: ProgressMetric[] }) {
             onClick={m.onClick}
             aria-label={m.ariaLabel || m.name}
             className="w-full text-left p-3.5 rounded-[20px] active:scale-[0.98] transition-transform"
-            style={GLASS}
+            style={glassStyle}
           >
             <div
               className="inline-flex items-center justify-center w-10 h-10 rounded-[12px] mb-2.5"
@@ -370,11 +367,59 @@ export function ProgressSection({ metrics }: { metrics: ProgressMetric[] }) {
   );
 }
 
+export function NextLearnSection({
+  priorityStructures,
+  chunksCount,
+  reviewCount,
+  difficultyLabel,
+  onReview,
+  onChunks,
+  onLearn,
+}: {
+  priorityStructures: number | string;
+  chunksCount: number | string;
+  reviewCount: number | string;
+  difficultyLabel: string;
+  onReview?: () => void;
+  onChunks?: () => void;
+  onLearn?: () => void;
+}) {
+  const items = [
+    { label: 'Estruturas prioritárias', value: priorityStructures, color: '#8B5CF6', onClick: onLearn },
+    { label: 'Chunks para praticar', value: chunksCount, color: '#00F2FE', onClick: onChunks },
+    { label: 'Itens para revisar', value: reviewCount, color: '#F97316', onClick: onReview },
+    { label: 'Dificuldade atual', value: difficultyLabel, color: '#EC4899', onClick: onLearn },
+  ];
+  return (
+    <section className="px-5 pt-7 animate-fade-in">
+      <p className="text-[11px] uppercase tracking-[0.16em] font-semibold text-[#64748b] mb-3">
+        Was sollst du jetzt lernen?
+      </p>
+      <div className="grid grid-cols-2 gap-2.5">
+        {items.map((item) => (
+          <button
+            key={item.label}
+            type="button"
+            onClick={item.onClick}
+            className="text-left p-3.5 rounded-[20px] active:scale-[0.98] transition-transform"
+            style={glassStyle}
+          >
+            <p className="text-[20px] font-bold text-white leading-none" style={{ textShadow: `0 0 18px ${item.color}55` }}>
+              {item.value}
+            </p>
+            <p className="text-[11px] text-[#CBD5E1] mt-2 leading-snug">{item.label}</p>
+          </button>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 export function HomeHeader({ onSettings }: { onSettings: () => void }) {
   return (
     <header className="flex items-center justify-between px-5 pt-3 safe-top">
       <span className="text-[11px] tracking-[0.2em] font-semibold text-[#94A3B8]">DEUTSCH TURBO</span>
-      <button onClick={onSettings} aria-label="Configurações" className="min-h-11 min-w-11 rounded-full dt-glass flex items-center justify-center">⚙️</button>
+      <button onClick={onSettings} aria-label="Configurações" className="min-h-11 min-w-11 rounded-full dt-glassStyle flex items-center justify-center">⚙️</button>
     </header>
   );
 }
@@ -395,7 +440,7 @@ export function TrainingAreas() {
 export function FocusCard({ focusText }: { focusText: string }) {
   return (
     <section className="px-5 pt-7 pb-2">
-      <div className="rounded-[28px] p-5" style={GLASS}>
+      <div className="rounded-[28px] p-5" style={glassStyle}>
         <p className="text-[11px] text-[#a78bfa] font-semibold tracking-[0.14em] mb-1">Seu foco</p>
         <p className="text-[15px] text-white font-medium">{focusText}</p>
       </div>

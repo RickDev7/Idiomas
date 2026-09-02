@@ -8,65 +8,69 @@
 :root {
   color-scheme: dark;
 
-  /* Surfaces — Deep Obsidian (Design System Revisado) */
-  --bg: #070A12;
-  --bg-elevated: #0a0e18;
-  --surface: #0f172a;
-  --surface-glass: rgba(15, 23, 42, 0.65);
-  --surface-light: #162238;
-  --surface-elevated: #1b2940;
-  --border: rgba(255, 255, 255, 0.08);
-  --border-soft: rgba(255, 255, 255, 0.05);
+  /* Surfaces — AI Training Cockpit (ref: deutsch-turbo-reference.png) */
+  --bg: #050816;
+  --bg-elevated: #080B18;
+  --surface: #0B1022;
+  --surface-glass: rgba(15, 23, 42, 0.72);
+  --surface-light: #12182c;
+  --surface-elevated: #161d35;
+  --border: rgba(255, 255, 255, 0.10);
+  --border-soft: rgba(255, 255, 255, 0.06);
+  --border-violet: rgba(139, 92, 246, 0.45);
+  --border-cyan: rgba(0, 242, 254, 0.40);
 
   /* Text */
   --text: #ffffff;
-  --text-muted: #94a3b8;
-  --text-faint: #64748b;
+  --text-muted: #CBD5E1;
+  --text-faint: #64748B;
 
   /* Brand accents */
   --primary: #00F2FE;
-  --primary-dark: #22d3ee;
+  --primary-dark: #22D3EE;
   --primary-soft: rgba(0, 242, 254, 0.14);
   --purple: #8B5CF6;
   --purple-soft: rgba(139, 92, 246, 0.18);
-  --accent: #FF512F;
-  --accent-hot: #DD2476;
-  --success: #10B981;
-  --warning: #fbbf24;
-  --error: #f87171;
-  --pink: #DD2476;
-  --label: #DD2476;
+  --accent: #F97316;
+  --accent-hot: #EC4899;
+  --success: #22C55E;
+  --warning: #F59E0B;
+  --error: #EF4444;
+  --pink: #EC4899;
+  --label: #EC4899;
   --cyan: #00F2FE;
-  --hero-from: #FF512F;
-  --hero-mid: #DD2476;
-  --hero-to: #FF5E62;
+  --coral: #F97316;
+  --orange: #FF8A00;
+  --hero-from: #F97316;
+  --hero-mid: #EC4899;
+  --hero-to: #A855F7;
 
   /* Voice orb — cyan / violet / magenta */
   --orb-1: #00F2FE;
   --orb-2: #8B5CF6;
-  --orb-3: #DD2476;
+  --orb-3: #EC4899;
 
   /* Shadows + glow */
   --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.35);
   --shadow-md: 0 8px 28px rgba(0, 0, 0, 0.4);
   --shadow-lg: 0 18px 50px rgba(0, 0, 0, 0.5);
-  --shadow-glow: 0 0 48px rgba(0, 242, 254, 0.28);
-  --shadow-glow-purple: 0 0 48px rgba(139, 92, 246, 0.35);
-  --shadow-glow-orange: 0 12px 40px rgba(255, 81, 47, 0.4);
-  --shadow-glow-pink: 0 12px 40px rgba(221, 36, 118, 0.35);
+  --shadow-glow: 0 0 20px rgba(0, 242, 254, 0.35), 0 0 50px rgba(0, 242, 254, 0.15);
+  --shadow-glow-purple: 0 0 20px rgba(139, 92, 246, 0.35), 0 0 50px rgba(139, 92, 246, 0.15);
+  --shadow-glow-orange: 0 12px 40px rgba(249, 115, 22, 0.35);
+  --shadow-glow-pink: 0 0 20px rgba(236, 72, 153, 0.30), 0 0 45px rgba(236, 72, 153, 0.12);
 
   --radius-card: 24px;
   --radius-hero: 28px;
 
   /* Theme-aware composites */
-  --body-glow-1: rgba(0, 242, 254, 0.06);
-  --body-glow-2: rgba(221, 36, 118, 0.08);
-  --glass-from: rgba(15, 23, 42, 0.7);
-  --glass-to: rgba(15, 23, 42, 0.55);
-  --glass-inset: rgba(255, 255, 255, 0.05);
-  --nav-from: rgba(15, 23, 42, 0.72);
-  --nav-to: rgba(7, 10, 18, 0.96);
-  --nav-border: rgba(255, 255, 255, 0.08);
+  --body-glow-1: rgba(0, 242, 254, 0.07);
+  --body-glow-2: rgba(139, 92, 246, 0.09);
+  --glass-from: rgba(15, 23, 42, 0.72);
+  --glass-to: rgba(15, 23, 42, 0.82);
+  --glass-inset: rgba(255, 255, 255, 0.06);
+  --nav-from: rgba(15, 23, 42, 0.78);
+  --nav-to: rgba(5, 8, 22, 0.96);
+  --nav-border: rgba(139, 92, 246, 0.28);
   --teacher-from: rgba(22, 34, 56, 0.98);
   --teacher-to: rgba(15, 26, 46, 0.95);
   --progress-hero-from: #162238;
@@ -246,44 +250,84 @@ body {
 
 /* Glass card utility — Design System Revisado */
 .dt-glass {
-  background: rgba(15, 23, 42, 0.65);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(15, 23, 42, 0.72);
+  border: 1px solid rgba(255, 255, 255, 0.10);
   box-shadow: var(--shadow-md), inset 0 1px 0 var(--glass-inset);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
 }
 
 .dt-glass-soft {
-  background: rgba(15, 23, 42, 0.5);
+  background: rgba(15, 23, 42, 0.55);
   border: 1px solid rgba(255, 255, 255, 0.08);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+
+.dt-glass-violet {
+  background: rgba(15, 23, 42, 0.72);
+  border: 1px solid rgba(139, 92, 246, 0.45);
+  box-shadow: var(--shadow-glow-purple), inset 0 1px 0 var(--glass-inset);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+}
+
+.dt-glass-cyan {
+  background: rgba(15, 23, 42, 0.72);
+  border: 1px solid rgba(0, 242, 254, 0.40);
+  box-shadow: var(--shadow-glow), inset 0 1px 0 var(--glass-inset);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
 }
 
 .dt-hero-train {
-  background: linear-gradient(135deg, #FF512F 0%, #DD2476 50%, #FF5E62 100%);
-  box-shadow: 0 12px 40px rgba(221, 36, 118, 0.4), 0 8px 28px rgba(255, 81, 47, 0.3);
+  background: linear-gradient(135deg, #F97316 0%, #EC4899 55%, #A855F7 100%);
+  box-shadow: 0 12px 40px rgba(236, 72, 153, 0.38), 0 8px 28px rgba(249, 115, 22, 0.28);
+}
+
+.dt-page {
+  background: #050816;
+  min-height: 100%;
+}
+
+.dt-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #64748B;
+}
+
+.dt-cta-primary {
+  background: linear-gradient(135deg, #00F2FE 0%, #8B5CF6 100%);
+  box-shadow: 0 0 24px rgba(0, 242, 254, 0.28), 0 8px 24px rgba(139, 92, 246, 0.22);
+}
+
+.dt-title {
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: #ffffff;
+}
+
+.dt-body {
+  font-size: 14px;
+  line-height: 1.45;
+  color: #CBD5E1;
+}
+
+.dt-muted {
+  font-size: 12px;
+  line-height: 1.4;
+  color: #64748B;
 }
 
 .dt-hero-progress-done {
-  background: linear-gradient(90deg, #00F2FE 0%, #10B981 100%);
+  background: linear-gradient(90deg, #00F2FE 0%, #22C55E 100%);
   box-shadow:
-    0 0 12px rgba(0, 242, 254, 0.75),
-    0 0 24px rgba(16, 185, 129, 0.45);
-  animation: dt-hero-glow 2s ease-in-out infinite alternate;
-}
-
-@keyframes dt-hero-glow {
-  from {
-    box-shadow:
-      0 0 10px rgba(0, 242, 254, 0.55),
-      0 0 20px rgba(16, 185, 129, 0.35);
-  }
-  to {
-    box-shadow:
-      0 0 16px rgba(0, 242, 254, 0.9),
-      0 0 32px rgba(16, 185, 129, 0.55);
-  }
+    0 0 10px rgba(0, 242, 254, 0.45),
+    0 0 18px rgba(34, 197, 94, 0.28);
 }
 
 .dt-pill-cyan {

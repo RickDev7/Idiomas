@@ -221,33 +221,33 @@ export function GeminiConversation({ profile, onFinish }: { profile: UserProfile
     ? (live.state === 'connecting' ? 'Verbinden…'
       : live.state === 'reconnecting' ? 'Wieder verbinden…'
         : live.state === 'error' ? 'Keine Verbindung'
-          : live.micActive ? 'Ich höre zu'
-            : live.assistantSpeaking || live.teacherTurnStatus === 'RECEIVING' ? 'Ich spreche'
+          : live.micActive ? 'Du sprichst…'
+            : live.assistantSpeaking || live.teacherTurnStatus === 'RECEIVING' ? 'Professor spricht…'
               : responseStatus === 'processing' ? 'Prüfen…'
-                : 'Bereit')
+                : 'Zuhören…')
     : (live.state === 'connecting' ? 'Conectando…'
       : live.state === 'reconnecting' ? 'Reconectando…'
         : live.state === 'error' ? 'Sem conexão'
-          : live.micActive ? 'Ouvindo'
-            : live.assistantSpeaking || live.teacherTurnStatus === 'RECEIVING' ? 'Falando'
-              : responseStatus === 'processing' ? 'Verificando'
-                : 'Pronto');
+          : live.micActive ? 'Du sprichst…'
+            : live.assistantSpeaking || live.teacherTurnStatus === 'RECEIVING' ? 'Professor spricht…'
+              : responseStatus === 'processing' ? 'Verificando…'
+                : 'Zuhören…');
 
   const micStatus = immersion
     ? (live.micState === 'REQUESTING_PERMISSION' ? 'Mikrofon erlauben…'
       : live.micState === 'ERROR' ? 'Mikrofon nicht verfügbar'
-        : live.micActive || live.micState === 'LISTENING' ? 'Ich höre zu'
-          : live.assistantSpeaking ? 'Ich höre zu'
+        : live.micActive || live.micState === 'LISTENING' ? 'Du sprichst…'
+          : live.assistantSpeaking ? 'Professor spricht…'
             : live.state === 'connecting' || live.state === 'reconnecting' ? 'Verbinden…'
               : responseStatus === 'processing' ? 'Verstanden. Ich prüfe…'
-                : started ? 'Tippen zum Sprechen' : 'Tippen zum Starten')
+                : started ? 'Zuhören…' : 'Tippen zum Starten')
     : (live.micState === 'REQUESTING_PERMISSION' ? 'Pedindo microfone…'
       : live.micState === 'ERROR' ? 'Não conseguimos acessar o microfone'
-        : live.micActive || live.micState === 'LISTENING' ? 'Estou ouvindo você'
-          : live.assistantSpeaking ? 'Estou ouvindo você'
+        : live.micActive || live.micState === 'LISTENING' ? 'Du sprichst…'
+          : live.assistantSpeaking ? 'Professor spricht…'
             : live.state === 'connecting' || live.state === 'reconnecting' ? 'Conectando…'
               : responseStatus === 'processing' ? 'Entendi. Estou verificando...'
-                : started ? 'Toque para falar' : 'Toque para começar');
+                : started ? 'Zuhören…' : 'Toque para começar');
 
   const micHint =
     live.micState === 'ERROR' ? 'Verifique a permissão do microfone.'
@@ -383,7 +383,7 @@ export function GeminiConversation({ profile, onFinish }: { profile: UserProfile
   const showUserCard = !!live.userText && responseStatus !== 'none';
 
   return (
-    <div className="flex flex-col h-full max-w-md mx-auto overflow-hidden" style={{ background: '#070A12' }}>
+    <div className="flex flex-col h-full max-w-md mx-auto overflow-hidden dt-page">
       <header
         className="flex items-center justify-between gap-2 px-3 pb-2 shrink-0"
         style={{ paddingTop: 'calc(0.75rem + env(safe-area-inset-top, 0px))' }}

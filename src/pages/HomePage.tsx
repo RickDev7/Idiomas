@@ -11,6 +11,7 @@ import {
   TrainingHero,
   ChunksOfDay,
   ProgressSection,
+  NextLearnSection,
 } from '@/components/home/HomeSections';
 import { DailyGoalSheet } from '@/components/home/DailyGoalSheet';
 import { BottomNav } from '@/components/layout/BottomNav';
@@ -23,13 +24,17 @@ import {
 import { getIncompleteSession } from '@/services/teacher/sessionContinuity';
 import { t } from '@/services/ui/LocaleService';
 import { SoundService } from '@/services/ui/SoundService';
+import { getReviewQueue } from '@/services/learning/ReviewEngine';
+import { useChunkTracker } from '@/hooks/useChunkTracker';
 
 export function HomePage() {
   const { profile, loading } = useProfile();
   const navigate = useNavigate();
   const [course, setCourse] = useState<CourseProgress | null>(null);
   const [incomplete, setIncomplete] = useState(() => getIncompleteSession());
+  const [reviewCount, setReviewCount] = useState<number | null>(null);
   const metrics = useUserMetrics();
+  const { activeChunk, displaySlots } = useChunkTracker();
   const { refreshFromLearning, setDailyGoal, dismissMorningPrompt } = metrics;
   const [goalSheetOpen, setGoalSheetOpen] = useState(false);
   const [goalSheetMode, setGoalSheetMode] = useState<'edit' | 'morning'>('edit');
@@ -51,6 +56,20 @@ export function HomePage() {
     window.addEventListener('focus', refresh);
     return () => window.removeEventListener('focus', refresh);
   }, [profile?.diagnosticLevel, profile?.selfReportedLevel, profile?.currentDay, refreshFromLearning]);
+
+  useEffect(() => {
+    if (!profile) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const queue = await getReviewQueue(8);
+        if (!cancelled) setReviewCount(queue.length);
+      } catch {
+        if (!cancelled) setReviewCount(null);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [profile]);
 
   useEffect(() => {
     if (metrics.showMorningPrompt) {
@@ -91,34 +110,35 @@ export function HomePage() {
   };
 
   const goProgress = () => navigate('/progresso');
+  const practicedSlots = displaySlots.filter((s) => s.kind === 'variation').length;
 
   const progressMetrics = [
     {
       icon: <IconCube size={18} />,
       value: metrics.learnedChunksCount,
-      name: 'Chunks aprendidos',
+      name: 'Chunks',
       color: '#8B5CF6',
-      onClick: goProgress,
+      onClick: () => navigate('/chunks'),
     },
     {
       icon: <IconPuzzle size={18} />,
       value: metrics.totalVariationsCreated,
-      name: 'Variações criadas',
-      color: '#10B981',
+      name: 'Estruturas',
+      color: '#22C55E',
       onClick: goProgress,
     },
     {
       icon: <IconWave size={18} />,
       value: `${metrics.autonomousSpeechPct}%`,
-      name: 'Fala autônoma',
-      color: '#FF512F',
+      name: 'Autonomia',
+      color: '#F97316',
       onClick: goProgress,
     },
     {
       icon: <IconClock size={18} />,
       value: metrics.minutesStudiedLabel,
-      name: 'Estudados hoje',
-      color: '#38bdf8',
+      name: 'Situações / tempo',
+      color: '#00F2FE',
       onClick: goProgress,
     },
   ];
@@ -126,11 +146,11 @@ export function HomePage() {
   const levelId = ['L0', 'A1', 'A2', 'B1', 'B2'].includes(currentLevel) ? currentLevel : 'L0';
 
   return (
-    <div className="flex flex-col h-full max-w-md mx-auto" style={{ background: '#070A12' }}>
+    <div className="flex flex-col h-full max-w-md mx-auto dt-page">
       <HomeGreetingHeader
         greeting={greeting}
         name={profile.name}
-        streak={profile.streak || 7}
+        streak={profile.streak || 0}
         onStreak={goProgress}
         onBell={() => navigate('/configuracoes')}
       />
@@ -143,9 +163,18 @@ export function HomePage() {
           goalReached={metrics.goalReached}
           onBadgeClick={openGoalEditor}
           onStart={startTraining}
-          title={incomplete ? t('home.continue') : 'Continuar treino'}
+          title={incomplete ? 'Weiterlernen' : 'Weiterlernen'}
           ariaLabel={incomplete ? t('home.continue') : 'Continuar treino'}
           continueMode
+        />
+        <NextLearnSection
+          priorityStructures={activeChunk?.german ? 1 : '—'}
+          chunksCount={practicedSlots > 0 ? practicedSlots : metrics.learnedChunksCount || '—'}
+          reviewCount={reviewCount == null ? '—' : reviewCount}
+          difficultyLabel={levelId}
+          onReview={() => navigate('/revisar')}
+          onChunks={() => navigate('/chunks')}
+          onLearn={() => navigate('/aprender')}
         />
         <ChunksOfDay />
         <ProgressSection metrics={progressMetrics} />

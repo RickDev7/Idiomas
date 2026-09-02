@@ -41,8 +41,8 @@ export function EmptyState({
           draggable={false}
         />
       </div>
-      {title && <p className="text-h1 font-semibold text-text text-center">{title}</p>}
-      {subtitle && <p className="text-secondary text-text-muted text-center -mt-2">{subtitle}</p>}
+      {title && <p className="text-[18px] font-semibold text-white text-center font-[family-name:var(--font-display)]">{title}</p>}
+      {subtitle && <p className="dt-body text-center -mt-2">{subtitle}</p>}
       {footer && <div className="w-full mt-2">{footer}</div>}
     </div>
   );

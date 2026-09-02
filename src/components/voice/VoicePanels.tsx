@@ -517,17 +517,17 @@ export interface TranslationPanelProps {
 export function TranslationPanel({ german, portuguese, visible, loading, onToggle, mode }: TranslationPanelProps) {
   return (
     <div className="w-full">
-      <p className="text-display font-semibold animate-fade-in w-full" style={{ whiteSpace: 'normal', overflowWrap: 'anywhere', lineHeight: 1.25 }}>
+      <p className="text-[26px] font-semibold animate-fade-in w-full text-white font-[family-name:var(--font-display)]" style={{ whiteSpace: 'normal', overflowWrap: 'anywhere', lineHeight: 1.25 }}>
         {german}
       </p>
       {visible && portuguese && (
-        <p className="mt-2 text-h2 text-text-muted font-medium">🇧🇷 {portuguese}</p>
+        <p className="mt-2 text-[16px] text-[#CBD5E1] font-medium">🇧🇷 {portuguese}</p>
       )}
       {visible && loading && !portuguese && (
-        <p className="mt-2 text-h2 text-text-faint">Traduzindo…</p>
+        <p className="mt-2 text-[15px] text-[#64748B]">Traduzindo…</p>
       )}
       <div className="mt-3">
-        <button onClick={onToggle} className="inline-flex items-center gap-1.5 text-caption text-text-faint min-h-11 px-2">
+        <button type="button" onClick={onToggle} className="inline-flex items-center gap-1.5 text-[12px] text-[#64748B] min-h-11 px-2 hover:text-[#CBD5E1] transition-colors">
           {mode === 'immersion' ? '🇧🇷' : '👁'} {visible ? 'Ocultar' : 'Mostrar'} significado
         </button>
       </div>

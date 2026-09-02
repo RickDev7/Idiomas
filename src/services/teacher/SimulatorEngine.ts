@@ -246,13 +246,19 @@ export function buildSimulatorContext(input: {
   durationMinutes: SimulatorDurationMinutes;
   trainingStyle: SimulatorTrainingStyle;
   surprise?: boolean;
+  /** Integração UI (mapa de Situações) — só aplica se o cenário for compatível. */
+  preferredScenarioId?: string;
 }): SimulatorContext | null {
   const compatible = listCompatibleScenarios(input.learning);
   if (compatible.length === 0) return null;
 
   const weakPhraseIds = buildWeakPhraseIds(input.learning);
   const surprise = !!input.surprise;
-  const scenario = pickScenario(input.learning, input.mode, surprise, weakPhraseIds);
+  const preferred = input.preferredScenarioId
+    ? compatible.find((s) => s.id === input.preferredScenarioId)
+    : undefined;
+  const scenario =
+    preferred || pickScenario(input.learning, input.mode, surprise, weakPhraseIds);
   const { structures, baseIds } = collectStructures(
     input.learning,
     input.phrases,
