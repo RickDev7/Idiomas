@@ -121,6 +121,4 @@ export function immersionHint(pct: number): string {
 }
 
 export { haptic, HapticService } from '@/services/ui/HapticService';
-export { SoundService } from '@/services/ui/SoundService';
-export { NotificationService } from '@/services/ui/NotificationService';
 
