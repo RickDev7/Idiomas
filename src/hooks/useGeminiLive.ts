@@ -584,6 +584,12 @@ export function useGeminiLive(profile: UserProfile | null): GeminiLiveUI {
   const wireHandlers = useCallback((): GeminiVoiceHandlers => ({
     onStateChange: (s) => setState(s),
     onMicState: (s) => setMicState(s),
+    onSessionGenerationChange: (generation) => {
+      sessionGenRef.current = generation;
+      if (DEV) {
+        console.log('[LIVE_TRACE]', 'reconnect:new-generation', { generation });
+      }
+    },
     onTeacherAudio: () => {
       const turnId = turnIdsRef.current.assistant || `assistant-audio-${Date.now()}`;
       if (teacherAudioLoggedForTurnRef.current === turnId) return;
@@ -605,7 +611,11 @@ export function useGeminiLive(profile: UserProfile | null): GeminiLiveUI {
       const list = role === 'assistant' ? transcriptRef.current.assistant : transcriptRef.current.user;
       if (ids[role] !== turn.id) {
         if (role === 'assistant') {
-          stopGeminiPlayback();
+          // Só para áudio do TURNO ANTERIOR. O primeiro transcript do turno atual
+          // não pode cortar PCM que já está tocando (kickoff / mesma fala).
+          if (ids.assistant) {
+            stopGeminiPlayback();
+          }
           setTargetPhrase(null);
         }
         ids[role] = turn.id;
@@ -619,6 +629,12 @@ export function useGeminiLive(profile: UserProfile | null): GeminiLiveUI {
         setAssistantText(turn.text);
         setTeacherTurnStatus(turn.status);
         setAssistantSpeaking(turn.status === 'RECEIVING');
+        if (DEV) {
+          console.log('[LIVE_TRACE]', 'transcript:partial', {
+            turnId: turn.id,
+            len: turn.text.length,
+          });
+        }
         if (turn.text) {
           syncUiFromTeacherUtterance(turn.text, turn.id, false);
         }
@@ -672,6 +688,12 @@ export function useGeminiLive(profile: UserProfile | null): GeminiLiveUI {
         });
       }
       if (r === 'assistant') {
+        if (DEV) {
+          console.log('[LIVE_TRACE]', 'transcript:turn_complete', {
+            turnId: done.id,
+            len: done.text.length,
+          });
+        }
         naturalTeacherResponseExpectedRef.current = false;
         teacherAudioLoggedForTurnRef.current = '';
         releaseDeferredMicRef.current();
@@ -686,11 +708,11 @@ export function useGeminiLive(profile: UserProfile | null): GeminiLiveUI {
           syncUiFromTeacherUtterance(done.text, turnId, true);
         }
         if (done.text.trim() && orchRef.current) {
-          const text = done.text;
+          const textDone = done.text;
           orchQueueRef.current = orchQueueRef.current
             .then(async () => {
               if (!orchRef.current) return;
-              const d = await orchRef.current.handle({ type: 'TEACHER_UTTERANCE', text });
+              const d = await orchRef.current.handle({ type: 'TEACHER_UTTERANCE', text: textDone });
               await applyDecision(d);
             })
             .catch(() => { /* não quebrar a fila */ });
@@ -1006,17 +1028,8 @@ export function useGeminiLive(profile: UserProfile | null): GeminiLiveUI {
     serviceRef.current?.interrupt();
   }, []);
 
-  useEffect(() => {
-    if (teacherTurnStatus !== 'RECEIVING' || !assistantText) return;
-    const t = setTimeout(() => {
-      const done = accRef.current.complete('assistant');
-      setAssistantText(done.text);
-      setTeacherTurnStatus('COMPLETE');
-      setAssistantSpeaking(false);
-      releaseDeferredMicRef.current();
-    }, 1600);
-    return () => clearTimeout(t);
-  }, [assistantText, teacherTurnStatus]);
+  // Transcript RECEIVING NÃO é finalizado por timeout.
+  // Só turn_complete / interrupted (via onTurnComplete) marca COMPLETE e libera o mic.
 
   const persistEnd = useCallback((status: 'COMPLETED' | 'PAUSED' | 'ABANDONED' = 'COMPLETED') => {
     if (endedRef.current) return;

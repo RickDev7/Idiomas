@@ -101,14 +101,20 @@ function statusLinePt(opts: {
   if (opts.liveState === 'connecting') return 'Conectando…';
   if (opts.liveState === 'reconnecting') return 'Reconectando…';
   if (opts.liveState === 'error') return 'Sem conexão';
+  // Professor falando tem prioridade sobre "Sua vez" / aguardando.
   if (opts.assistantSpeaking || opts.teacherTurnStatus === 'RECEIVING') return 'Professor falando…';
   if (opts.awaitingProfessor) return 'Aguardando o professor…';
   // micActive/LISTENING ≠ fala real — só transcript RECEIVING do aluno
   if (opts.userSpeaking) return 'Você está falando…';
   if (opts.responseStatus === 'processing') return 'Pensando…';
+  // "Sua vez" somente após professor ter terminado (COMPLETE) ou sessão pronta sem fala.
+  if (opts.started && opts.teacherTurnStatus === 'COMPLETE') return 'Sua vez';
   if (opts.started) return 'Sua vez';
   return 'Toque para falar';
 }
+
+/** Exposto para testes de UI de turno. */
+export { statusLinePt as liveStatusLinePt };
 
 export function GeminiConversation({ profile, onFinish }: { profile: UserProfile; onFinish: () => void }) {
   const navigate = useNavigate();

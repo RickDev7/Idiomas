@@ -54,6 +54,11 @@ interface LiveHandlers {
   onTurnComplete?: (role?: 'user' | 'assistant', text?: string) => void;
   onInterrupted?: (text?: string) => void;
   onError?: (message: string) => void;
+  /**
+   * Antes de abrir WS novo no reconnect: invalidar generation, limpar fila de áudio.
+   * Deve rodar ANTES de ensureToken/openSocket.
+   */
+  onBeforeReconnect?: () => void;
 }
 
 const TOKEN_TTL_MS = 4 * 60 * 1000;
@@ -281,6 +286,30 @@ export class GeminiLiveService {
       const delay = Math.min(8000, 1000 * 2 ** this.reconnectAttempts);
       await new Promise((r) => setTimeout(r, delay));
       if (this.closedByUser) return;
+
+      liveDebug('reconnect:start', { attempt: this.reconnectAttempts });
+      // Invalidar generation + limpar fila de áudio ANTES do novo WS/token.
+      // Impede áudio da sessão A de misturar com kickoff/áudio da sessão B.
+      try {
+        this.handlers.onBeforeReconnect?.();
+      } catch {
+        /* ignore */
+      }
+      liveDebug('reconnect:invalidate');
+
+      // Fecha WS antigo explicitamente (openSocket também faz, mas garante ordem).
+      if (this.ws) {
+        try {
+          this.ws.onclose = null;
+          this.ws.onerror = null;
+          this.ws.onmessage = null;
+          this.ws.close();
+        } catch {
+          /* ignore */
+        }
+        this.ws = null;
+      }
+
       // Só pular kickoff se o professor JÁ falou. Caso contrário o reconnect
       // fica sem primeiro turno e a UI trava em "Aguardando o professor".
       const skipKickoff = this.heardTeacherTurn;

@@ -12,7 +12,7 @@ import {
 } from '@/services/voice/AudioPipeline';
 import { stopAllAudio } from '@/services/voice/AudioPlayback';
 import { audioStreamPlayer } from '@/services/voice/AudioStreamPlayer';
-import { isLiveSessionCurrent } from '@/services/voice/LiveSessionRegistry';
+import { invalidateLiveSession, isLiveSessionCurrent } from '@/services/voice/LiveSessionRegistry';
 
 const DEV = typeof import.meta !== 'undefined' && !!(import.meta as { env?: { DEV?: boolean } }).env?.DEV;
 
@@ -62,6 +62,8 @@ export interface GeminiVoiceHandlers {
   onMicState?: (state: MicCaptureState) => void;
   /** Primeiro chunk PCM do professor neste turno (diagnóstico). */
   onTeacherAudio?: () => void;
+  /** Generation após invalidate no reconnect — sincroniza ownership do hook. */
+  onSessionGenerationChange?: (generation: number) => void;
 }
 
 export class GeminiVoiceService implements VoiceServiceInterface {
@@ -81,10 +83,15 @@ export class GeminiVoiceService implements VoiceServiceInterface {
   private bytesSent = 0;
   private visibilityHandler: (() => void) | null = null;
   private backgroundSuspended = false;
-  private readonly sessionGen: number;
+  /** Mutável: reconnect invalida a generation anterior e atribui uma nova. */
+  private sessionGen: number;
 
   setMicDeviceId(id: string | null): void {
     this.preferredDeviceId = id;
+  }
+
+  getSessionGeneration(): number {
+    return this.sessionGen;
   }
 
   constructor(
@@ -101,8 +108,17 @@ export class GeminiVoiceService implements VoiceServiceInterface {
         onStateChange: (s) => {
           this.handlers.onStateChange?.(s);
         },
+        onBeforeReconnect: () => {
+          this.invalidatePlaybackGeneration('reconnect');
+        },
         onAudio: (b64, mime) => {
-          if (!isLiveSessionCurrent(this.sessionGen)) return;
+          if (!isLiveSessionCurrent(this.sessionGen)) {
+            console.log('[LIVE_AUDIO_TRACE]', 'callback:stale-discarded', {
+              sessionGen: this.sessionGen,
+              serviceId: 'geminiVoiceService',
+            });
+            return;
+          }
           const pcm = base64ToArrayBuffer(b64);
           const float = decodePcm16LE(pcm);
           const rate = parsePcmSampleRate(mime, PLAYBACK_PCM_RATE);
@@ -135,6 +151,21 @@ export class GeminiVoiceService implements VoiceServiceInterface {
       backendUrl,
     );
     this.bindVisibilityHandling();
+  }
+
+  /** Invalida generation ativa, limpa fila e publica a nova generation. */
+  private invalidatePlaybackGeneration(reason: string): void {
+    const previous = this.sessionGen;
+    stopAllAudio();
+    const next = invalidateLiveSession();
+    this.sessionGen = next;
+    audioStreamPlayer.setGeneration(next);
+    this.handlers.onSessionGenerationChange?.(next);
+    if (DEV) {
+      console.log('[LIVE_TRACE]', 'reconnect:invalidate', { previous, next, reason });
+      console.log('[LIVE_TRACE]', 'audio:generation-invalidated', { previous, next });
+      console.log('[LIVE_TRACE]', 'reconnect:new-generation', { generation: next });
+    }
   }
 
   getMicState(): MicCaptureState {

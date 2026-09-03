@@ -1,9 +1,14 @@
-const DEV = typeof import.meta !== 'undefined' && !!(import.meta as { env?: { DEV?: boolean } }).env?.DEV;
+import { PLAYBACK_PCM_RATE } from '@/services/voice/AudioPipeline';
 
 type QueueItem = {
   pcm: Float32Array;
   generation: number;
 };
+
+function audioTrace(event: string, extra: Record<string, unknown>): void {
+  // Telemetria segura — sem PCM, transcript ou segredos.
+  console.log('[LIVE_AUDIO_TRACE]', event, extra);
+}
 
 export class AudioStreamPlayer {
   private audioCtx: AudioContext | null = null;
@@ -12,13 +17,35 @@ export class AudioStreamPlayer {
   private currentSource: AudioBufferSourceNode | null = null;
   private activeGeneration = 0;
   private chunkSeq = 0;
+  private sourceCount = 0;
+  /** Incrementado em stopAll/setGeneration — onended antigo não pode continuar a cadeia. */
+  private playbackEpoch = 0;
+  private readonly serviceId = 'audioStreamPlayer';
+
+  getDebugState(): {
+    sourceCount: number;
+    queueLength: number;
+    isPlaying: boolean;
+    activeGeneration: number;
+    playbackEpoch: number;
+  } {
+    return {
+      sourceCount: this.sourceCount,
+      queueLength: this.queue.length,
+      isPlaying: this.isPlaying,
+      activeGeneration: this.activeGeneration,
+      playbackEpoch: this.playbackEpoch,
+    };
+  }
 
   setGeneration(generation: number): void {
     this.activeGeneration = generation;
     this.stopAll();
-    if (DEV) {
-      console.log('[LIVE_PLAYER]', { playerId: 'audioStreamPlayer', generation, created: true });
-    }
+    audioTrace('generation:set', {
+      serviceId: this.serviceId,
+      activeGeneration: this.activeGeneration,
+      sourceCount: this.sourceCount,
+    });
   }
 
   private initContext(): AudioContext {
@@ -31,35 +58,42 @@ export class AudioStreamPlayer {
     return this.audioCtx;
   }
 
-  /** Adiciona um bloco de áudio PCM (24kHz) recebido do Gemini na fila. */
+  /** Adiciona um bloco de áudio PCM (24 kHz) recebido do Gemini na fila. */
   public enqueue(pcmChunk24k: Float32Array, generation: number): void {
     if (pcmChunk24k.length === 0) return;
     if (generation !== this.activeGeneration) {
-      if (DEV) {
-        console.log('[LIVE_AUDIO]', {
-          sessionId: generation,
-          chunkId: 'discarded',
-          playerId: 'audioStreamPlayer',
-          reason: 'stale_generation',
-        });
-      }
+      audioTrace('audio:stale-discarded', {
+        sessionGen: generation,
+        serviceId: this.serviceId,
+        activeGeneration: this.activeGeneration,
+        queueLength: this.queue.length,
+        sourceCount: this.sourceCount,
+      });
       return;
     }
-    const chunkId = ++this.chunkSeq;
-    if (DEV) {
-      console.log('[LIVE_AUDIO]', {
-        sessionId: generation,
-        chunkId,
-        playerId: 'audioStreamPlayer',
-      });
-    }
+    const chunkSequence = ++this.chunkSeq;
+    const bufferDuration = pcmChunk24k.length / PLAYBACK_PCM_RATE;
     this.queue.push({ pcm: pcmChunk24k, generation });
+    audioTrace('enqueue', {
+      sessionGen: generation,
+      serviceId: this.serviceId,
+      chunkSequence,
+      queueLength: this.queue.length,
+      activeGeneration: this.activeGeneration,
+      audioContextState: this.audioCtx?.state ?? 'none',
+      sampleRate: PLAYBACK_PCM_RATE,
+      contextSampleRate: this.audioCtx?.sampleRate ?? null,
+      bufferDuration,
+      sourceCount: this.sourceCount,
+      timestamp: Date.now(),
+    });
     if (!this.isPlaying) {
       this.playNext();
     }
   }
 
   private playNext(): void {
+    const epoch = this.playbackEpoch;
     while (this.queue.length > 0 && this.queue[0].generation !== this.activeGeneration) {
       this.queue.shift();
     }
@@ -67,20 +101,22 @@ export class AudioStreamPlayer {
       this.isPlaying = false;
       return;
     }
+    if (epoch !== this.playbackEpoch) return;
 
     this.isPlaying = true;
     const ctx = this.initContext();
     const { pcm: chunk24k, generation } = this.queue.shift()!;
-    if (generation !== this.activeGeneration) {
+    if (generation !== this.activeGeneration || epoch !== this.playbackEpoch) {
       this.isPlaying = false;
       this.playNext();
       return;
     }
 
-    const sourceRate = 24000;
+    const sourceRate = PLAYBACK_PCM_RATE;
     const targetRate = ctx.sampleRate;
     const ratio = targetRate / sourceRate;
     const targetLength = Math.max(1, Math.round(chunk24k.length * ratio));
+    const bufferDuration = chunk24k.length / sourceRate;
 
     const audioBuffer = ctx.createBuffer(1, targetLength, targetRate);
     const channelData = audioBuffer.getChannelData(0);
@@ -98,7 +134,17 @@ export class AudioStreamPlayer {
     source.connect(ctx.destination);
 
     source.onended = () => {
+      if (epoch !== this.playbackEpoch) return;
+      if (this.currentSource !== source) return;
       this.currentSource = null;
+      this.sourceCount = Math.max(0, this.sourceCount - 1);
+      audioTrace('source:stop', {
+        sessionGen: generation,
+        serviceId: this.serviceId,
+        sourceCount: this.sourceCount,
+        queueLength: this.queue.length,
+        activeGeneration: this.activeGeneration,
+      });
       if (generation === this.activeGeneration) {
         this.playNext();
       } else {
@@ -107,22 +153,53 @@ export class AudioStreamPlayer {
     };
 
     this.currentSource = source;
-    source.start(0);
+    this.sourceCount += 1;
+    if (this.sourceCount > 1) {
+      audioTrace('OVERLAP_DETECTED', {
+        sessionGen: generation,
+        serviceId: this.serviceId,
+        sourceCount: this.sourceCount,
+        queueLength: this.queue.length,
+        activeGeneration: this.activeGeneration,
+      });
+    }
+    audioTrace('source:start', {
+      sessionGen: generation,
+      serviceId: this.serviceId,
+      sourceCount: this.sourceCount,
+      queueLength: this.queue.length,
+      sampleRate: sourceRate,
+      contextSampleRate: ctx.sampleRate,
+      bufferDuration,
+      playbackRate: source.playbackRate?.value ?? 1,
+    });
+    // currentTime (não 0): 0 é o início do contexto e já passou; o spec toca imediatamente se when < currentTime.
+    source.start(ctx.currentTime);
   }
 
   /** Cancela instantaneamente qualquer fala ativa e limpa a fila. */
   public stopAll(): void {
+    this.playbackEpoch += 1;
     this.queue = [];
-    if (this.currentSource) {
+    const src = this.currentSource;
+    this.currentSource = null;
+    if (src) {
+      src.onended = null;
       try {
-        this.currentSource.stop();
-        this.currentSource.disconnect();
+        src.stop();
+        src.disconnect();
       } catch {
         /* ignore */
       }
-      this.currentSource = null;
     }
+    this.sourceCount = 0;
     this.isPlaying = false;
+    audioTrace('stopAll', {
+      serviceId: this.serviceId,
+      activeGeneration: this.activeGeneration,
+      sourceCount: this.sourceCount,
+      queueLength: 0,
+    });
   }
 
   /** Fecha contexto e zera estado — chamar no gesto do usuário ao iniciar sessão. */
