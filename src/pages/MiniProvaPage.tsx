@@ -13,7 +13,7 @@ import { IconBack, IconMic } from '@/components/ui/Icons';
 import { useProfile } from '@/hooks/useProfile';
 import { MemoryService } from '@/services/learning/MemoryService';
 import { StorageService } from '@/services/storage/StorageService';
-import { buildMiniProvaContext, buildMiniProvaQuestions } from '@/services/teacher/MiniProvaEngine';
+import { buildMiniProvaContext } from '@/services/teacher/MiniProvaEngine';
 import { storeMiniProvaContext } from '@/services/teacher/MiniProvaIntent';
 import type { MiniProvaContext } from '@/services/teacher/MiniProvaTypes';
 
@@ -31,23 +31,11 @@ export function MiniProvaPage() {
     void (async () => {
       const learning = await MemoryService.loadProfile(profile);
       const phrases = await StorageService.getAllPhrases();
+      // buildMiniProvaContext() retorna null quando < 3 perguntas reais.
+      // Nesse caso, não iniciamos — mostramos estado de conteúdo insuficiente.
       const built = buildMiniProvaContext(learning, phrases);
-      let nextCtx: MiniProvaContext | null = built;
-      if (!nextCtx) {
-        // buildMiniProvaContext() pode retornar null quando há poucas perguntas.
-        // Para evitar "empty state" visual quando existe ao menos 1 pergunta,
-        // reaproveitamos a lista real via buildMiniProvaQuestions().
-        const questions = buildMiniProvaQuestions(learning, phrases);
-        if (questions.length > 0) {
-          nextCtx = {
-            id: `miniprova-${Date.now()}`,
-            questions,
-            startedAt: new Date().toISOString(),
-          };
-        }
-      }
       if (cancelled) return;
-      setCtx(nextCtx);
+      setCtx(built);
       setReady(true);
     })();
     return () => {
@@ -59,8 +47,7 @@ export function MiniProvaPage() {
 
   const total = ctx?.questions?.length ?? 0;
   const firstPrompt = ctx?.questions?.[0]?.promptDe?.trim() || null;
-  const canShowQuestion = total > 0 && !!firstPrompt;
-  const displayQuestion = canShowQuestion ? firstPrompt : '—';
+  const readyEnough = total >= 3 && !!firstPrompt;
 
   const orbState: OrbState = starting ? 'processing' : 'idle';
   const micLabel = starting ? 'Preparando…' : 'Sua vez';
@@ -78,8 +65,8 @@ export function MiniProvaPage() {
     }
   };
 
-  const disabledChip = total === 0 || starting;
-  const headerCounter = total > 0 ? `1 / ${total}` : '—';
+  const disabledChip = !readyEnough || starting;
+  const headerCounter = readyEnough ? `1 / ${total}` : '—';
 
   return (
     <DTPage className="mini-prova-page">
@@ -118,63 +105,60 @@ export function MiniProvaPage() {
       </header>
 
       <DTMain withNav={false} className="pt-4 px-4">
-        <div className="mini-prova-cockpit flex flex-col min-h-[520px]">
-          <section className="mini-prova-question">
-            <p className="mini-prova-label">Pergunta</p>
-            <h2 className="mini-prova-question-text">{displayQuestion}</h2>
-          </section>
+        {!readyEnough ? (
+          <div className="flex-1 flex flex-col items-center justify-center text-center px-4 pb-6">
+            <DTAudioOrb state="idle" size={120} />
+            <p className="mt-5 text-[15px] text-[#CBD5E1] leading-relaxed max-w-[280px]">
+              Ainda não há conteúdo suficiente para uma Mini Prova.
+            </p>
+            <p className="mt-2 text-[12px] text-[#64748B]">
+              Pratique mais lições e volte depois.
+            </p>
+          </div>
+        ) : (
+          <div className="mini-prova-cockpit flex flex-col min-h-[520px]">
+            <section className="mini-prova-question">
+              <p className="mini-prova-label">Pergunta</p>
+              <h2 className="mini-prova-question-text">{firstPrompt}</h2>
+            </section>
 
-          <section className="mini-prova-audio">
-            <DTAudioOrb state={orbState} size={180} />
-          </section>
+            <section className="mini-prova-audio">
+              <DTAudioOrb state={orbState} size={180} />
+            </section>
 
-          <section className="mini-prova-mic">
-            <button
-              type="button"
-              onClick={() => void startExam()}
-              disabled={starting || disabledChip}
-              aria-label={micLabel}
-              className="mini-prova-mic-btn relative active:scale-[0.98] transition-transform disabled:opacity-70"
-            >
-              <span
-                className={`mini-prova-mic-halo ${starting ? 'mini-prova-mic-halo--busy' : ''}`}
-                aria-hidden
-              />
-              <span className="mini-prova-mic-core relative z-[1] rounded-full flex items-center justify-center">
-                <IconMic size={40} />
-              </span>
-            </button>
-            <p className="mini-prova-mic-text">{micLabel}</p>
-            <p className="mini-prova-mic-hint">Toque para responder</p>
-          </section>
+            <section className="mini-prova-mic">
+              <button
+                type="button"
+                onClick={() => void startExam()}
+                disabled={disabledChip}
+                aria-label={micLabel}
+                className="mini-prova-mic-btn relative active:scale-[0.98] transition-transform disabled:opacity-70"
+              >
+                <span
+                  className={`mini-prova-mic-halo ${starting ? 'mini-prova-mic-halo--busy' : ''}`}
+                  aria-hidden
+                />
+                <span className="mini-prova-mic-core relative z-[1] rounded-full flex items-center justify-center">
+                  <IconMic size={40} />
+                </span>
+              </button>
+              <p className="mini-prova-mic-text">{micLabel}</p>
+              <p className="mini-prova-mic-hint">Toque para responder</p>
+            </section>
 
-          <section className="mini-prova-actions" aria-label="Ações secundárias">
-            <button
-              type="button"
-              disabled={disabledChip}
-              className="mini-prova-chip"
-              onClick={() => void startExam()}
-            >
-              Não sei
-            </button>
-            <button
-              type="button"
-              disabled={disabledChip}
-              className="mini-prova-chip mini-prova-chip--violet"
-              onClick={() => void startExam()}
-            >
-              Repetir
-            </button>
-            <button
-              type="button"
-              disabled={disabledChip}
-              className="mini-prova-chip mini-prova-chip--cyan"
-              onClick={() => void startExam()}
-            >
-              Ajuda
-            </button>
-          </section>
-        </div>
+            <section className="mini-prova-actions" aria-label="Ações secundárias">
+              <button type="button" disabled={disabledChip} className="mini-prova-chip" onClick={() => void startExam()}>
+                Não sei
+              </button>
+              <button type="button" disabled={disabledChip} className="mini-prova-chip mini-prova-chip--violet" onClick={() => void startExam()}>
+                Repetir
+              </button>
+              <button type="button" disabled={disabledChip} className="mini-prova-chip mini-prova-chip--cyan" onClick={() => void startExam()}>
+                Ajuda
+              </button>
+            </section>
+          </div>
+        )}
       </DTMain>
 
       <BottomNav />

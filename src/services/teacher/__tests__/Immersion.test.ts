@@ -45,18 +45,22 @@ export function testImmersion() {
   const geminiConv = readSrc('src/pages/GeminiConversation.tsx');
   const useGemini = readSrc('src/hooks/useGeminiLive.ts');
 
-  assert(geminiConv.includes('live.immersionMode'), 'GeminiConversation detecta imersão');
-  assert(geminiConv.includes('allowTextInput={!immersion}'), 'sem campo de texto em imersão');
-  assert(!geminiConv.includes('translateGermanToPortuguese(german)') || geminiConv.includes('if (live.immersionMode)'), 'tradução desligada em imersão');
-  assert(geminiConv.includes('MINI-PRÜFUNG'), 'header mini prova em alemão');
-  assert(geminiConv.includes('SIMULATOR'), 'header simulador em alemão');
-  assert(geminiConv.includes('promptSubtitle = immersion'), 'sem subtítulo PT em imersão');
+  // ── A) VOICE-FIRST: sem campo textual de resposta no Live ──
+  assert(!geminiConv.includes('<input'), 'GeminiConversation sem <input> de texto');
+  assert(!geminiConv.includes('<textarea'), 'GeminiConversation sem <textarea>');
+  assert(!geminiConv.includes('Digitar resposta'), 'GeminiConversation sem "Digitar resposta"');
+  assert(!geminiConv.includes('Por texto'), 'GeminiConversation sem "Por texto"');
 
+  // ── B) Imersão: hook expõe flags de modo ──
+  assert(geminiConv.includes('live.immersionMode'), 'GeminiConversation detecta imersão');
   assert(useGemini.includes('immersionMode'), 'useGeminiLive expõe immersionMode');
   assert(useGemini.includes('miniProvaMode'), 'useGeminiLive expõe miniProvaMode');
   assert(useGemini.includes('simulatorMode: true'), 'perfil simulador explícito');
   assert(useGemini.includes('zeroLanguageMode: false'), 'L0 desligado em imersão');
-  assert(useGemini.includes('titleDe'), 'label cenário em alemão');
+
+  // ── C) Simulator e Mini Prova: detectados no Live ──
+  assert(geminiConv.includes('live.simulatorMode'), 'GeminiConversation detecta simulador');
+  assert(geminiConv.includes('live.miniProvaMode'), 'GeminiConversation detecta mini prova');
 
   const simKick = buildImmersionSimulatorKickoff({
     settingDe: 'Im Café',
@@ -138,13 +142,24 @@ export function testImmersion() {
   });
   assert(ui === 'Guten Tag', 'TeacherTurnSync — transcript como fonte');
 
+  // ── D) Mini Prova gate: sem tradução, voice-first, usa promptDe ──
   const miniProvaPage = readSrc('src/pages/MiniProvaPage.tsx');
   assert(!miniProvaPage.includes('traduz'), 'mini prova setup sem tradução');
-  assert(miniProvaPage.includes('MINI-PRÜFUNG'), 'mini prova UI em alemão');
+  assert(!miniProvaPage.includes('<input'), 'mini prova sem input de texto');
+  assert(!miniProvaPage.includes('<textarea'), 'mini prova sem textarea');
+  assert(miniProvaPage.includes('promptDe'), 'mini prova usa promptDe (conteúdo em alemão)');
+  assert(miniProvaPage.includes('buildMiniProvaContext'), 'mini prova usa engine real');
+  assert(miniProvaPage.includes('storeMiniProvaContext'), 'mini prova armazena contexto para sessão');
 
+  // ── E) Simulator gate: voice-first, sem input de texto ──
   const simPage = readSrc('src/pages/SimulatorPage.tsx');
-  assert(simPage.includes('SIMULATOR'), 'simulador setup em alemão');
+  assert(!simPage.includes('<textarea'), 'simulador sem textarea');
   assert(simPage.includes('60'), 'duração 60 min disponível');
+
+  // ── F) Gate → Sessão: MiniProvaPage armazena e sessão lê o mesmo contexto ──
+  assert(miniProvaPage.includes('storeMiniProvaContext'), 'gate armazena contexto');
+  assert(useGemini.includes('readMiniProvaContext'), 'sessão lê o mesmo contexto');
+  assert(useGemini.includes('startMiniProvaSession'), 'sessão cria snapshot do contexto');
 }
 
 if (import.meta.url.endsWith('Immersion.test.ts')) {
