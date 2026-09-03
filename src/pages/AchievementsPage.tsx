@@ -1,12 +1,21 @@
 /**
- * Conquistas — camada visual sobre ACHIEVEMENTS_DATA + evidências reais.
- * Não cria engine de gamificação.
+ * Conquistas — grade rica de badges (ACHIEVEMENTS_DATA + evidências reais).
+ * Visual only — sem engine de gamificação.
  */
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { BottomNav } from '@/components/layout/BottomNav';
-import { GlassCard, glassStyle } from '@/components/ui/GlassCard';
-import { IconBack } from '@/components/ui/Icons';
+import {
+  DTPage,
+  DTMain,
+  DTTopBar,
+  DTSectionLabel,
+  DTGlassCard,
+  DTProgressBar,
+  DTBadge,
+  DTMetricCard,
+} from '@/components/dt';
+import { IconTrophy, IconFlame, IconLock, IconCheck } from '@/components/ui/Icons';
 import { LoadingScreen } from '@/components/ui/LoadingScreen';
 import { useProfile, useProgress } from '@/hooks/useProfile';
 import { useUserMetrics } from '@/hooks/useUserMetrics';
@@ -46,7 +55,7 @@ function evaluate(def: (typeof ACHIEVEMENTS_DATA)[number], ev: Evidence): BadgeV
       icon: def.icon,
       state: 'UNLOCKED',
       progressPct: 100,
-      detail: 'Freigeschaltet',
+      detail: 'Desbloqueada',
     };
   }
 
@@ -142,6 +151,18 @@ function evaluate(def: (typeof ACHIEVEMENTS_DATA)[number], ev: Evidence): BadgeV
   };
 }
 
+const STATE_LABEL: Record<BadgeState, string> = {
+  UNLOCKED: 'Desbloqueada',
+  IN_PROGRESS: 'Em progresso',
+  LOCKED: 'Bloqueada',
+};
+
+const STATE_COLOR: Record<BadgeState, string> = {
+  UNLOCKED: '#00F2FE',
+  IN_PROGRESS: '#A855F7',
+  LOCKED: '#64748B',
+};
+
 export function AchievementsPage() {
   const navigate = useNavigate();
   const { profile, loading } = useProfile();
@@ -155,9 +176,7 @@ export function AchievementsPage() {
 
   const badges = useMemo(() => {
     if (!profile) return [];
-    const unlockedIds = new Set(
-      stored.filter((a) => !!a.unlockedAt).map((a) => a.id),
-    );
+    const unlockedIds = new Set(stored.filter((a) => !!a.unlockedAt).map((a) => a.id));
     const ev: Evidence = {
       streak: profile.streak || 0,
       currentDay: profile.currentDay || 1,
@@ -171,93 +190,128 @@ export function AchievementsPage() {
     return ACHIEVEMENTS_DATA.map((d) => evaluate(d, ev));
   }, [profile, progress, metrics.learnedChunksCount, stored]);
 
+  const unlockedCount = badges.filter((b) => b.state === 'UNLOCKED').length;
+  const inProgressCount = badges.filter((b) => b.state === 'IN_PROGRESS').length;
+  const lockedCount = badges.filter((b) => b.state === 'LOCKED').length;
+
   if (loading || !profile) return <LoadingScreen />;
 
   return (
-    <div className="flex flex-col h-full max-w-md mx-auto dt-page">
-      <header className="px-5 pt-4 safe-top shrink-0 flex items-center gap-3">
-        <button
-          type="button"
-          onClick={() => navigate(-1)}
-          aria-label="Voltar"
-          className="w-10 h-10 rounded-full flex items-center justify-center text-white"
-          style={glassStyle}
-        >
-          <IconBack size={18} />
-        </button>
-        <div className="min-w-0 flex-1">
-          <h1 className="text-[18px] font-bold text-white font-[family-name:var(--font-display)] tracking-wide">
-            DEINE ERFOLGE
-          </h1>
-          <p className="text-[12px] text-[#CBD5E1]">Was du bereits erreicht hast.</p>
-        </div>
-      </header>
+    <DTPage>
+      <DTTopBar
+        title="CONQUISTAS"
+        subtitle="O que você já conquistou"
+        onBack={() => navigate(-1)}
+      />
 
-      <main className="flex-1 overflow-y-auto scrollbar-hide px-5 pt-4 pb-28">
-        <div className="grid grid-cols-2 gap-2.5">
-          {badges.map((b) => {
-            const unlocked = b.state === 'UNLOCKED';
-            const progress = b.state === 'IN_PROGRESS';
-            const opacity = unlocked || progress ? 1 : 0.45;
-            const glow = unlocked
-              ? '0 0 22px rgba(0,242,254,0.45)'
-              : progress
-                ? '0 0 14px rgba(139,92,246,0.3)'
-                : undefined;
-            return (
-              <GlassCard
-                key={b.id}
-                className="p-4 transition-all duration-300"
-                style={{
-                  opacity,
-                  boxShadow: glow,
-                  border: unlocked
-                    ? '1px solid rgba(0,242,254,0.4)'
-                    : progress
-                      ? '1px solid rgba(139,92,246,0.4)'
-                      : undefined,
-                }}
-              >
-                <span className="text-[28px] leading-none" aria-hidden>
-                  {b.icon}
-                </span>
-                <p className="mt-2 text-[13px] font-bold text-white leading-snug">{b.title}</p>
-                <p className="mt-1 text-[11px] text-[#64748B] leading-snug">{b.description}</p>
-                <p
-                  className="mt-2 text-[10px] font-bold uppercase tracking-wide"
-                  style={{
-                    color: unlocked ? '#00F2FE' : progress ? '#A855F7' : '#64748B',
-                  }}
-                >
-                  {b.state === 'UNLOCKED'
-                    ? 'Freigeschaltet'
-                    : b.state === 'IN_PROGRESS'
-                      ? 'In Arbeit'
-                      : 'Gesperrt'}
-                  {b.detail ? ` · ${b.detail}` : ''}
+      <DTMain>
+        <div className="pt-3 space-y-5">
+          <section className="relative overflow-hidden rounded-[24px] p-5 dt-hero-train">
+            <span className="absolute -top-12 -right-8 w-36 h-36 rounded-full bg-white/20 blur-3xl pointer-events-none" />
+            <div className="relative flex items-center gap-3">
+              <span className="w-12 h-12 rounded-2xl bg-black/25 border border-white/20 flex items-center justify-center text-white">
+                <IconTrophy size={22} />
+              </span>
+              <div className="min-w-0">
+                <p className="text-[11px] uppercase tracking-[0.16em] font-bold text-white/75">Coleção</p>
+                <p className="text-[24px] font-extrabold text-white font-[family-name:var(--font-display)] leading-tight">
+                  {unlockedCount}/{badges.length}
                 </p>
-                {b.progressPct != null && b.state !== 'LOCKED' && (
-                  <div
-                    className="mt-2 h-[4px] rounded-full overflow-hidden"
-                    style={{ background: 'rgba(255,255,255,0.08)' }}
+                <p className="text-[12px] text-white/85 mt-0.5">badges desbloqueadas</p>
+              </div>
+            </div>
+          </section>
+
+          <div className="grid grid-cols-3 gap-2">
+            <DTMetricCard
+              value={unlockedCount}
+              label="Desbloqueadas"
+              color="#00F2FE"
+              icon={<IconCheck size={14} />}
+            />
+            <DTMetricCard
+              value={inProgressCount}
+              label="Em progresso"
+              color="#A855F7"
+              icon={<IconFlame size={14} />}
+            />
+            <DTMetricCard
+              value={lockedCount}
+              label="Bloqueadas"
+              color="#64748B"
+              icon={<IconLock size={14} />}
+            />
+          </div>
+
+          <section>
+            <DTSectionLabel className="mb-3">Badges</DTSectionLabel>
+            <div className="grid grid-cols-2 gap-2.5">
+              {badges.map((b) => {
+                const unlocked = b.state === 'UNLOCKED';
+                const progressState = b.state === 'IN_PROGRESS';
+                const color = STATE_COLOR[b.state];
+                return (
+                  <DTGlassCard
+                    key={b.id}
+                    variant={unlocked ? 'cyan' : progressState ? 'violet' : 'default'}
+                    className="p-4 transition-all duration-300"
+                    style={{
+                      opacity: unlocked || progressState ? 1 : 0.48,
+                      boxShadow: unlocked
+                        ? '0 0 22px rgba(0,242,254,0.35)'
+                        : progressState
+                          ? '0 0 14px rgba(139,92,246,0.28)'
+                          : undefined,
+                      border: unlocked
+                        ? '1px solid rgba(0,242,254,0.4)'
+                        : progressState
+                          ? '1px solid rgba(139,92,246,0.4)'
+                          : undefined,
+                    }}
                   >
-                    <div
-                      className="h-full rounded-full transition-all duration-300"
-                      style={{
-                        width: `${Math.min(100, Math.max(4, b.progressPct))}%`,
-                        background: unlocked
-                          ? 'linear-gradient(90deg, #00F2FE, #22C55E)'
-                          : 'linear-gradient(90deg, #8B5CF6, #EC4899)',
-                      }}
-                    />
-                  </div>
-                )}
-              </GlassCard>
-            );
-          })}
+                    <div className="flex items-start justify-between gap-2">
+                      <span
+                        className="w-11 h-11 rounded-2xl flex items-center justify-center text-[22px] leading-none"
+                        style={{
+                          background: `${color}18`,
+                          boxShadow: unlocked || progressState ? `0 0 14px ${color}33` : undefined,
+                        }}
+                        aria-hidden
+                      >
+                        {b.icon}
+                      </span>
+                      {unlocked ? (
+                        <DTBadge color="#00F2FE">✓</DTBadge>
+                      ) : b.state === 'LOCKED' ? (
+                        <span className="text-[#64748B]">
+                          <IconLock size={14} />
+                        </span>
+                      ) : null}
+                    </div>
+                    <p className="mt-3 text-[13px] font-bold text-white leading-snug">{b.title}</p>
+                    <p className="mt-1 text-[11px] text-[#64748B] leading-snug line-clamp-2">{b.description}</p>
+                    <p
+                      className="mt-2.5 text-[10px] font-bold uppercase tracking-wide"
+                      style={{ color }}
+                    >
+                      {STATE_LABEL[b.state]}
+                      {b.detail && b.detail !== STATE_LABEL[b.state] ? ` · ${b.detail}` : ''}
+                    </p>
+                    {b.progressPct != null && b.state !== 'LOCKED' && (
+                      <DTProgressBar
+                        value={b.progressPct}
+                        color={unlocked ? '#00F2FE' : '#8B5CF6'}
+                        className="mt-2"
+                      />
+                    )}
+                  </DTGlassCard>
+                );
+              })}
+            </div>
+          </section>
         </div>
-      </main>
+      </DTMain>
       <BottomNav />
-    </div>
+    </DTPage>
   );
 }

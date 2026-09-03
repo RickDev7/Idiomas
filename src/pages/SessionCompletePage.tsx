@@ -1,10 +1,27 @@
 /**
- * Sessão concluída — tela premium reutilizável (dados via SessionCompleteStore).
+ * Sessão concluída — visual forte de conclusão (SessionCompleteStore).
  */
 import { useNavigate } from 'react-router-dom';
 import { BottomNav } from '@/components/layout/BottomNav';
-import { GlassCard, glassStyle } from '@/components/ui/GlassCard';
-import { ProgressRing } from '@/components/ui/ProgressRing';
+import {
+  DTPage,
+  DTMain,
+  DTSectionLabel,
+  DTGlassCard,
+  DTProgressRing,
+  DTMetricCard,
+  DTNeonButton,
+  DTBadge,
+  glassStyle,
+} from '@/components/dt';
+import {
+  IconCheck,
+  IconClock,
+  IconPuzzle,
+  IconSparkle,
+  IconFlame,
+  IconChat,
+} from '@/components/ui/Icons';
 import {
   readSessionComplete,
   clearSessionComplete,
@@ -16,21 +33,23 @@ export function SessionCompletePage() {
 
   if (!data) {
     return (
-      <div className="flex flex-col h-full max-w-md mx-auto items-center justify-center px-6 dt-page">
-        <p className="text-[#94A3B8] text-center">Keine Session-Zusammenfassung gefunden.</p>
-        <button
-          type="button"
-          onClick={() => navigate('/')}
-          className="mt-4 px-5 py-3 rounded-[14px] text-white font-semibold"
-          style={glassStyle}
-        >
-          Zur Startseite
-        </button>
-      </div>
+      <DTPage>
+        <div className="flex-1 flex flex-col items-center justify-center px-6">
+          <p className="text-[#94A3B8] text-center">Nenhum resumo de sessão encontrado.</p>
+          <button
+            type="button"
+            onClick={() => navigate('/')}
+            className="mt-4 px-5 py-3 rounded-[14px] text-white font-semibold"
+            style={glassStyle}
+          >
+            Voltar ao início
+          </button>
+        </div>
+      </DTPage>
     );
   }
 
-  const name = data.name?.trim() || 'Learner';
+  const name = data.name?.trim() || 'Aluno';
   const ringValue = data.autonomyPct != null ? data.autonomyPct : null;
 
   const done = () => {
@@ -39,116 +58,133 @@ export function SessionCompletePage() {
   };
 
   return (
-    <div className="flex flex-col h-full max-w-md mx-auto dt-page">
-      <header className="px-5 pt-6 safe-top shrink-0 text-center">
-        <h1 className="text-[18px] font-bold text-white font-[family-name:var(--font-display)]">
-          {data.headline || 'TRAINING ABGESCHLOSSEN'}
+    <DTPage>
+      <header className="px-4 pt-6 safe-top shrink-0 text-center">
+        <div className="inline-flex items-center justify-center mb-3">
+          <span
+            className="w-14 h-14 rounded-full flex items-center justify-center text-[#050816]"
+            style={{
+              background: 'linear-gradient(135deg, #00F2FE, #22C55E)',
+              boxShadow: '0 0 28px rgba(0,242,254,0.45)',
+            }}
+          >
+            <IconCheck size={28} />
+          </span>
+        </div>
+        <h1 className="text-[18px] font-bold text-white font-[family-name:var(--font-display)] tracking-wide uppercase">
+          {data.headline || 'SESSÃO CONCLUÍDA'}
         </h1>
-        <p className="text-[14px] text-[#CBD5E1] mt-2">Sehr gut, {name}!</p>
+        <p className="text-[14px] text-[#CBD5E1] mt-2">Muito bem, {name}!</p>
+        {data.streak != null && data.streak > 0 ? (
+          <div className="mt-3 flex justify-center">
+            <DTBadge color="#F97316">
+              <IconFlame size={12} /> {data.streak} dias de sequência
+            </DTBadge>
+          </div>
+        ) : null}
       </header>
 
-      <main className="flex-1 overflow-y-auto scrollbar-hide px-5 pt-4 pb-28 space-y-5">
-        <GlassCard variant="cyan" className="p-6 flex flex-col items-center relative overflow-hidden">
-          <span
-            className="absolute -top-16 w-52 h-52 rounded-full pointer-events-none"
-            style={{ background: 'radial-gradient(circle, rgba(0,242,254,0.3), transparent 70%)' }}
-          />
-          <ProgressRing
-            value={ringValue ?? 0}
-            size={120}
-            stroke={10}
-            color="#00F2FE"
-            label={
-              data.autonomyPct != null
-                ? `${data.autonomyPct}%`
-                : data.minutes != null
-                  ? `${data.minutes}m`
-                  : '✓'
-            }
-          />
-          <p className="relative mt-3 dt-label">Session beendet</p>
-        </GlassCard>
+      <DTMain>
+        <div className="pt-2 space-y-5">
+          <DTGlassCard
+            variant="cyan"
+            className="p-6 flex flex-col items-center relative overflow-hidden"
+          >
+            <span
+              className="absolute -top-16 w-52 h-52 rounded-full pointer-events-none"
+              style={{
+                background: 'radial-gradient(circle, rgba(0,242,254,0.35), transparent 70%)',
+              }}
+            />
+            <DTProgressRing
+              value={ringValue ?? 100}
+              size={128}
+              stroke={10}
+              color="#00F2FE"
+              label={
+                data.autonomyPct != null
+                  ? `${data.autonomyPct}%`
+                  : data.minutes != null
+                    ? `${data.minutes}m`
+                    : '✓'
+              }
+            />
+            <p className="relative mt-3">
+              <DTSectionLabel>Sessão encerrada</DTSectionLabel>
+            </p>
+          </DTGlassCard>
 
-        <div className="grid grid-cols-2 gap-2.5">
-          <Metric label="Zeit" value={data.minutes != null ? `${data.minutes} min` : '—'} />
-          <Metric
-            label="Strukturen"
-            value={data.structures != null ? String(data.structures) : '—'}
-          />
-          <Metric
-            label="Variationen"
-            value={data.variations != null ? String(data.variations) : '—'}
-          />
-          <Metric
-            label="Autonomie"
-            value={data.autonomyPct != null ? `${data.autonomyPct}%` : '—'}
-          />
-        </div>
+          <div className="grid grid-cols-2 gap-2.5">
+            <DTMetricCard
+              value={data.minutes != null ? `${data.minutes}` : '—'}
+              label="Minutos"
+              color="#00F2FE"
+              icon={<IconClock size={14} />}
+            />
+            <DTMetricCard
+              value={data.structures != null ? String(data.structures) : '—'}
+              label="Estruturas"
+              color="#8B5CF6"
+              icon={<IconPuzzle size={14} />}
+            />
+            <DTMetricCard
+              value={data.variations != null ? String(data.variations) : '—'}
+              label="Variações"
+              color="#EC4899"
+              icon={<IconSparkle size={14} />}
+            />
+            <DTMetricCard
+              value={data.autonomyPct != null ? `${data.autonomyPct}%` : '—'}
+              label="Autonomia"
+              color="#22C55E"
+              icon={<IconChat size={14} />}
+            />
+          </div>
 
-        {data.improved && data.improved.length > 0 && (
-          <section>
-            <p className="dt-label mb-2">Heute verbessert</p>
-            <GlassCard className="p-4 space-y-2">
-              {data.improved.slice(0, 8).map((g) => (
-                <p key={g} className="text-[14px] text-white flex gap-2">
-                  <span className="text-[#22C55E]">+</span>
-                  <span className="truncate">{g}</span>
-                </p>
-              ))}
-            </GlassCard>
-          </section>
-        )}
+          {data.improved && data.improved.length > 0 && (
+            <section>
+              <DTSectionLabel className="mb-2">Melhorou hoje</DTSectionLabel>
+              <DTGlassCard className="p-4 space-y-2">
+                {data.improved.slice(0, 8).map((g) => (
+                  <p key={g} className="text-[14px] text-white flex gap-2">
+                    <span className="text-[#22C55E] font-bold">+</span>
+                    <span className="truncate">{g}</span>
+                  </p>
+                ))}
+              </DTGlassCard>
+            </section>
+          )}
 
-        {(data.nextStep?.trim() || (data.streak != null && data.streak > 0)) && (
-          <section>
-            <p className="dt-label mb-2">Nächster Schritt</p>
-            <GlassCard className="p-4">
-              {data.nextStep?.trim() ? (
+          {data.nextStep?.trim() && (
+            <section>
+              <DTSectionLabel className="mb-2">Próximo passo</DTSectionLabel>
+              <DTGlassCard className="p-4">
                 <p className="text-[14px] text-white">{data.nextStep.trim()}</p>
-              ) : null}
-              {data.streak != null && data.streak > 0 && (
-                <p className={`text-[12px] text-[#F97316] ${data.nextStep?.trim() ? 'mt-2' : ''}`}>
-                  🔥 {data.streak} Sequenz
-                </p>
-              )}
-            </GlassCard>
-          </section>
-        )}
+              </DTGlassCard>
+            </section>
+          )}
 
-        <button
-          type="button"
-          onClick={() => {
-            clearSessionComplete();
-            navigate('/aprender');
-          }}
-          className="w-full py-4 rounded-[20px] text-[15px] font-bold text-[#050816] active:scale-[0.98] transition-transform duration-200"
-          style={{
-            background: 'linear-gradient(135deg, #00F2FE, #8B5CF6)',
-            boxShadow: '0 0 28px rgba(0,242,254,0.35)',
-          }}
-        >
-          Weiter üben
-        </button>
+          <DTNeonButton
+            variant="accent"
+            onClick={() => {
+              clearSessionComplete();
+              navigate('/aprender');
+            }}
+          >
+            Continuar treino
+          </DTNeonButton>
 
-        <button
-          type="button"
-          onClick={done}
-          className="w-full py-3.5 rounded-[18px] text-[14px] font-semibold text-white"
-          style={glassStyle}
-        >
-          Fertig
-        </button>
-      </main>
+          <button
+            type="button"
+            onClick={done}
+            className="w-full py-3.5 rounded-[18px] text-[14px] font-semibold text-white"
+            style={glassStyle}
+          >
+            Concluído
+          </button>
+        </div>
+      </DTMain>
       <BottomNav />
-    </div>
-  );
-}
-
-function Metric({ label, value }: { label: string; value: string }) {
-  return (
-    <GlassCard className="p-4">
-      <p className="text-[10px] uppercase tracking-wide text-[#64748B]">{label}</p>
-      <p className="text-[18px] font-bold text-white mt-1 tabular-nums">{value}</p>
-    </GlassCard>
+    </DTPage>
   );
 }

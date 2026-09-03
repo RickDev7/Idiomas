@@ -77,6 +77,9 @@ export const IconPlane = (p: IconProps) => (
 export const IconClock = (p: IconProps) => (
   <svg {...base(p)}><circle cx="12" cy="12" r="8" /><path d="M12 8v5l3 2" /></svg>
 );
+export const IconLock = (p: IconProps) => (
+  <svg {...base(p)}><rect x="5" y="11" width="14" height="10" rx="2" /><path d="M8 11V8a4 4 0 0 1 8 0v3" /></svg>
+);
 export const IconSprout = (p: IconProps) => (
   <svg {...base(p)}><path d="M12 21V11" /><path d="M12 11c-4-1-6-5-6-8 5 0 8 3 8 8" /><path d="M12 11c4-1 6-5 6-8-5 0-8 3-8 8" /></svg>
 );

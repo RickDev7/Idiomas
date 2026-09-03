@@ -1,11 +1,29 @@
 /**
- * Mini Prova Result — redesign premium Fase 3.
- * Alinhado visualmente ao SimulatorResultPage.
+ * Resultado da Mini Prova — UI premium (DT).
+ * Alinhado visualmente ao SimulatorResultPage. Dados reais de MiniProvaResult.
  */
 import { useNavigate } from 'react-router-dom';
 import { BottomNav } from '@/components/layout/BottomNav';
-import { GlassCard, glassStyle } from '@/components/ui/GlassCard';
-import { ProgressRing } from '@/components/ui/ProgressRing';
+import {
+  DTPage,
+  DTMain,
+  DTTopBar,
+  DTSectionLabel,
+  DTGlassCard,
+  DTProgressRing,
+  DTMetricCard,
+  DTBadge,
+  DTProgressBar,
+  glassStyle,
+} from '@/components/dt';
+import {
+  IconBolt,
+  IconCheck,
+  IconMic,
+  IconRefresh,
+  IconTarget,
+  IconWave,
+} from '@/components/ui/Icons';
 import { readMiniProvaResult } from '@/services/teacher/MiniProvaIntent';
 
 export function MiniProvaResultPage() {
@@ -14,17 +32,19 @@ export function MiniProvaResultPage() {
 
   if (!result) {
     return (
-      <div className="flex flex-col h-full max-w-md mx-auto items-center justify-center px-6 dt-page">
-        <p className="text-[#94A3B8] text-center">Kein Prüfungsergebnis gefunden.</p>
-        <button
-          type="button"
-          onClick={() => navigate('/mini-prova')}
-          className="mt-4 px-5 py-3 rounded-[14px] text-white font-semibold"
-          style={glassStyle}
-        >
-          Zurück
-        </button>
-      </div>
+      <DTPage>
+        <DTMain withNav={false} className="flex flex-col items-center justify-center px-6">
+          <p className="text-[#94A3B8] text-center">Nenhum resultado de prova encontrado.</p>
+          <button
+            type="button"
+            onClick={() => navigate('/mini-prova')}
+            className="mt-4 px-5 py-3 rounded-[14px] text-white font-semibold"
+            style={glassStyle}
+          >
+            Voltar
+          </button>
+        </DTMain>
+      </DTPage>
     );
   }
 
@@ -34,11 +54,11 @@ export function MiniProvaResultPage() {
       : 0;
 
   const metrics = [
-    { label: 'Autonomie', value: result.autonomyPercent },
-    { label: 'Verstehen', value: result.comprehensionPercent },
-    { label: 'Produktion', value: result.speakingPercent },
-    { label: 'Satzbildung', value: result.sentencePercent },
-    { label: 'Variationen', value: result.variationPercent },
+    { label: 'Autonomia', value: result.autonomyPercent, color: '#00F2FE', icon: <IconBolt size={14} /> },
+    { label: 'Compreensão', value: result.comprehensionPercent, color: '#8B5CF6', icon: <IconWave size={14} /> },
+    { label: 'Produção', value: result.speakingPercent, color: '#EC4899', icon: <IconMic size={14} /> },
+    { label: 'Formação de frases', value: result.sentencePercent, color: '#F97316', icon: <IconTarget size={14} /> },
+    { label: 'Variações', value: result.variationPercent, color: '#22C55E', icon: <IconRefresh size={14} /> },
   ];
 
   const nochUeben = [...result.needsPractice, ...result.difficult].filter(
@@ -46,113 +66,113 @@ export function MiniProvaResultPage() {
   );
 
   return (
-    <div className="flex flex-col h-full max-w-md mx-auto dt-page">
-      <header className="px-5 pt-4 safe-top shrink-0">
-        <h1 className="text-[18px] font-bold text-white font-[family-name:var(--font-display)]">
-          ERGEBNIS
-        </h1>
-        <p className="text-[12px] text-[#CBD5E1] mt-0.5">MINI-PRÜFUNG abgeschlossen</p>
-      </header>
+    <DTPage>
+      <DTTopBar
+        title="Resultado"
+        subtitle="Mini Prova concluída"
+        right={<DTBadge color="#A855F7">Prova</DTBadge>}
+      />
 
-      <main className="flex-1 overflow-y-auto scrollbar-hide px-5 pt-5 pb-28 space-y-5">
-        <GlassCard variant="violet" className="p-6 flex flex-col items-center relative overflow-hidden">
+      <DTMain className="pt-5 space-y-5">
+        <DTGlassCard variant="violet" className="p-6 flex flex-col items-center relative overflow-hidden">
           <span
-            className="absolute -top-16 w-52 h-52 rounded-full pointer-events-none"
-            style={{ background: 'radial-gradient(circle, rgba(139,92,246,0.4), transparent 70%)' }}
+            className="absolute -top-16 w-56 h-56 rounded-full pointer-events-none"
+            style={{ background: 'radial-gradient(circle, rgba(139,92,246,0.42), transparent 70%)' }}
           />
-          <ProgressRing
+          <DTProgressRing
             value={overallPct}
-            size={128}
-            stroke={10}
+            size={148}
+            stroke={11}
             color="#8B5CF6"
             label={`${overallPct}%`}
           />
-          <p className="relative mt-3 dt-label">Gesamt</p>
+          <p className="relative mt-4 dt-label">Desempenho</p>
           <p className="relative text-[13px] text-[#CBD5E1] tabular-nums mt-1">
-            {result.correctCount} / {result.totalQuestions} richtig
+            {result.correctCount} / {result.totalQuestions} corretas
           </p>
-        </GlassCard>
+        </DTGlassCard>
 
         <div className="grid grid-cols-2 gap-2.5">
           {metrics.map((m) => (
-            <GlassCard key={m.label} className="p-4">
-              <p className="text-[10px] uppercase tracking-wide text-[#64748B]">{m.label}</p>
-              <p className="text-[22px] font-bold text-white mt-1 tabular-nums">
-                {Math.round(m.value)}%
-              </p>
-              <div
-                className="mt-2 h-[4px] rounded-full overflow-hidden"
-                style={{ background: 'rgba(255,255,255,0.08)' }}
+            <div key={m.label} className="rounded-[18px] p-3 min-h-[92px] flex flex-col justify-between" style={glassStyle}>
+              <span
+                className="w-8 h-8 rounded-lg flex items-center justify-center mb-2"
+                style={{ background: `${m.color}22`, color: m.color }}
               >
-                <div
-                  className="h-full rounded-full transition-all duration-300"
-                  style={{
-                    width: `${Math.min(100, Math.max(0, m.value))}%`,
-                    background: 'linear-gradient(90deg, #00F2FE, #8B5CF6)',
-                  }}
-                />
+                {m.icon}
+              </span>
+              <div>
+                <p className="text-[20px] font-extrabold text-white tabular-nums leading-none">
+                  {Math.round(m.value)}%
+                </p>
+                <p className="text-[10px] text-[#94A3B8] mt-1.5 leading-snug">{m.label}</p>
+                <DTProgressBar value={m.value} color={m.color} className="mt-2" />
               </div>
-            </GlassCard>
+            </div>
           ))}
-          <GlassCard className="p-4">
-            <p className="text-[10px] uppercase tracking-wide text-[#64748B]">Geprüft</p>
-            <p className="text-[22px] font-bold text-white mt-1 tabular-nums">
-              {result.contentsChecked}
-            </p>
-          </GlassCard>
+          <DTMetricCard
+            label="Avaliados"
+            value={result.contentsChecked}
+            color="#A855F7"
+            icon={<IconCheck size={14} />}
+          />
         </div>
 
         {result.strengths.length > 0 && (
           <section>
-            <p className="dt-label mb-2">Stärken</p>
-            <GlassCard className="p-4 space-y-2">
+            <DTSectionLabel className="mb-2">Pontos fortes</DTSectionLabel>
+            <DTGlassCard className="p-4 space-y-2.5">
               {result.strengths.map((g) => (
                 <p key={g} className="text-[14px] text-white flex gap-2">
-                  <span className="text-[#22C55E]">✓</span>
+                  <span className="text-[#22C55E] shrink-0">
+                    <IconCheck size={16} />
+                  </span>
                   <span className="truncate">{g}</span>
                 </p>
               ))}
-            </GlassCard>
+            </DTGlassCard>
           </section>
         )}
 
         {nochUeben.length > 0 && (
           <section>
-            <p className="dt-label mb-2">Noch üben</p>
-            <GlassCard className="p-4 space-y-2">
+            <DTSectionLabel className="mb-2">O que treinar</DTSectionLabel>
+            <DTGlassCard className="p-4 space-y-2.5">
               {nochUeben.slice(0, 8).map((g) => (
                 <p key={g} className="text-[14px] text-white flex gap-2">
-                  <span className="text-[#EC4899]">↻</span>
+                  <span className="text-[#EC4899] shrink-0">
+                    <IconRefresh size={16} />
+                  </span>
                   <span className="truncate">{g}</span>
                 </p>
               ))}
-            </GlassCard>
+            </DTGlassCard>
           </section>
         )}
 
-        <div className="flex gap-2">
+        <div className="flex gap-2 items-stretch">
           <button
             type="button"
             onClick={() => navigate('/revisar')}
             className="flex-1 py-3.5 rounded-[16px] text-[14px] font-semibold text-white"
             style={glassStyle}
           >
-            Üben
+            Revisar
           </button>
           <button
             type="button"
             onClick={() => navigate('/aprender')}
-            className="flex-1 py-3.5 rounded-[16px] text-[14px] font-bold text-white"
+            className="flex-[1.4] py-3.5 rounded-[16px] text-[14px] font-bold text-[#050816] active:scale-[0.98] transition-transform"
             style={{
-              background: 'linear-gradient(90deg, #8B5CF6, #00F2FE)',
-              boxShadow: '0 0 20px rgba(139,92,246,0.35)',
+              background: 'linear-gradient(135deg, #00F2FE, #8B5CF6)',
+              boxShadow: '0 0 24px rgba(139,92,246,0.35)',
             }}
           >
-            Weiterlernen
+            Continuar treino
           </button>
         </div>
-      </main>
+      </DTMain>
       <BottomNav />
-    </div>
+    </DTPage>
   );
 }

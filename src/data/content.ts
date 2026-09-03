@@ -467,14 +467,14 @@ export const DIALOGUES = Array.from({ length: 20 }, (_, i) => ({
 }));
 
 export const ACHIEVEMENTS_DATA = [
-  { id: 'first-word', title: 'Erstes Wort', description: 'Aprendeu sua primeira palavra', icon: '📝', xp: 10 },
-  { id: 'first-phrase', title: 'Erste Phrase', description: 'Aprendeu sua primeira frase', icon: '💬', xp: 20 },
-  { id: 'streak-3', title: '3 Tage', description: '3 dias seguidos', icon: '🔥', xp: 30 },
-  { id: 'streak-7', title: '1 Woche', description: '7 dias seguidos', icon: '🔥', xp: 50 },
-  { id: 'first-conversation', title: 'Erstes Gespräch', description: 'Primeira conversa completa', icon: '🗣️', xp: 40 },
-  { id: 'mission-complete', title: 'Mission erfüllt', description: 'Completou uma missão real', icon: '🎯', xp: 25 },
-  { id: 'day-7', title: 'Woche 1', description: 'Completou 7 dias', icon: '🏆', xp: 100 },
-  { id: 'day-30', title: '30 Tage', description: 'Completou o programa de 30 dias', icon: '👑', xp: 500 },
+  { id: 'first-word', title: 'Primeira palavra', description: 'Aprendeu sua primeira palavra', icon: '📝', xp: 10 },
+  { id: 'first-phrase', title: 'Primeira frase', description: 'Aprendeu sua primeira frase', icon: '💬', xp: 20 },
+  { id: 'streak-3', title: '3 dias', description: '3 dias seguidos', icon: '🔥', xp: 30 },
+  { id: 'streak-7', title: '1 semana', description: '7 dias seguidos', icon: '🔥', xp: 50 },
+  { id: 'first-conversation', title: 'Primeira conversa', description: 'Primeira conversa completa', icon: '🗣️', xp: 40 },
+  { id: 'mission-complete', title: 'Missão cumprida', description: 'Completou uma missão real', icon: '🎯', xp: 25 },
+  { id: 'day-7', title: 'Semana 1', description: 'Completou 7 dias', icon: '🏆', xp: 100 },
+  { id: 'day-30', title: '30 dias', description: 'Completou o programa de 30 dias', icon: '👑', xp: 500 },
 ];
 
 export const LISTENING_EXERCISES = Array.from({ length: 6 }, (_, i) => ({

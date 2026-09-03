@@ -1,17 +1,29 @@
+/**
+ * Gemini Live — composição visual: Professor → Orb → Mic.
+ * Lógica de áudio/sessão intacta (useGeminiLive). Sem input de texto.
+ */
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { UserProfile } from '@/types';
 import { useGeminiLive } from '@/hooks/useGeminiLive';
 import { IconButton } from '@/components/ui/Button';
-import { IconBack, IconHangup, IconRefresh, IconLightbulb, IconTurtle, IconStop } from '@/components/ui/Icons';
+import {
+  IconBack,
+  IconHangup,
+  IconRefresh,
+  IconLightbulb,
+  IconTurtle,
+  IconStop,
+  IconMic,
+} from '@/components/ui/Icons';
 import { toast } from '@/components/ui/Toast';
 import { haptic } from '@/services/ui/UiPrefsService';
 import { SoundService } from '@/services/ui/SoundService';
 import { getVoiceService } from '@/services/voice/VoiceService';
 import { stopAllAudio } from '@/services/voice/AudioPlayback';
 import {
-  TeacherCard, StudentResponseCard, ActionGrid, VoiceArea, SessionProgress,
-  ConversationProgressBar, SequenceDots,
+  SessionProgress,
+  ConversationProgressBar,
 } from '@/components/voice/VoicePanels';
 import { MicroPracticePanel } from '@/components/voice/MicroPracticePanel';
 import {
@@ -19,7 +31,7 @@ import {
   cachedTranslation,
   separateTeacherSpeech,
 } from '@/services/ai/TranslationService';
-import { useKeyboardInset } from '@/hooks/useKeyboardInset';
+import { DTAudioOrb, type OrbState } from '@/components/dt';
 
 /** Feedback em alemão para modos de imersão (Simulador / Mini Prova). */
 function deriveImmersionFeedback(opts: {
@@ -77,39 +89,22 @@ function deriveFeedback(opts: {
   return { text: null, tone: 'neutral' };
 }
 
-function buildPromptTitle(targetPhrase: string | null, germanFromSpeech: string, immersion = false): string {
-  const raw = (targetPhrase || germanFromSpeech || '').trim();
-  if (!raw) return '';
-  const clean = raw.replace(/[.?!…]+$/u, '').trim();
-  if (!clean) return '';
-  const short = clean.length > 48 ? clean.slice(0, 48).trim() : clean;
-  if (immersion) return short;
-  return `Diga "${short}".`;
-}
-
-function buildPromptSubtitle(
-  embeddedPt: string,
-  translatedPt: string,
-  pedagogicalReason: string | null,
-): string | undefined {
-  const pt = (embeddedPt || translatedPt || '').trim();
-  if (pt) {
-    const first = pt.split(/[.!?]/)[0]?.trim() || pt;
-    const clipped = first.length > 90 ? `${first.slice(0, 87).trim()}…` : first;
-    if (/como se diz|diga|repita|significa/i.test(clipped)) {
-      return clipped.endsWith('.') || clipped.endsWith('…') ? clipped : `${clipped}.`;
-    }
-    // Tradução curta → formato da referência: Como se diz 'Oi' em alemão.
-    if (clipped.length <= 40) {
-      return `Como se diz '${clipped}' em alemão.`;
-    }
-    return clipped.endsWith('.') || clipped.endsWith('…') ? clipped : `${clipped}.`;
-  }
-  const reason = (pedagogicalReason || '').trim();
-  if (reason && reason.length < 80 && !/FRACAS|PROIBIDO|DEBUG|score/i.test(reason)) {
-    return reason;
-  }
-  return undefined;
+function statusLinePt(opts: {
+  liveState: string;
+  micActive: boolean;
+  assistantSpeaking: boolean;
+  teacherTurnStatus: string;
+  responseStatus: 'processing' | 'received' | 'none';
+  started: boolean;
+}): string {
+  if (opts.liveState === 'connecting') return 'Conectando…';
+  if (opts.liveState === 'reconnecting') return 'Reconectando…';
+  if (opts.liveState === 'error') return 'Sem conexão';
+  if (opts.micActive) return 'Você está falando…';
+  if (opts.assistantSpeaking || opts.teacherTurnStatus === 'RECEIVING') return 'Professor falando…';
+  if (opts.responseStatus === 'processing') return 'Pensando…';
+  if (opts.started) return 'Sua vez';
+  return 'Toque para falar';
 }
 
 export function GeminiConversation({ profile, onFinish }: { profile: UserProfile; onFinish: () => void }) {
@@ -121,10 +116,6 @@ export function GeminiConversation({ profile, onFinish }: { profile: UserProfile
 
   const [ptTranslation, setPtTranslation] = useState('');
   const translatedForRef = useRef('');
-
-  const [textMode, setTextMode] = useState(false);
-  const [textValue, setTextValue] = useState('');
-  useKeyboardInset(textMode);
 
   const [responseStatus, setResponseStatus] = useState<'processing' | 'received' | 'none'>('none');
   const prevUserText = useRef('');
@@ -148,7 +139,6 @@ export function GeminiConversation({ profile, onFinish }: { profile: UserProfile
     onFinish();
   }, [live.miniProvaMode, live.miniProvaComplete, live, onFinish]);
 
-  // Tradução só para subtítulo curto do card — desligada em imersão (Simulador / Mini Prova)
   useEffect(() => {
     if (live.immersionMode) {
       setPtTranslation('');
@@ -179,7 +169,9 @@ export function GeminiConversation({ profile, onFinish }: { profile: UserProfile
         translatedForRef.current = german;
       }
     });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [live.assistantText, live.teacherTurnStatus, live.immersionMode]);
 
   const immersion = live.immersionMode;
@@ -197,7 +189,6 @@ export function GeminiConversation({ profile, onFinish }: { profile: UserProfile
     }
   }, [live.assistantText, responseStatus, live.teacherTurnStatus]);
 
-  // Nova frase-alvo → atualiza em lugar (sem empilhar cards)
   useEffect(() => {
     const t = live.targetPhrase;
     if (t && t !== prevTargetRef.current) {
@@ -209,54 +200,48 @@ export function GeminiConversation({ profile, onFinish }: { profile: UserProfile
     }
   }, [live.targetPhrase]);
 
-  const orbState: 'idle' | 'listening' | 'processing' | 'speaking' | 'error' =
-    live.state === 'error' ? 'error'
-      : live.state === 'connecting' || live.state === 'reconnecting' ? 'processing'
-        : live.micActive ? 'listening'
-          : live.assistantSpeaking || live.teacherTurnStatus === 'RECEIVING' ? 'speaking'
-            : live.state === 'connected' && responseStatus === 'processing' ? 'processing'
+  const orbState: OrbState =
+    live.state === 'error'
+      ? 'error'
+      : live.state === 'connecting' || live.state === 'reconnecting'
+        ? 'processing'
+        : live.micActive
+          ? 'listening'
+          : live.assistantSpeaking || live.teacherTurnStatus === 'RECEIVING'
+            ? 'speaking'
+            : live.state === 'connected' && responseStatus === 'processing'
+              ? 'processing'
               : 'idle';
 
-  const statusBadge = immersion
-    ? (live.state === 'connecting' ? 'Verbinden…'
-      : live.state === 'reconnecting' ? 'Wieder verbinden…'
-        : live.state === 'error' ? 'Keine Verbindung'
-          : live.micActive ? 'Du sprichst…'
-            : live.assistantSpeaking || live.teacherTurnStatus === 'RECEIVING' ? 'Professor spricht…'
-              : responseStatus === 'processing' ? 'Prüfen…'
-                : 'Zuhören…')
-    : (live.state === 'connecting' ? 'Conectando…'
-      : live.state === 'reconnecting' ? 'Reconectando…'
-        : live.state === 'error' ? 'Sem conexão'
-          : live.micActive ? 'Du sprichst…'
-            : live.assistantSpeaking || live.teacherTurnStatus === 'RECEIVING' ? 'Professor spricht…'
-              : responseStatus === 'processing' ? 'Verificando…'
-                : 'Zuhören…');
+  const statusBadge = statusLinePt({
+    liveState: live.state,
+    micActive: live.micActive,
+    assistantSpeaking: live.assistantSpeaking,
+    teacherTurnStatus: live.teacherTurnStatus,
+    responseStatus,
+    started,
+  });
 
-  const micStatus = immersion
-    ? (live.micState === 'REQUESTING_PERMISSION' ? 'Mikrofon erlauben…'
-      : live.micState === 'ERROR' ? 'Mikrofon nicht verfügbar'
-        : live.micActive || live.micState === 'LISTENING' ? 'Du sprichst…'
-          : live.assistantSpeaking ? 'Professor spricht…'
-            : live.state === 'connecting' || live.state === 'reconnecting' ? 'Verbinden…'
-              : responseStatus === 'processing' ? 'Verstanden. Ich prüfe…'
-                : started ? 'Zuhören…' : 'Tippen zum Starten')
-    : (live.micState === 'REQUESTING_PERMISSION' ? 'Pedindo microfone…'
-      : live.micState === 'ERROR' ? 'Não conseguimos acessar o microfone'
-        : live.micActive || live.micState === 'LISTENING' ? 'Du sprichst…'
-          : live.assistantSpeaking ? 'Professor spricht…'
-            : live.state === 'connecting' || live.state === 'reconnecting' ? 'Conectando…'
-              : responseStatus === 'processing' ? 'Entendi. Estou verificando...'
-                : started ? 'Zuhören…' : 'Toque para começar');
-
-  const micHint =
-    live.micState === 'ERROR' ? 'Verifique a permissão do microfone.'
-      : undefined;
+  const micLabel =
+    live.micState === 'REQUESTING_PERMISSION'
+      ? 'Pedindo microfone…'
+      : live.micState === 'ERROR'
+        ? 'Microfone indisponível'
+        : live.micActive || live.micState === 'LISTENING'
+          ? 'Você está falando…'
+          : live.assistantSpeaking
+            ? 'Professor falando…'
+            : live.state === 'connecting' || live.state === 'reconnecting'
+              ? 'Conectando…'
+              : responseStatus === 'processing'
+                ? 'Pensando…'
+                : started
+                  ? 'Toque para falar'
+                  : 'Toque para falar';
 
   const handleMic = async () => {
     if (startLockRef.current) return;
     haptic();
-    setTextMode(false);
     if (!started) {
       startLockRef.current = true;
       setStarted(true);
@@ -272,20 +257,20 @@ export function GeminiConversation({ profile, onFinish }: { profile: UserProfile
   };
 
   const teacherSpeech = separateTeacherSpeech(live.assistantText);
-  const shownGerman = teacherSpeech.german || (teacherSpeech.embeddedPortuguese ? '' : live.assistantText);
+  // Só mostra fala do professor quando o turno está completo / recebendo — sem target prematuro
+  const shownGerman = (() => {
+    if (live.teacherTurnStatus === 'RECEIVING' || live.teacherTurnStatus === 'COMPLETE') {
+      return (teacherSpeech.german || (teacherSpeech.embeddedPortuguese ? '' : live.assistantText)).trim();
+    }
+    return '';
+  })();
 
-  const promptTitle = buildPromptTitle(live.targetPhrase, shownGerman, immersion);
-  const promptSubtitle = immersion
-    ? undefined
-    : buildPromptSubtitle(
-      teacherSpeech.embeddedPortuguese,
-      ptTranslation,
-      live.pedagogicalReason,
-    );
+  const secondaryPt = immersion
+    ? ''
+    : (teacherSpeech.embeddedPortuguese || ptTranslation || '').trim();
 
-  /** Repetir = TTS local da última frase. Não dispara nova resposta Gemini. */
   const replayTeacher = () => {
-    const text = (live.targetPhrase || shownGerman).trim();
+    const text = (shownGerman || live.targetPhrase || '').trim();
     if (!text) return;
     haptic(8);
     stopAllAudio();
@@ -310,63 +295,24 @@ export function GeminiConversation({ profile, onFinish }: { profile: UserProfile
     void live.sendHelp('Bitte langsam sprechen.');
   };
 
-  const handleTextSubmit = async () => {
-    const t = textValue.trim();
-    if (!t) return;
-    haptic();
-    setTextMode(false);
-    setTextValue('');
-    if (live.microPractice) {
-      await live.submitMicroAnswer(t);
-      return;
-    }
-    if (!started) {
-      startLockRef.current = true;
-      setStarted(true);
-      try {
-        await live.start();
-        SoundService.play('start');
-        await live.submitUserText(t);
-      } finally {
-        startLockRef.current = false;
-      }
-      return;
-    }
-    await live.submitUserText(t);
-  };
-
   const feedback = immersion
     ? deriveImmersionFeedback({
-      microFeedback: live.microFeedback,
-      pedagogicalAction: live.pedagogicalAction,
-      responseStatus,
-      microActive: !!live.microPractice,
-    })
+        microFeedback: live.microFeedback,
+        pedagogicalAction: live.pedagogicalAction,
+        responseStatus,
+        microActive: !!live.microPractice,
+      })
     : deriveFeedback({
-      microFeedback: live.microFeedback,
-      pedagogicalAction: live.pedagogicalAction,
-      responseStatus,
-      microActive: !!live.microPractice,
-    });
+        microFeedback: live.microFeedback,
+        pedagogicalAction: live.pedagogicalAction,
+        responseStatus,
+        microActive: !!live.microPractice,
+      });
 
   const progressCurrent = Math.min(
     live.targetTurns,
     Math.max(started ? 1 : 0, live.userTurns + (live.assistantText ? 1 : 0)),
   );
-
-  const sequenceIndex = Math.max(0, Math.min(3, (live.userTurns || 0) % 4));
-
-  const actions = immersion
-    ? [
-      { icon: <IconRefresh size={18} />, label: 'Nochmal', sub: 'Wiederholen', color: '#00F2FE', onClick: replayTeacher },
-      { icon: <IconLightbulb size={18} />, label: 'Hilfe', sub: 'Ich brauche Hilfe', color: '#FBBF24', onClick: askHelp },
-      { icon: <IconTurtle size={18} />, label: 'Langsam', sub: 'Langsamer sprechen', color: '#34D399', onClick: askSlow },
-    ]
-    : [
-      { icon: <IconRefresh size={18} />, label: 'Repetir', sub: 'Ouvir de novo', color: '#00F2FE', onClick: replayTeacher },
-      { icon: <IconLightbulb size={18} />, label: 'Ajuda', sub: 'Preciso de ajuda', color: '#FBBF24', onClick: askHelp },
-      { icon: <IconTurtle size={18} />, label: 'Devagar', sub: 'Falar mais devagar', color: '#34D399', onClick: askSlow },
-    ];
 
   const abandon = () => {
     SoundService.play('end');
@@ -380,10 +326,25 @@ export function GeminiConversation({ profile, onFinish }: { profile: UserProfile
     onFinish();
   };
 
-  const showUserCard = !!live.userText && responseStatus !== 'none';
+  const connecting = live.state === 'connecting' || live.state === 'reconnecting';
+  const professorLine =
+    shownGerman ||
+    (connecting
+      ? ''
+      : started
+        ? ''
+        : '');
+
+  const emptyHint = connecting
+    ? 'Conectando com seu professor…'
+    : started
+      ? 'Aguardando o professor…'
+      : live.returning
+        ? 'Continuando sua prática.'
+        : 'Seu professor de IA está pronto.';
 
   return (
-    <div className="flex flex-col h-full max-w-md mx-auto overflow-hidden dt-page">
+    <div className="flex flex-col h-full max-w-md mx-auto overflow-hidden dt-page talk-live">
       <header
         className="flex items-center justify-between gap-2 px-3 pb-2 shrink-0"
         style={{ paddingTop: 'calc(0.75rem + env(safe-area-inset-top, 0px))' }}
@@ -394,7 +355,7 @@ export function GeminiConversation({ profile, onFinish }: { profile: UserProfile
         {live.simulatorMode ? (
           <div className="flex flex-col items-center min-w-0 flex-1 px-1">
             <span className="text-[10px] uppercase tracking-[0.14em] font-semibold text-[#00F2FE]">
-              SIMULATOR
+              SIMULADOR
             </span>
             <span className="text-[12px] text-white font-semibold truncate max-w-full">
               {live.simulatorScenarioLabel}
@@ -404,194 +365,256 @@ export function GeminiConversation({ profile, onFinish }: { profile: UserProfile
         ) : live.miniProvaMode ? (
           <div className="flex flex-col items-center min-w-0 flex-1 px-1">
             <span className="text-[10px] uppercase tracking-[0.14em] font-semibold text-[#A855F7]">
-              MINI-PRÜFUNG
+              MINI PROVA
             </span>
             <span className="text-[12px] text-white font-semibold tabular-nums">
               {live.miniProvaProgress.current} / {live.miniProvaProgress.total}
             </span>
-            <span className="text-[11px] text-[#64748b]">Was kannst du schon?</span>
           </div>
         ) : (
-          <SessionProgress current={progressCurrent} total={live.targetTurns} />
+          <div className="flex flex-col items-center min-w-0 flex-1">
+            <span className="text-[11px] font-bold uppercase tracking-wide text-white">Conversar</span>
+            <SessionProgress current={progressCurrent} total={live.targetTurns} />
+          </div>
         )}
         <button
           type="button"
           onClick={finish}
-          className="inline-flex items-center gap-1.5 min-h-10 px-3 rounded-full text-[13px] font-semibold transition-colors text-white"
+          className="inline-flex items-center gap-1.5 min-h-10 px-3 rounded-full text-[13px] font-semibold text-white"
           style={{
             background: 'linear-gradient(135deg, rgba(239,68,68,0.35), rgba(185,28,28,0.55))',
             border: '1px solid rgba(248,113,113,0.35)',
-            boxShadow: '0 4px 16px rgba(239,68,68,0.2)',
           }}
         >
           <IconHangup size={14} /> Encerrar
         </button>
       </header>
 
-      <div className="px-4 pb-2 shrink-0">
-        {live.simulatorMode ? (
-          <p className="text-center text-[11px] text-[#64748b]">
-            {live.userTurns > 0
-              ? `${live.userTurns} Produktionen`
-              : 'Sprich so viel Deutsch wie möglich.'}
-          </p>
-        ) : live.miniProvaMode ? (
-          <p className="text-center text-[11px] text-[#64748b]">
-            Frage {live.miniProvaProgress.current} von {live.miniProvaProgress.total}
-          </p>
-        ) : (
+      {!live.simulatorMode && !live.miniProvaMode ? (
+        <div className="px-4 pb-1 shrink-0">
           <ConversationProgressBar current={progressCurrent} total={live.targetTurns} />
-        )}
-      </div>
+        </div>
+      ) : null}
 
       <div className="flex-1 min-h-0 overflow-y-auto scrollbar-hide px-4 flex flex-col">
-        {live.assistantText || live.targetPhrase ? (
-          <TeacherCard
-            orbState={orbState}
-            statusText={statusBadge}
-            promptTitle={promptTitle || (live.assistantText
-              ? (immersion ? 'Hör zu.' : 'Escute o professor.')
-              : (immersion ? 'Warte auf den Lehrer…' : 'Aguardando o professor…'))}
-            promptSubtitle={promptSubtitle}
-            onRepeat={replayTeacher}
-          />
-        ) : (
-          <EmptyCoach
-            statusText={statusBadge}
-            started={started}
-            returning={live.returning}
-            connecting={live.state === 'connecting' || live.state === 'reconnecting'}
-            onRepeat={replayTeacher}
-          />
-        )}
+        {/* Badge professor + status */}
+        <div className="flex items-center justify-center gap-2 pt-1 pb-2 flex-wrap">
+          <span
+            className="inline-flex items-center px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-[0.1em] text-[#C4B5FD]"
+            style={{
+              background: 'rgba(139,92,246,0.15)',
+              border: '1px solid rgba(139,92,246,0.35)',
+            }}
+          >
+            Professor de IA
+          </span>
+          <span
+            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold"
+            style={{
+              color: orbState === 'listening' || orbState === 'speaking' ? '#67E8F9' : '#A78BFA',
+              background:
+                orbState === 'listening' || orbState === 'speaking'
+                  ? 'rgba(0,242,254,0.12)'
+                  : 'rgba(139,92,246,0.12)',
+              border:
+                orbState === 'listening' || orbState === 'speaking'
+                  ? '1px solid rgba(0,242,254,0.3)'
+                  : '1px solid rgba(139,92,246,0.28)',
+            }}
+          >
+            <span
+              className={`w-1.5 h-1.5 rounded-full ${
+                orbState === 'listening' || orbState === 'speaking' ? 'animate-pulse bg-[#00F2FE]' : 'bg-[#A78BFA]'
+              }`}
+              aria-hidden
+            />
+            {statusBadge}
+          </span>
+        </div>
 
-        <SequenceDots current={sequenceIndex} total={4} />
+        {/* Fala do professor — protagonista (transcript real) */}
+        <div className="text-center px-2 min-h-[72px] flex flex-col items-center justify-center">
+          {professorLine ? (
+            <>
+              <p className="talk-live-de text-white font-[family-name:var(--font-display)]">
+                {professorLine}
+              </p>
+              {secondaryPt ? (
+                <p className="mt-2 text-[13px] text-[#94A3B8] max-w-[320px] leading-snug line-clamp-2">
+                  {secondaryPt}
+                </p>
+              ) : null}
+            </>
+          ) : (
+            <p className="text-[15px] text-[#94A3B8]">{emptyHint}</p>
+          )}
+        </div>
 
-        {showUserCard && (
-          <StudentResponseCard
-            text={live.userText}
-            status={responseStatus}
-            feedback={feedback.text}
-            feedbackTone={feedback.tone}
-          />
-        )}
+        {/* Orb central */}
+        <div className="flex-1 flex flex-col items-center justify-center min-h-[200px] py-3 relative">
+          <span className="talk-orb-halo" aria-hidden />
+          <DTAudioOrb state={orbState} size={220} />
+        </div>
 
-        {import.meta.env.DEV && live.pedagogicalAction && (
-          <p className="mt-2 text-[10px] text-text-faint font-mono px-1" aria-hidden>
-            Action: {live.pedagogicalAction}
-            {live.targetPhrase ? ` · Target: ${live.targetPhrase}` : ''}
-          </p>
-        )}
+        {/* Resposta do usuário — linha compacta, não card dashboard */}
+        {live.userText && responseStatus !== 'none' ? (
+          <div className="mb-2 px-3 py-2.5 rounded-[16px] text-center" style={{ background: 'rgba(255,255,255,0.04)' }}>
+            <p className="text-[10px] font-bold uppercase tracking-wider text-[#60A5FA]">Você</p>
+            <p className="mt-1 text-[15px] font-semibold text-white leading-snug" style={{ overflowWrap: 'anywhere' }}>
+              {live.userText}
+            </p>
+            {responseStatus === 'processing' ? (
+              <p className="mt-1 text-[11px] text-[#94A3B8]">Pensando…</p>
+            ) : null}
+            {responseStatus === 'received' && feedback.text ? (
+              <p
+                className="mt-1 text-[12px] font-medium"
+                style={{
+                  color:
+                    feedback.tone === 'adjust'
+                      ? '#FBBF24'
+                      : feedback.tone === 'neutral'
+                        ? '#94A3B8'
+                        : '#34D399',
+                }}
+              >
+                {feedback.text}
+              </p>
+            ) : null}
+          </div>
+        ) : null}
 
-        {live.microPractice && (
-          <div className="mt-2">
+        {live.microPractice ? (
+          <div className="mb-2">
             <MicroPracticePanel
               session={live.microPractice}
               feedback={live.microFeedback}
               micActive={live.micActive}
-              onSubmit={(t) => { void live.submitMicroAnswer(t); }}
-              onSkip={() => { void live.skipMicroPractice(); }}
-              onRequestHelp={() => { void live.sendHelp('Ajuda'); }}
+              onSubmit={(t) => {
+                void live.submitMicroAnswer(t);
+              }}
+              onSkip={() => {
+                void live.skipMicroPractice();
+              }}
+              onRequestHelp={() => {
+                void live.sendHelp('Ajuda');
+              }}
             />
           </div>
-        )}
+        ) : null}
 
-        {live.error && (
-          <div className="mt-3 rounded-[22px] dt-glass p-4 text-center animate-fade-in">
-            <p className="text-body text-text font-semibold">Não foi possível continuar a conversa.</p>
-            <p className="text-caption text-text-muted mt-1">{live.error}</p>
+        {live.error ? (
+          <div className="mb-2 rounded-[20px] p-4 text-center" style={{ background: 'rgba(255,255,255,0.04)' }}>
+            <p className="text-[14px] text-white font-semibold">Não foi possível continuar a conversa.</p>
+            <p className="text-[12px] text-[#94A3B8] mt-1">{live.error}</p>
             <button
               type="button"
-              onClick={() => { void live.start(); }}
-              className="mt-3 px-5 py-2.5 rounded-full bg-primary text-white text-secondary font-semibold min-h-11"
+              onClick={() => {
+                void live.start();
+              }}
+              className="mt-3 px-5 py-2.5 rounded-full text-[13px] font-semibold text-white"
+              style={{ background: 'linear-gradient(135deg, #8B5CF6, #00F2FE)' }}
             >
               Tentar novamente
             </button>
           </div>
-        )}
+        ) : null}
 
-        {live.assistantSpeaking && live.state === 'connected' && !live.micActive && (
+        {live.assistantSpeaking && live.state === 'connected' && !live.micActive ? (
           <button
             type="button"
-            onClick={() => { haptic(8); live.interrupt(); }}
-            className="mt-2 self-start inline-flex items-center gap-2 text-[12px] text-text-faint min-h-10 px-1"
+            onClick={() => {
+              haptic(8);
+              live.interrupt();
+            }}
+            className="mb-1 self-center inline-flex items-center gap-2 text-[12px] text-[#64748B] min-h-10"
           >
             <IconStop size={14} /> Interromper
           </button>
-        )}
+        ) : null}
       </div>
 
-      <div className="px-4 pt-1 pb-1 shrink-0">
-        <ActionGrid items={actions} />
+      {/* Controles cockpit discretos */}
+      <div className="px-4 pt-1 flex items-center justify-center gap-5 shrink-0">
+        {[
+          { icon: <IconRefresh size={18} />, label: 'Repetir', onClick: replayTeacher },
+          { icon: <IconLightbulb size={18} />, label: 'Ajuda', onClick: askHelp },
+          { icon: <IconTurtle size={18} />, label: 'Mais devagar', onClick: askSlow },
+        ].map((a) => (
+          <button
+            key={a.label}
+            type="button"
+            onClick={a.onClick}
+            className="flex flex-col items-center gap-1 active:scale-95 transition-transform"
+            aria-label={a.label}
+          >
+            <span
+              className="w-11 h-11 rounded-2xl flex items-center justify-center text-[#CBD5E1]"
+              style={{
+                background: 'rgba(255,255,255,0.05)',
+                border: '1px solid rgba(255,255,255,0.08)',
+              }}
+            >
+              {a.icon}
+            </span>
+            <span className="text-[10px] font-semibold text-[#64748B]">{a.label}</span>
+          </button>
+        ))}
       </div>
 
-      <VoiceArea
-        micActive={live.micActive}
-        micLevel={live.micLevel}
-        statusLabel={micStatus}
-        statusHint={micHint}
-        onMic={handleMic}
-        disabled={live.state === 'connecting' || live.state === 'reconnecting'}
-        noSignal={live.micLevel < 0.015}
-        onPickMic={() => setShowMicSettings((s) => !s)}
-        textMode={textMode}
-        textValue={textValue}
-        onTextChange={setTextValue}
-        onTextSubmit={handleTextSubmit}
-        onToggleText={() => setTextMode((v) => !v)}
-        allowTextInput={!immersion}
-      />
-
-      {showMicSettings && started && live.audioInputs.length > 0 && (
-        <div className="px-4 pb-3 animate-fade-in">
+      {/* Microfone dominante — voice-first, sem digitar */}
+      <div
+        className="flex flex-col items-center pt-2 shrink-0 px-3"
+        style={{ paddingBottom: 'calc(0.75rem + env(safe-area-inset-bottom, 0px))' }}
+      >
+        <button
+          type="button"
+          onClick={() => void handleMic()}
+          disabled={connecting}
+          aria-label={micLabel}
+          className="talk-mic-btn relative active:scale-[0.96] transition-transform disabled:opacity-70"
+        >
+          <span
+            className={`talk-mic-halo ${live.micActive ? 'talk-mic-halo--hot' : ''}`}
+            aria-hidden
+          />
+          <span
+            className={`talk-mic-core relative z-[1] w-[88px] h-[88px] rounded-full flex items-center justify-center ${
+              live.micActive ? 'talk-mic-core--hot' : ''
+            }`}
+          >
+            <IconMic size={34} className="text-white" />
+          </span>
+        </button>
+        <p className="mt-2 text-[12px] font-bold text-white">{micLabel}</p>
+        {live.micState === 'ERROR' ? (
+          <p className="mt-1 text-[11px] text-[#F87171]">Verifique a permissão do microfone.</p>
+        ) : null}
+        {started && live.audioInputs.length > 1 ? (
+          <button
+            type="button"
+            onClick={() => setShowMicSettings((s) => !s)}
+            className="mt-2 text-[10px] font-semibold text-[#64748B]"
+          >
+            Microfone
+          </button>
+        ) : null}
+        {showMicSettings && started && live.audioInputs.length > 0 ? (
           <select
             value={live.selectedDeviceId || ''}
             onChange={(e) => live.selectDevice(e.target.value)}
-            className="w-full bg-surface-light text-text-muted text-secondary rounded-[18px] px-3 py-2.5 border border-border"
+            className="mt-2 w-full max-w-xs bg-[#0f172a] text-[#94A3B8] text-[12px] rounded-[14px] px-3 py-2 border border-white/10"
             aria-label="Escolher microfone"
           >
             <option value="">Padrão do sistema</option>
             {live.audioInputs.map((d) => (
-              <option key={d.deviceId} value={d.deviceId}>{d.label || 'dispositivo sem nome'}</option>
+              <option key={d.deviceId} value={d.deviceId}>
+                {d.label || 'dispositivo sem nome'}
+              </option>
             ))}
           </select>
-        </div>
-      )}
+        ) : null}
+      </div>
     </div>
-  );
-}
-
-function EmptyCoach({
-  statusText, started, returning, connecting, onRepeat,
-}: {
-  statusText: string;
-  started: boolean;
-  returning: boolean;
-  connecting: boolean;
-  onRepeat: () => void;
-}) {
-  const title = connecting
-    ? 'Conectando com seu professor…'
-    : started
-      ? 'Aguardando o professor…'
-      : returning
-        ? 'Continuando sua prática.'
-        : 'Toque no microfone para começar.';
-  const sub = connecting
-    ? undefined
-    : started
-      ? undefined
-      : returning
-        ? 'Toque no microfone para retomar.'
-        : 'Seu professor de alemão está pronto.';
-
-  return (
-    <TeacherCard
-      orbState={connecting ? 'processing' : 'idle'}
-      statusText={statusText}
-      promptTitle={title}
-      promptSubtitle={sub}
-      onRepeat={onRepeat}
-    />
   );
 }

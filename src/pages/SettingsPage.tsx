@@ -1,11 +1,19 @@
 /**
- * Configurações — redesign visual Fase 4 (lógica preservada).
+ * Configurações — seções GERAL / ÁUDIO / APRENDIZADO / NOTIFICAÇÕES.
+ * Preferências e opções existentes preservadas; t() força pt-BR.
  */
 import { useEffect, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { BottomNav } from '@/components/layout/BottomNav';
-import { GlassCard, glassStyle } from '@/components/ui/GlassCard';
-import { IconBack, IconSun, IconMoon } from '@/components/ui/Icons';
+import {
+  DTPage,
+  DTMain,
+  DTTopBar,
+  DTSectionLabel,
+  DTGlassCard,
+  glassStyle,
+} from '@/components/dt';
+import { IconSun, IconMoon, IconUser } from '@/components/ui/Icons';
 import { useProfile } from '@/hooks/useProfile';
 import type { SessionDuration, SpeechSpeed } from '@/types';
 import { ThemeService, type Theme } from '@/services/ui/ThemeService';
@@ -102,182 +110,256 @@ export function SettingsPage() {
   };
 
   return (
-    <div className="flex flex-col h-full max-w-md mx-auto dt-page">
-      <header className="px-5 pt-4 safe-top shrink-0 flex items-center gap-3">
-        <button
-          type="button"
-          onClick={() => navigate(-1)}
-          aria-label={t('settings.back')}
-          className="w-10 h-10 rounded-full flex items-center justify-center text-white"
-          style={glassStyle}
-        >
-          <IconBack size={18} />
-        </button>
-        <div className="min-w-0 flex-1">
-          <h1 className="text-[18px] font-bold text-white font-[family-name:var(--font-display)]">
-            {t('settings.title')}
-          </h1>
-          <p className="text-[12px] text-[#CBD5E1]">Einstellungen</p>
-        </div>
-        <button
-          type="button"
-          onClick={() => navigate('/perfil')}
-          className="px-3 py-1.5 rounded-full text-[11px] font-bold text-[#CBD5E1]"
-          style={glassStyle}
-        >
-          Profil
-        </button>
-      </header>
-
-      <main className="flex-1 overflow-y-auto scrollbar-hide px-5 pt-4 pb-28 space-y-6">
-        <Section title="ALLGEMEIN">
-          <p className="text-[11px] text-[#64748B] mb-2">{t('settings.language')}</p>
-          <div className="flex gap-2 mb-4">
-            <Choice active={prefs.interfaceLanguage === 'pt-BR'} onClick={() => { changePref({ interfaceLanguage: 'pt-BR' }); SoundService.play('tap'); }} label="Português" />
-            <Choice active={prefs.interfaceLanguage === 'en-US'} onClick={() => { changePref({ interfaceLanguage: 'en-US' }); SoundService.play('tap'); }} label="English" />
-            <Choice active={prefs.interfaceLanguage === 'de-DE'} onClick={() => { changePref({ interfaceLanguage: 'de-DE' }); SoundService.play('tap'); }} label="Deutsch" />
-          </div>
-
-          <p className="text-[11px] text-[#64748B] mb-2">{t('settings.theme')}</p>
-          <div className="flex gap-2 mb-4">
-            <Choice active={theme === 'dark'} onClick={() => changeTheme('dark')} icon={<IconMoon size={16} />} label={t('settings.theme.dark')} />
-            <Choice active={theme === 'light'} onClick={() => changeTheme('light')} icon={<IconSun size={16} />} label={t('settings.theme.light')} />
-            <Choice active={theme === 'system'} onClick={() => changeTheme('system')} label={t('settings.theme.system')} />
-          </div>
-
-          <p className="text-[11px] text-[#64748B] mb-2">{t('settings.training')}</p>
-          <div className="flex flex-wrap gap-2">
-            {times.map((m) => (
-              <Choice
-                key={m}
-                active={profile.dailyMinutes === m}
-                onClick={() => { void updateProfile({ dailyMinutes: m }); SoundService.play('tap'); }}
-                label={`${m} min`}
-              />
-            ))}
-          </div>
-        </Section>
-
-        <Section title="AUDIO">
-          <p className="text-[11px] text-[#64748B] mb-2">{t('settings.voice')}</p>
-          <div className="flex gap-2">
-            {speeds.map((s) => (
-              <Choice
-                key={s}
-                active={profile.speechSpeed === s}
-                onClick={() => { void updateProfile({ speechSpeed: s }); SoundService.play('tap'); }}
-                label={t(`settings.voice.${s}`)}
-                full
-              />
-            ))}
-          </div>
-          <div className="mt-3">
-            <Toggle
-              label={t('settings.sound')}
-              hint={t('settings.sound.hint')}
-              active={prefs.sound}
-              onClick={() => {
-                const on = !prefs.sound;
-                changePref({ sound: on });
-                if (on) SoundService.play('success');
-              }}
-            />
-          </div>
-        </Section>
-
-        <Section title="LERNEN">
-          <p className="text-[11px] text-[#64748B] mb-2">{t('settings.translation')}</p>
-          <div className="space-y-2 mb-4">
-            <ChoiceRow active={prefs.translationMode === 'always'} onClick={() => changePref({ translationMode: 'always' })} icon="🇧🇷" label={t('settings.translation.always')} hint={t('settings.translation.always.hint')} />
-            <ChoiceRow active={prefs.translationMode === 'ondemand'} onClick={() => changePref({ translationMode: 'ondemand' })} icon="👁" label={t('settings.translation.ondemand')} hint={t('settings.translation.ondemand.hint')} />
-            <ChoiceRow active={prefs.translationMode === 'immersion'} onClick={() => changePref({ translationMode: 'immersion' })} icon="🇩🇪" label={t('settings.translation.immersion')} hint={t('settings.translation.immersion.hint')} />
-          </div>
-
-          <p className="text-[11px] text-[#64748B] mb-2">{t('settings.help')}</p>
-          <div className="grid grid-cols-2 gap-2 mb-4">
-            <Choice active={prefs.helpLevel === 'auto'} onClick={() => changePref({ helpLevel: 'auto' })} label={t('settings.help.auto')} full />
-            <Choice active={prefs.helpLevel === 'extra'} onClick={() => changePref({ helpLevel: 'extra' })} label={t('settings.help.extra')} full />
-            <Choice active={prefs.helpLevel === 'normal'} onClick={() => changePref({ helpLevel: 'normal' })} label={t('settings.help.normal')} full />
-            <Choice active={prefs.helpLevel === 'minimal'} onClick={() => changePref({ helpLevel: 'minimal' })} label={t('settings.help.minimal')} full />
-          </div>
-
-          <p className="text-[11px] text-[#64748B] mb-2">{t('settings.immersion')}</p>
-          <GlassCard className="p-4 mb-3">
-            <div className="flex items-baseline justify-between gap-2 mb-2">
-              <p className="text-[22px] font-bold text-white">{immersion}%</p>
-              <p className="text-[11px] text-[#64748B] text-right">{immersionHintLocalized(immersion)}</p>
-            </div>
-            <input
-              type="range"
-              min={0}
-              max={100}
-              step={5}
-              value={immersion}
-              aria-label={t('settings.immersion')}
-              onChange={(e) => setImmersion(Number(e.target.value))}
-              className="w-full accent-[#00F2FE]"
-            />
-          </GlassCard>
-
-          <Toggle
-            label={t('settings.intensive')}
-            hint={t('settings.intensive.hint')}
-            active={profile.turboMode}
-            onClick={() => {
-              void updateProfile({ turboMode: !profile.turboMode });
-              SoundService.play('tap');
-              haptic(8);
-            }}
-          />
-        </Section>
-
-        <Section title="BENACHRICHTIGUNGEN">
-          <Toggle
-            label={t('settings.notifications')}
-            hint={t('settings.notifications.hint')}
-            active={prefs.notifications && NotificationService.permission() === 'granted'}
-            onClick={() => { void toggleNotifications(); }}
-          />
-          {notifNote && <p className="text-[12px] text-[#F97316] mt-2">{notifNote}</p>}
-          <div className="mt-3">
-            <Toggle
-              label={t('settings.haptics')}
-              hint={hapticsOk ? t('settings.haptics.hint') : t('settings.haptics.unsupported')}
-              active={prefs.haptics}
-              onClick={() => {
-                const on = !prefs.haptics;
-                changePref({ haptics: on });
-                if (on) HapticService.pulse(16);
-              }}
-            />
-          </div>
-        </Section>
-
-        <Section title={t('settings.reset')}>
+    <DTPage>
+      <DTTopBar
+        title="CONFIGURAÇÕES"
+        subtitle="Preferências"
+        onBack={() => navigate(-1)}
+        right={
           <button
             type="button"
-            onClick={resetPrefs}
-            className="w-full text-left p-3.5 rounded-[18px] min-h-11"
+            onClick={() => navigate('/perfil')}
+            aria-label="Perfil"
+            className="w-10 h-10 rounded-full flex items-center justify-center text-[#00F2FE]"
             style={glassStyle}
           >
-            <span className="block text-[14px] text-white font-medium">{t('settings.reset')}</span>
-            <span className="block text-[11px] text-[#64748B] mt-0.5">{t('settings.reset.hint')}</span>
+            <IconUser size={16} />
           </button>
-        </Section>
+        }
+      />
 
-        <p className="text-[11px] text-[#64748B] leading-relaxed">
-          {t('settings.immersion')} {immersion}% — {immersionHint(immersion)}. {t('settings.privacy')}
-        </p>
-      </main>
+      <DTMain>
+        <div className="pt-3 space-y-6">
+          <Section title="GERAL">
+            <p className="text-[11px] text-[#64748B] mb-2">{t('settings.language')}</p>
+            <div className="flex gap-2 mb-4">
+              <Choice
+                active={prefs.interfaceLanguage === 'pt-BR'}
+                onClick={() => {
+                  changePref({ interfaceLanguage: 'pt-BR' });
+                  SoundService.play('tap');
+                }}
+                label="Português"
+              />
+              <Choice
+                active={prefs.interfaceLanguage === 'en-US'}
+                onClick={() => {
+                  changePref({ interfaceLanguage: 'en-US' });
+                  SoundService.play('tap');
+                }}
+                label="English"
+              />
+              <Choice
+                active={prefs.interfaceLanguage === 'de-DE'}
+                onClick={() => {
+                  changePref({ interfaceLanguage: 'de-DE' });
+                  SoundService.play('tap');
+                }}
+                label="Deutsch"
+              />
+            </div>
+
+            <p className="text-[11px] text-[#64748B] mb-2">{t('settings.theme')}</p>
+            <div className="flex gap-2 mb-4">
+              <Choice
+                active={theme === 'dark'}
+                onClick={() => changeTheme('dark')}
+                icon={<IconMoon size={16} />}
+                label={t('settings.theme.dark')}
+              />
+              <Choice
+                active={theme === 'light'}
+                onClick={() => changeTheme('light')}
+                icon={<IconSun size={16} />}
+                label={t('settings.theme.light')}
+              />
+              <Choice
+                active={theme === 'system'}
+                onClick={() => changeTheme('system')}
+                label={t('settings.theme.system')}
+              />
+            </div>
+
+            <p className="text-[11px] text-[#64748B] mb-2">{t('settings.training')}</p>
+            <div className="flex flex-wrap gap-2">
+              {times.map((m) => (
+                <Choice
+                  key={m}
+                  active={profile.dailyMinutes === m}
+                  onClick={() => {
+                    void updateProfile({ dailyMinutes: m });
+                    SoundService.play('tap');
+                  }}
+                  label={`${m} min`}
+                />
+              ))}
+            </div>
+          </Section>
+
+          <Section title="ÁUDIO">
+            <p className="text-[11px] text-[#64748B] mb-2">{t('settings.voice')}</p>
+            <div className="flex gap-2">
+              {speeds.map((s) => (
+                <Choice
+                  key={s}
+                  active={profile.speechSpeed === s}
+                  onClick={() => {
+                    void updateProfile({ speechSpeed: s });
+                    SoundService.play('tap');
+                  }}
+                  label={t(`settings.voice.${s}`)}
+                  full
+                />
+              ))}
+            </div>
+            <div className="mt-3">
+              <Toggle
+                label={t('settings.sound')}
+                hint={t('settings.sound.hint')}
+                active={prefs.sound}
+                onClick={() => {
+                  const on = !prefs.sound;
+                  changePref({ sound: on });
+                  if (on) SoundService.play('success');
+                }}
+              />
+            </div>
+          </Section>
+
+          <Section title="APRENDIZADO">
+            <p className="text-[11px] text-[#64748B] mb-2">{t('settings.translation')}</p>
+            <div className="space-y-2 mb-4">
+              <ChoiceRow
+                active={prefs.translationMode === 'always'}
+                onClick={() => changePref({ translationMode: 'always' })}
+                icon="🇧🇷"
+                label={t('settings.translation.always')}
+                hint={t('settings.translation.always.hint')}
+              />
+              <ChoiceRow
+                active={prefs.translationMode === 'ondemand'}
+                onClick={() => changePref({ translationMode: 'ondemand' })}
+                icon="👁"
+                label={t('settings.translation.ondemand')}
+                hint={t('settings.translation.ondemand.hint')}
+              />
+              <ChoiceRow
+                active={prefs.translationMode === 'immersion'}
+                onClick={() => changePref({ translationMode: 'immersion' })}
+                icon="🇩🇪"
+                label={t('settings.translation.immersion')}
+                hint={t('settings.translation.immersion.hint')}
+              />
+            </div>
+
+            <p className="text-[11px] text-[#64748B] mb-2">{t('settings.help')}</p>
+            <div className="grid grid-cols-2 gap-2 mb-4">
+              <Choice
+                active={prefs.helpLevel === 'auto'}
+                onClick={() => changePref({ helpLevel: 'auto' })}
+                label={t('settings.help.auto')}
+                full
+              />
+              <Choice
+                active={prefs.helpLevel === 'extra'}
+                onClick={() => changePref({ helpLevel: 'extra' })}
+                label={t('settings.help.extra')}
+                full
+              />
+              <Choice
+                active={prefs.helpLevel === 'normal'}
+                onClick={() => changePref({ helpLevel: 'normal' })}
+                label={t('settings.help.normal')}
+                full
+              />
+              <Choice
+                active={prefs.helpLevel === 'minimal'}
+                onClick={() => changePref({ helpLevel: 'minimal' })}
+                label={t('settings.help.minimal')}
+                full
+              />
+            </div>
+
+            <p className="text-[11px] text-[#64748B] mb-2">{t('settings.immersion')}</p>
+            <DTGlassCard className="p-4 mb-3">
+              <div className="flex items-baseline justify-between gap-2 mb-2">
+                <p className="text-[22px] font-bold text-white tabular-nums">{immersion}%</p>
+                <p className="text-[11px] text-[#64748B] text-right">{immersionHintLocalized(immersion)}</p>
+              </div>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                step={5}
+                value={immersion}
+                aria-label={t('settings.immersion')}
+                onChange={(e) => setImmersion(Number(e.target.value))}
+                className="w-full accent-[#00F2FE]"
+              />
+            </DTGlassCard>
+
+            <Toggle
+              label={t('settings.intensive')}
+              hint={t('settings.intensive.hint')}
+              active={profile.turboMode}
+              onClick={() => {
+                void updateProfile({ turboMode: !profile.turboMode });
+                SoundService.play('tap');
+                haptic(8);
+              }}
+            />
+          </Section>
+
+          <Section title="NOTIFICAÇÕES">
+            <Toggle
+              label={t('settings.notifications')}
+              hint={t('settings.notifications.hint')}
+              active={prefs.notifications && NotificationService.permission() === 'granted'}
+              onClick={() => {
+                void toggleNotifications();
+              }}
+            />
+            {notifNote && <p className="text-[12px] text-[#F97316] mt-2">{notifNote}</p>}
+            <div className="mt-3">
+              <Toggle
+                label={t('settings.haptics')}
+                hint={hapticsOk ? t('settings.haptics.hint') : t('settings.haptics.unsupported')}
+                active={prefs.haptics}
+                onClick={() => {
+                  const on = !prefs.haptics;
+                  changePref({ haptics: on });
+                  if (on) HapticService.pulse(16);
+                }}
+              />
+            </div>
+          </Section>
+
+          <Section title={t('settings.reset')}>
+            <button
+              type="button"
+              onClick={resetPrefs}
+              className="w-full text-left p-3.5 rounded-[18px] min-h-11"
+              style={glassStyle}
+            >
+              <span className="block text-[14px] text-white font-medium">{t('settings.reset')}</span>
+              <span className="block text-[11px] text-[#64748B] mt-0.5">{t('settings.reset.hint')}</span>
+            </button>
+          </Section>
+
+          <p className="text-[11px] text-[#64748B] leading-relaxed pb-2">
+            {t('settings.immersion')} {immersion}% — {immersionHint(immersion)}. {t('settings.privacy')}
+          </p>
+        </div>
+      </DTMain>
       <BottomNav />
-    </div>
+    </DTPage>
   );
 }
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
     <section>
-      <p className="dt-label mb-3">{title}</p>
+      <DTSectionLabel className="mb-3">{title}</DTSectionLabel>
       {children}
     </section>
   );
@@ -345,7 +427,9 @@ function ChoiceRow({
           : glassStyle
       }
     >
-      <span className="text-xl" aria-hidden>{icon}</span>
+      <span className="text-xl" aria-hidden>
+        {icon}
+      </span>
       <span className="flex-1">
         <span className="block text-[14px] text-white font-medium">{label}</span>
         {hint && <span className="block text-[11px] text-[#64748B] mt-0.5">{hint}</span>}

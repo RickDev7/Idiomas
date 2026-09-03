@@ -1,21 +1,23 @@
+import mascotImg from '@/assets/mascot/deutsch-turbo-mascot.png';
+
 export function LoadingScreen({ label = 'Carregando…' }: { label?: string }) {
   return (
-    <div className="flex flex-col items-center justify-center h-full gap-4 dt-page animate-fade-soft">
-      <div className="relative w-16 h-16" role="status" aria-label={label}>
-        <div
-          className="absolute inset-0 rounded-full animate-orb-breathe"
-          style={{
-            background: 'linear-gradient(145deg, #00F2FE 0%, #8B5CF6 100%)',
-          }}
+    <div className="flex flex-col h-full max-w-md mx-auto items-center justify-center gap-5 dt-page px-6">
+      <div className="relative">
+        <span
+          className="absolute inset-[-20%] rounded-full animate-pulse-ring"
+          style={{ background: 'radial-gradient(circle, rgba(139,92,246,0.35), transparent 70%)' }}
+          aria-hidden
         />
-        <div
-          className="absolute inset-2 rounded-full flex items-center justify-center text-[11px] font-bold text-[#00F2FE]"
-          style={{ background: '#050816' }}
-        >
-          DT
-        </div>
+        <img
+          src={mascotImg}
+          alt=""
+          className="relative w-20 h-20 rounded-full object-cover border border-white/10"
+          style={{ boxShadow: '0 0 28px rgba(139,92,246,0.45)' }}
+          draggable={false}
+        />
       </div>
-      <p className="text-[13px] text-[#64748B]">{label}</p>
+      <p className="text-[14px] font-semibold text-[#CBD5E1]">{label}</p>
     </div>
   );
 }

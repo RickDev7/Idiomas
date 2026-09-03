@@ -1,14 +1,23 @@
 /**
- * Simulator — redesign visual Fase 2.
- * Preserva SimulatorEngine / ImmersionPolicy / sessão Live existente.
+ * Simulador — UI premium (DT).
+ * Preserva SimulatorEngine / buildSimulatorContext / storeSimulatorContext.
  */
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { BottomNav } from '@/components/layout/BottomNav';
-import { GlassCard, glassStyle } from '@/components/ui/GlassCard';
+import {
+  DTPage,
+  DTMain,
+  DTTopBar,
+  DTSectionLabel,
+  DTGlassCard,
+  DTAudioOrb,
+  DTNeonButton,
+  DTBadge,
+  glassStyle,
+} from '@/components/dt';
 import { LoadingScreen } from '@/components/ui/LoadingScreen';
-import { LiveAudioOrb } from '@/components/ui/VoiceOrb';
-import { IconBack } from '@/components/ui/Icons';
+import { IconBolt, IconMic, IconSparkle, IconTarget } from '@/components/ui/Icons';
 import { useProfile } from '@/hooks/useProfile';
 import { MemoryService } from '@/services/learning/MemoryService';
 import { StorageService } from '@/services/storage/StorageService';
@@ -24,10 +33,34 @@ import type {
   SimulatorTrainingStyle,
 } from '@/services/teacher/SimulatorTypes';
 
-const MODES: Array<{ id: SimulatorMode; title: string; subtitle: string; tint: string }> = [
-  { id: 'learned', title: 'Gelerntes üben', subtitle: 'Neue Inhalte wiederholen', tint: '#00F2FE' },
-  { id: 'weak', title: 'Schwächen', subtitle: 'Was noch schwer fällt', tint: '#F97316' },
-  { id: 'free', title: 'Freies Sprechen', subtitle: 'Alles was du schon kannst', tint: '#8B5CF6' },
+const MODES: Array<{
+  id: SimulatorMode;
+  title: string;
+  subtitle: string;
+  tint: string;
+  icon: typeof IconBolt;
+}> = [
+  {
+    id: 'learned',
+    title: 'Praticar o aprendido',
+    subtitle: 'Repetir conteúdos recentes',
+    tint: '#00F2FE',
+    icon: IconBolt,
+  },
+  {
+    id: 'weak',
+    title: 'Pontos fracos',
+    subtitle: 'O que ainda é difícil',
+    tint: '#F97316',
+    icon: IconTarget,
+  },
+  {
+    id: 'free',
+    title: 'Fala livre',
+    subtitle: 'Tudo o que você já consegue',
+    tint: '#8B5CF6',
+    icon: IconMic,
+  },
 ];
 
 const DURATIONS: SimulatorDurationMinutes[] = [10, 20, 30, 60];
@@ -82,94 +115,92 @@ export function SimulatorPage() {
   };
 
   return (
-    <div className="flex flex-col h-full max-w-md mx-auto dt-page">
-      <header className="px-5 pt-4 safe-top shrink-0 flex items-center gap-3">
-        <button
-          type="button"
-          onClick={() => navigate(-1)}
-          aria-label="Zurück"
-          className="w-10 h-10 rounded-full flex items-center justify-center text-white shrink-0"
-          style={glassStyle}
-        >
-          <IconBack size={18} />
-        </button>
-        <div className="min-w-0 flex-1">
-          <h1 className="text-[18px] font-bold text-white font-[family-name:var(--font-display)]">
-            SIMULATOR
-          </h1>
-          <p className="text-[12px] text-[#CBD5E1]">
-            {preview ? preview.titleDe : 'Sprich so viel Deutsch wie möglich.'}
-          </p>
-        </div>
-      </header>
+    <DTPage>
+      <DTTopBar
+        title="Simulador"
+        subtitle={
+          preview
+            ? `${preview.emoji} ${preview.titleDe}`
+            : 'Fale o máximo de alemão possível — sem pressão'
+        }
+        onBack={() => navigate(-1)}
+        right={<DTBadge color="#00F2FE">Imersão</DTBadge>}
+      />
 
-      <main className="flex-1 overflow-y-auto scrollbar-hide px-5 pt-4 pb-28 space-y-5">
+      <DTMain className="pt-4 space-y-5">
         {scenarios.length === 0 ? (
-          <GlassCard className="p-5 text-center">
+          <DTGlassCard className="p-6 text-center">
             <p className="text-[14px] text-[#CBD5E1] leading-relaxed">
-              Noch nicht genug Inhalte. Lerne zuerst einige L0-Lektionen.
+              Ainda não há conteúdo suficiente. Aprenda algumas lições L0 primeiro.
             </p>
-            <button
-              type="button"
-              onClick={() => navigate('/aprender')}
-              className="mt-4 px-5 py-2.5 rounded-full text-[13px] font-bold text-white"
-              style={{
-                background: 'linear-gradient(135deg, #00F2FE, #8B5CF6)',
-              }}
-            >
-              Ir para Aprender
-            </button>
-          </GlassCard>
+            <div className="mt-5">
+              <DTNeonButton onClick={() => navigate('/aprender')}>Ir para Aprender</DTNeonButton>
+            </div>
+          </DTGlassCard>
         ) : (
           <>
-            <GlassCard variant="cyan" className="p-5 relative overflow-hidden">
+            <DTGlassCard variant="cyan" className="p-5 relative overflow-hidden">
               <span
-                className="absolute -right-10 -top-10 w-40 h-40 rounded-full pointer-events-none"
-                style={{ background: 'radial-gradient(circle, rgba(0,242,254,0.25), transparent 70%)' }}
+                className="absolute -right-10 -top-10 w-44 h-44 rounded-full pointer-events-none"
+                style={{ background: 'radial-gradient(circle, rgba(0,242,254,0.28), transparent 70%)' }}
               />
-              <p className="dt-label relative">Szenario</p>
-              <p className="relative mt-2 text-[22px] font-bold text-white font-[family-name:var(--font-display)]">
+              <DTSectionLabel className="relative">Cenário</DTSectionLabel>
+              <p className="relative mt-2 text-[24px] font-extrabold text-white leading-tight font-[family-name:var(--font-display)]">
                 {preview?.emoji} {preview?.titleDe}
               </p>
               <p className="relative mt-2 text-[14px] text-[#CBD5E1] leading-snug">
                 {preview?.settingDe}
-                {preview?.roleDe ? ` ${preview.roleDe}` : ''}
+                {preview?.roleDe ? ` · ${preview.roleDe}` : ''}
               </p>
-              <div className="relative mt-4 flex justify-center">
-                <LiveAudioOrb state="idle" size={160} />
+              <div className="relative mt-5 flex justify-center">
+                <DTAudioOrb state="idle" size={168} />
               </div>
-              <p className="relative mt-2 text-center text-[12px] text-[#64748B]">
-                Estados ao vivo: Zuhören · Du sprichst · Professor spricht · Thinking…
+              <p className="relative mt-3 text-center text-[12px] text-[#64748B]">
+                Ouvindo · Você falando · Professor falando · Pensando…
               </p>
               <p className="relative mt-1 text-center text-[11px] text-[#64748B]">
-                Immersion: nur Deutsch — keine Übersetzung.
+                Só alemão durante a simulação — sem tradução.
               </p>
-            </GlassCard>
+            </DTGlassCard>
 
             <section className="space-y-2.5">
+              <DTSectionLabel>Modo</DTSectionLabel>
               {MODES.map((m) => {
                 const active = mode === m.id;
+                const Icon = m.icon;
                 return (
                   <button
                     key={m.id}
                     type="button"
                     onClick={() => setMode(m.id)}
-                    className="w-full rounded-[20px] px-4 py-4 text-left transition-transform duration-200 active:scale-[0.98]"
+                    className="w-full rounded-[20px] px-4 py-4 text-left flex items-start gap-3 transition-transform duration-200 active:scale-[0.98]"
                     style={{
                       ...glassStyle,
                       border: active ? `1px solid ${m.tint}88` : glassStyle.border,
                       boxShadow: active ? `0 0 18px ${m.tint}33` : undefined,
                     }}
                   >
-                    <p className="text-[15px] font-bold text-white">{m.title}</p>
-                    <p className="text-[12px] text-[#94A3B8] mt-1">{m.subtitle}</p>
+                    <span
+                      className="w-10 h-10 rounded-2xl flex items-center justify-center shrink-0"
+                      style={{
+                        background: `${m.tint}22`,
+                        color: m.tint,
+                        boxShadow: active ? `0 0 14px ${m.tint}44` : undefined,
+                      }}
+                    >
+                      <Icon size={18} />
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-[15px] font-bold text-white">{m.title}</span>
+                      <span className="block text-[12px] text-[#94A3B8] mt-1">{m.subtitle}</span>
+                    </span>
                   </button>
                 );
               })}
             </section>
 
             <section>
-              <p className="dt-label mb-2">Dauer</p>
+              <DTSectionLabel className="mb-2">Duração</DTSectionLabel>
               <div className="flex gap-2">
                 {DURATIONS.map((d) => (
                   <button
@@ -190,7 +221,7 @@ export function SimulatorPage() {
             </section>
 
             <section>
-              <p className="dt-label mb-2">Stil</p>
+              <DTSectionLabel className="mb-2">Estilo</DTSectionLabel>
               <div className="flex gap-2">
                 <button
                   type="button"
@@ -199,10 +230,13 @@ export function SimulatorPage() {
                   style={{
                     ...glassStyle,
                     color: trainingStyle === 'training' ? '#A855F7' : '#94A3B8',
-                    border: trainingStyle === 'training' ? '1px solid rgba(168,85,247,0.45)' : glassStyle.border,
+                    border:
+                      trainingStyle === 'training'
+                        ? '1px solid rgba(168,85,247,0.45)'
+                        : glassStyle.border,
                   }}
                 >
-                  Mit Hilfe
+                  Com ajuda
                 </button>
                 <button
                   type="button"
@@ -211,10 +245,13 @@ export function SimulatorPage() {
                   style={{
                     ...glassStyle,
                     color: trainingStyle === 'real_test' ? '#F97316' : '#94A3B8',
-                    border: trainingStyle === 'real_test' ? '1px solid rgba(249,115,22,0.45)' : glassStyle.border,
+                    border:
+                      trainingStyle === 'real_test'
+                        ? '1px solid rgba(249,115,22,0.45)'
+                        : glassStyle.border,
                   }}
                 >
-                  Echter Test
+                  Teste real
                 </button>
               </div>
             </section>
@@ -222,34 +259,38 @@ export function SimulatorPage() {
             <button
               type="button"
               onClick={() => setSurprise((v) => !v)}
-              className="w-full rounded-[16px] px-4 py-3 text-left"
+              className="w-full rounded-[16px] px-4 py-3.5 text-left flex items-center gap-3"
               style={{
                 ...glassStyle,
-                border: surprise ? '1px dashed rgba(251,191,36,0.5)' : glassStyle.border,
+                border: surprise ? '1px dashed rgba(251,191,36,0.55)' : glassStyle.border,
               }}
             >
-              <p className="text-[14px] font-semibold text-white">
-                Überraschung {surprise ? '· an' : ''}
-              </p>
-              <p className="text-[11px] text-[#64748B] mt-0.5">Das System wählt ein passendes Szenario</p>
+              <span
+                className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0"
+                style={{
+                  background: surprise ? 'rgba(251,191,36,0.18)' : 'rgba(255,255,255,0.06)',
+                  color: surprise ? '#FBBF24' : '#94A3B8',
+                }}
+              >
+                <IconSparkle size={16} />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block text-[14px] font-semibold text-white">
+                  Surpresa {surprise ? '· ligada' : ''}
+                </span>
+                <span className="block text-[11px] text-[#64748B] mt-0.5">
+                  O sistema escolhe um cenário adequado
+                </span>
+              </span>
             </button>
 
-            <button
-              type="button"
-              disabled={starting}
-              onClick={() => void startSimulation()}
-              className="w-full py-4 rounded-[20px] text-[15px] font-bold text-[#050816] disabled:opacity-60 active:scale-[0.98] transition-transform duration-200"
-              style={{
-                background: 'linear-gradient(135deg, #00F2FE 0%, #8B5CF6 55%, #F97316 100%)',
-                boxShadow: '0 0 28px rgba(0,242,254,0.35)',
-              }}
-            >
-              {starting ? 'Vorbereiten…' : 'Simulation starten'}
-            </button>
+            <DTNeonButton disabled={starting} onClick={() => void startSimulation()}>
+              {starting ? 'Preparando…' : 'Começar simulação'}
+            </DTNeonButton>
           </>
         )}
-      </main>
+      </DTMain>
       <BottomNav />
-    </div>
+    </DTPage>
   );
 }

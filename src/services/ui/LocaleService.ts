@@ -198,9 +198,9 @@ export function getLocale(): InterfaceLanguage {
   return UiPrefsService.get().interfaceLanguage;
 }
 
-export function t(key: string, lang?: InterfaceLanguage): string {
-  const locale = lang || getLocale();
-  return TABLES[locale][key] || TABLES['pt-BR'][key] || key;
+export function t(key: string, _lang?: InterfaceLanguage): string {
+  // UI normal do app é sempre português (conteúdo de aprendizado permanece em alemão).
+  return TABLES['pt-BR'][key] || key;
 }
 
 export function immersionHintLocalized(pct: number, lang?: InterfaceLanguage): string {

@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import { BottomNav } from './BottomNav';
+import { DTPage, DTTopBar, DTMain } from '@/components/dt';
 
 interface LayoutProps {
   children: ReactNode;
@@ -11,26 +12,27 @@ interface LayoutProps {
   showMenu?: boolean;
 }
 
+/** Layout global — mesmo shell DT de todas as páginas. */
 export function Layout({ children, showNav = true, right, left, title, subtitle }: LayoutProps) {
-  const hasHeader = title || right || left;
+  const hasHeader = !!(title || right || left);
   return (
-    <div className="relative flex flex-col h-full bg-background max-w-md mx-auto">
+    <DTPage>
       {hasHeader && (
-        <header className="flex items-center justify-between px-5 pt-5 pb-3 shrink-0 safe-top">
-          <div className="flex items-center gap-2 min-w-0">
-            {left}
-            <div className="min-w-0">
-              {title && <h1 className="text-h2 text-text truncate">{title}</h1>}
-              {subtitle && <p className="text-caption text-text-faint mt-0.5 truncate">{subtitle}</p>}
+        <DTTopBar
+          title={title}
+          subtitle={subtitle}
+          right={
+            <div className="flex items-center gap-2">
+              {left}
+              {right}
             </div>
-          </div>
-          {right}
-        </header>
+          }
+        />
       )}
-      <main className={`flex-1 overflow-y-auto scrollbar-hide ${showNav ? 'pb-24' : ''}`}>
+      <DTMain withNav={showNav} className={hasHeader ? 'pt-2' : 'pt-3'}>
         {children}
-      </main>
+      </DTMain>
       {showNav && <BottomNav />}
-    </div>
+    </DTPage>
   );
 }

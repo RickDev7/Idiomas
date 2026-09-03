@@ -15,20 +15,21 @@
   --surface-glass: rgba(15, 23, 42, 0.72);
   --surface-light: #12182c;
   --surface-elevated: #161d35;
-  --border: rgba(255, 255, 255, 0.10);
+  /* Borders — reference */
+  --border: rgba(255, 255, 255, 0.08);
   --border-soft: rgba(255, 255, 255, 0.06);
-  --border-violet: rgba(139, 92, 246, 0.45);
-  --border-cyan: rgba(0, 242, 254, 0.40);
+  --border-violet: rgba(139, 92, 246, 0.35);
+  --border-cyan: rgba(0, 242, 254, 0.30);
 
   /* Text */
   --text: #ffffff;
   --text-muted: #CBD5E1;
   --text-faint: #64748B;
 
-  /* Brand accents */
-  --primary: #00F2FE;
-  --primary-dark: #22D3EE;
-  --primary-soft: rgba(0, 242, 254, 0.14);
+  /* Brand — Primary purple first (reference) */
+  --primary: #8B5CF6;
+  --primary-dark: #7C3AED;
+  --primary-soft: rgba(139, 92, 246, 0.14);
   --purple: #8B5CF6;
   --purple-soft: rgba(139, 92, 246, 0.18);
   --accent: #F97316;
@@ -37,7 +38,7 @@
   --warning: #F59E0B;
   --error: #EF4444;
   --pink: #EC4899;
-  --label: #EC4899;
+  --label: #64748B;
   --cyan: #00F2FE;
   --coral: #F97316;
   --orange: #FF8A00;
@@ -250,39 +251,370 @@ body {
 
 /* Glass card utility — Design System Revisado */
 .dt-glass {
-  background: rgba(15, 23, 42, 0.72);
-  border: 1px solid rgba(255, 255, 255, 0.10);
+  background: rgba(11, 16, 34, 0.78);
+  border: 1px solid rgba(255, 255, 255, 0.08);
   box-shadow: var(--shadow-md), inset 0 1px 0 var(--glass-inset);
   backdrop-filter: blur(18px);
   -webkit-backdrop-filter: blur(18px);
 }
 
 .dt-glass-soft {
-  background: rgba(15, 23, 42, 0.55);
+  background: rgba(11, 16, 34, 0.55);
   border: 1px solid rgba(255, 255, 255, 0.08);
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
 }
 
 .dt-glass-violet {
-  background: rgba(15, 23, 42, 0.72);
-  border: 1px solid rgba(139, 92, 246, 0.45);
+  background: rgba(11, 16, 34, 0.78);
+  border: 1px solid rgba(139, 92, 246, 0.35);
   box-shadow: var(--shadow-glow-purple), inset 0 1px 0 var(--glass-inset);
   backdrop-filter: blur(18px);
   -webkit-backdrop-filter: blur(18px);
 }
 
 .dt-glass-cyan {
-  background: rgba(15, 23, 42, 0.72);
-  border: 1px solid rgba(0, 242, 254, 0.40);
+  background: rgba(11, 16, 34, 0.78);
+  border: 1px solid rgba(0, 242, 254, 0.30);
   box-shadow: var(--shadow-glow), inset 0 1px 0 var(--glass-inset);
   backdrop-filter: blur(18px);
   -webkit-backdrop-filter: blur(18px);
 }
 
 .dt-hero-train {
-  background: linear-gradient(135deg, #F97316 0%, #EC4899 55%, #A855F7 100%);
-  box-shadow: 0 12px 40px rgba(236, 72, 153, 0.38), 0 8px 28px rgba(249, 115, 22, 0.28);
+  background: linear-gradient(135deg, #F97316 0%, #EC4899 48%, #8B5CF6 100%);
+  box-shadow: 0 14px 42px rgba(236, 72, 153, 0.42), 0 8px 28px rgba(139, 92, 246, 0.28);
+}
+
+/* ─── Home cockpit (Fase 1) — composição exclusiva da Home ─── */
+.home-cockpit-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.home-cockpit-hero {
+  background: linear-gradient(145deg, #FF6B3D 0%, #FF4D6D 42%, #EC4899 78%, #C026D3 100%);
+  box-shadow:
+    0 18px 48px rgba(236, 72, 153, 0.48),
+    0 8px 24px rgba(255, 107, 61, 0.28),
+    inset 0 1px 0 rgba(255, 255, 255, 0.22);
+  min-height: clamp(268px, 34vh, 312px);
+}
+
+.home-cockpit-orb {
+  position: absolute;
+  border-radius: 9999px;
+  pointer-events: none;
+  filter: blur(28px);
+}
+
+.home-cockpit-orb--tl {
+  top: -40%;
+  left: -20%;
+  width: 220px;
+  height: 220px;
+  background: rgba(255, 255, 255, 0.28);
+}
+
+.home-cockpit-orb--br {
+  bottom: -35%;
+  right: -15%;
+  width: 240px;
+  height: 240px;
+  background: rgba(139, 92, 246, 0.45);
+}
+
+.home-cockpit-particle {
+  position: absolute;
+  width: 3px;
+  height: 3px;
+  border-radius: 9999px;
+  background: rgba(255, 255, 255, 0.55);
+  pointer-events: none;
+  opacity: 0.55;
+}
+
+.home-cockpit-particle--1 { top: 18%; right: 22%; box-shadow: 0 0 6px rgba(255,255,255,0.6); }
+.home-cockpit-particle--2 { top: 42%; right: 12%; width: 2px; height: 2px; opacity: 0.35; }
+.home-cockpit-particle--3 { bottom: 28%; left: 18%; width: 2.5px; height: 2.5px; opacity: 0.4; }
+.home-cockpit-particle--4 { top: 28%; left: 48%; width: 2px; height: 2px; opacity: 0.3; }
+
+.home-cockpit-play-ring {
+  position: absolute;
+  inset: -14px;
+  border-radius: 9999px;
+  border: 1.5px solid rgba(255, 255, 255, 0.28);
+  box-shadow:
+    0 0 0 8px rgba(236, 72, 153, 0.12),
+    0 0 32px rgba(255, 255, 255, 0.25);
+  pointer-events: none;
+  animation: home-cockpit-pulse 2.8s ease-in-out infinite;
+}
+
+@keyframes home-cockpit-pulse {
+  0%, 100% { transform: scale(1); opacity: 0.85; }
+  50% { transform: scale(1.06); opacity: 1; }
+}
+
+.home-cockpit-targets {
+  list-style: none;
+  margin: 0;
+  padding: 2px 0 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.home-cockpit-targets > li + li {
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+@media (min-width: 414px) {
+  .home-cockpit-stack {
+    gap: 16px;
+  }
+}
+
+/* ─── Aprender cockpit (Fase 2) — aula voice-first ─── */
+.learn-cockpit {
+  background: #050816;
+}
+
+.learn-phrase-stage {
+  position: relative;
+  width: 100%;
+  padding: 12px 8px 20px;
+}
+
+.learn-phrase-glow {
+  position: absolute;
+  left: 50%;
+  bottom: 8%;
+  transform: translateX(-50%);
+  width: min(320px, 90%);
+  height: 160px;
+  border-radius: 50%;
+  background: radial-gradient(ellipse at center, rgba(139, 92, 246, 0.45) 0%, rgba(0, 242, 254, 0.12) 42%, transparent 70%);
+  filter: blur(8px);
+  pointer-events: none;
+}
+
+.learn-phrase-arc {
+  position: absolute;
+  left: 50%;
+  bottom: 4%;
+  transform: translateX(-50%);
+  width: min(280px, 82%);
+  height: 90px;
+  border-radius: 50%;
+  border: 1.5px solid transparent;
+  border-bottom-color: rgba(168, 85, 247, 0.55);
+  border-left-color: rgba(0, 242, 254, 0.2);
+  border-right-color: rgba(236, 72, 153, 0.18);
+  box-shadow:
+    0 12px 36px rgba(139, 92, 246, 0.28),
+    0 0 40px rgba(0, 242, 254, 0.1);
+  pointer-events: none;
+}
+
+.learn-phrase-de {
+  font-family: var(--font-display);
+  font-size: clamp(32px, 9vw, 42px);
+  font-weight: 800;
+  line-height: 1.12;
+  letter-spacing: -0.02em;
+  color: #ffffff;
+  text-shadow:
+    0 0 28px rgba(139, 92, 246, 0.35),
+    0 2px 16px rgba(0, 0, 0, 0.45);
+}
+
+.learn-mic-core {
+  background: linear-gradient(145deg, #A855F7 0%, #8B5CF6 48%, #6D28D9 100%);
+  box-shadow:
+    0 0 0 5px rgba(139, 92, 246, 0.22),
+    0 0 36px rgba(139, 92, 246, 0.55),
+    0 10px 28px rgba(0, 0, 0, 0.4),
+    inset 0 1px 0 rgba(255, 255, 255, 0.25);
+}
+
+.learn-mic-halo {
+  position: absolute;
+  inset: -16px;
+  border-radius: 9999px;
+  pointer-events: none;
+}
+
+.learn-mic-halo--ready {
+  border: 1.5px solid rgba(168, 85, 247, 0.4);
+  box-shadow:
+    0 0 0 10px rgba(139, 92, 246, 0.08),
+    0 0 28px rgba(139, 92, 246, 0.35);
+  animation: learn-mic-pulse 2.6s ease-in-out infinite;
+}
+
+.learn-mic-halo--busy {
+  border: 1.5px solid rgba(148, 163, 184, 0.35);
+  opacity: 0.7;
+}
+
+@keyframes learn-mic-pulse {
+  0%, 100% { transform: scale(1); opacity: 0.9; }
+  50% { transform: scale(1.07); opacity: 1; }
+}
+
+@media (max-height: 720px) {
+  .learn-phrase-de {
+    font-size: clamp(28px, 8vw, 36px);
+  }
+  .learn-mic-core {
+    width: 84px !important;
+    height: 84px !important;
+  }
+}
+
+/* ─── Conversar cockpit (Fase 3) ─── */
+.talk-cockpit,
+.talk-live {
+  background: #050816;
+}
+
+.talk-orb-halo {
+  position: absolute;
+  width: min(280px, 78vw);
+  height: min(280px, 78vw);
+  border-radius: 9999px;
+  background: radial-gradient(circle, rgba(139, 92, 246, 0.28) 0%, rgba(0, 242, 254, 0.1) 42%, transparent 68%);
+  filter: blur(6px);
+  pointer-events: none;
+}
+
+.talk-live-de {
+  font-size: clamp(22px, 6.2vw, 30px);
+  font-weight: 800;
+  line-height: 1.2;
+  letter-spacing: -0.015em;
+  max-width: 340px;
+  text-shadow: 0 0 24px rgba(139, 92, 246, 0.28);
+  overflow-wrap: anywhere;
+}
+
+.talk-mic-core {
+  background: linear-gradient(145deg, #A855F7 0%, #8B5CF6 48%, #6D28D9 100%);
+  box-shadow:
+    0 0 0 5px rgba(139, 92, 246, 0.2),
+    0 0 32px rgba(139, 92, 246, 0.5),
+    0 10px 24px rgba(0, 0, 0, 0.35),
+    inset 0 1px 0 rgba(255, 255, 255, 0.22);
+}
+
+.talk-mic-core--hot {
+  background: linear-gradient(145deg, #22D3EE 0%, #00F2FE 45%, #8B5CF6 100%);
+  box-shadow:
+    0 0 0 5px rgba(0, 242, 254, 0.22),
+    0 0 36px rgba(0, 242, 254, 0.5),
+    0 10px 24px rgba(0, 0, 0, 0.35);
+}
+
+.talk-mic-halo {
+  position: absolute;
+  inset: -14px;
+  border-radius: 9999px;
+  border: 1.5px solid rgba(168, 85, 247, 0.4);
+  box-shadow:
+    0 0 0 10px rgba(139, 92, 246, 0.08),
+    0 0 28px rgba(139, 92, 246, 0.32);
+  pointer-events: none;
+  animation: talk-mic-pulse 2.6s ease-in-out infinite;
+}
+
+.talk-mic-halo--hot {
+  border-color: rgba(0, 242, 254, 0.5);
+  box-shadow:
+    0 0 0 10px rgba(0, 242, 254, 0.1),
+    0 0 32px rgba(0, 242, 254, 0.4);
+}
+
+@keyframes talk-mic-pulse {
+  0%, 100% { transform: scale(1); opacity: 0.88; }
+  50% { transform: scale(1.06); opacity: 1; }
+}
+
+@media (max-height: 720px) {
+  .talk-live-de {
+    font-size: clamp(18px, 5.5vw, 24px);
+  }
+}
+
+/* ─── Revisão cockpit (Fase 4) ─── */
+.review-cockpit {
+  background: #050816;
+}
+
+.review-stack {
+  min-height: 220px;
+  padding-bottom: 8px;
+}
+
+.review-stack-layer {
+  border-radius: 24px;
+  background: rgba(15, 23, 42, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.review-stack-layer--3 {
+  position: absolute;
+  left: 10%;
+  right: 10%;
+  top: 0;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  opacity: 0.45;
+  transform: scale(0.92);
+  z-index: 1;
+}
+
+.review-stack-layer--2 {
+  position: absolute;
+  left: 5%;
+  right: 5%;
+  top: 18px;
+  height: 56px;
+  display: flex;
+  align-items: center;
+  opacity: 0.7;
+  transform: scale(0.96);
+  z-index: 2;
+  border-color: rgba(139, 92, 246, 0.18);
+}
+
+.review-stack-layer--1 {
+  position: relative;
+  z-index: 3;
+  margin-top: 40px;
+  padding: 22px 20px 24px;
+  min-height: 200px;
+  background: linear-gradient(165deg, rgba(30, 27, 55, 0.98) 0%, rgba(8, 12, 28, 0.98) 100%);
+}
+
+.review-cta {
+  background: linear-gradient(135deg, #8B5CF6 0%, #A855F7 50%, #00F2FE 140%);
+  box-shadow:
+    0 0 28px rgba(139, 92, 246, 0.42),
+    0 10px 24px rgba(0, 0, 0, 0.3);
+}
+
+@media (max-height: 720px) {
+  .review-stack-layer--1 {
+    margin-top: 32px;
+    min-height: 170px;
+    padding: 18px 16px 20px;
+  }
+}
+
+.dt-cta-primary {
+  background: linear-gradient(135deg, #8B5CF6 0%, #A855F7 55%, #00F2FE 140%);
+  box-shadow: 0 0 28px rgba(139, 92, 246, 0.4), 0 8px 24px rgba(0, 242, 254, 0.15);
 }
 
 .dt-page {
@@ -296,11 +628,6 @@ body {
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: #64748B;
-}
-
-.dt-cta-primary {
-  background: linear-gradient(135deg, #00F2FE 0%, #8B5CF6 100%);
-  box-shadow: 0 0 24px rgba(0, 242, 254, 0.28), 0 8px 24px rgba(139, 92, 246, 0.22);
 }
 
 .dt-title {
@@ -349,6 +676,177 @@ body {
 }
 
 /* ===== Animations ===== */
+/* ─── Mini Prova cockpit (Fase 5) ─── */
+.mini-prova-page {
+  background: #050816;
+}
+
+.mini-prova-progress-line {
+  width: 100%;
+  height: 3px;
+  border-radius: 9999px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.mini-prova-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #8B5CF6 0%, #00F2FE 100%);
+  box-shadow: 0 0 12px rgba(0, 242, 254, 0.45);
+  transition: width 400ms ease;
+}
+
+.mini-prova-cockpit {
+  display: flex;
+  flex-direction: column;
+  min-height: 520px;
+  justify-content: flex-start;
+  gap: 18px;
+}
+
+.mini-prova-label {
+  text-align: center;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: #64748B;
+  margin-bottom: 12px;
+}
+
+.mini-prova-question {
+  padding-top: 6px;
+}
+
+.mini-prova-question-text {
+  font-family: var(--font-display);
+  font-size: clamp(26px, 7vw, 36px);
+  font-weight: 900;
+  line-height: 1.12;
+  letter-spacing: -0.02em;
+  color: #ffffff;
+  text-align: center;
+  text-shadow:
+    0 0 26px rgba(139, 92, 246, 0.35),
+    0 2px 18px rgba(0, 0, 0, 0.45);
+  overflow-wrap: anywhere;
+  padding: 0 6px;
+}
+
+.mini-prova-audio {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: -6px;
+}
+
+.mini-prova-mic {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.mini-prova-mic-btn {
+  width: 96px;
+  height: 96px;
+  border-radius: 9999px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  position: relative;
+}
+
+.mini-prova-mic-halo {
+  position: absolute;
+  inset: -14px;
+  border-radius: 9999px;
+  pointer-events: none;
+  border: 1.5px solid rgba(168, 85, 247, 0.45);
+  box-shadow:
+    0 0 0 10px rgba(139, 92, 246, 0.08),
+    0 0 28px rgba(139, 92, 246, 0.35);
+  animation: mini-prova-mic-pulse 2.6s ease-in-out infinite;
+}
+
+.mini-prova-mic-halo--busy {
+  border-color: rgba(148, 163, 184, 0.35);
+  opacity: 0.7;
+  animation: none;
+}
+
+@keyframes mini-prova-mic-pulse {
+  0%, 100% { transform: scale(1); opacity: 0.88; }
+  50% { transform: scale(1.06); opacity: 1; }
+}
+
+.mini-prova-mic-core {
+  width: 96px;
+  height: 96px;
+  border-radius: 9999px;
+  background: linear-gradient(145deg, #A855F7 0%, #8B5CF6 48%, #6D28D9 100%);
+  box-shadow:
+    0 0 0 5px rgba(139, 92, 246, 0.2),
+    0 0 32px rgba(139, 92, 246, 0.55),
+    0 10px 28px rgba(0, 0, 0, 0.4),
+    inset 0 1px 0 rgba(255, 255, 255, 0.25);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.mini-prova-mic-text {
+  font-size: 12px;
+  font-weight: 800;
+  color: #ffffff;
+}
+
+.mini-prova-mic-hint {
+  font-size: 12px;
+  font-weight: 800;
+  color: #CBD5E1;
+  opacity: 0.95;
+}
+
+.mini-prova-actions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 2px 0 6px;
+}
+
+.mini-prova-chip {
+  padding: 10px 14px;
+  border-radius: 9999px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #E2E8F0;
+  font-size: 12px;
+  font-weight: 700;
+  transition: transform 120ms ease, opacity 120ms ease, border-color 120ms ease;
+}
+
+.mini-prova-chip:disabled {
+  opacity: 0.55;
+}
+
+.mini-prova-chip--violet {
+  border-color: rgba(168, 85, 247, 0.35);
+  box-shadow: 0 0 16px rgba(139, 92, 246, 0.12);
+  color: #C4B5FD;
+}
+
+.mini-prova-chip--cyan {
+  border-color: rgba(0, 242, 254, 0.35);
+  box-shadow: 0 0 16px rgba(0, 242, 254, 0.12);
+  color: #67E8F9;
+}
+
+.mini-prova-empty {
+  padding-top: 24px;
+}
+
 @keyframes pulse-ring {
   0% { transform: scale(0.95); opacity: 0.7; }
   70% { transform: scale(1.4); opacity: 0; }

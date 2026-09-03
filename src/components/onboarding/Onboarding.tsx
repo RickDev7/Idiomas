@@ -1,10 +1,12 @@
 /* ============================================================
-   DEUTSCH TURBO — Onboarding (identidade visual da referência)
+   DEUTSCH TURBO — Onboarding (identidade visual DT / glass)
    Shell, header, progresso numerado, botão, cards e telas 1–3 e 5.
+   Fluxo preservado; UI em português.
    ============================================================ */
 import type { ReactNode, CSSProperties } from 'react';
 import { haptic } from '@/services/ui/UiPrefsService';
 import { DeutschTurboMascot } from '@/components/ui/Mascot';
+import { glassStyle } from '@/components/dt';
 import {
   IconArrowUp,
   IconBriefcase,
@@ -49,9 +51,7 @@ export function LevelGlyph({ id, size = 18 }: { id: LevelIconId; size?: number }
 /* ---------- Shell ---------- */
 export function OnboardingShell({ children }: { children: ReactNode }) {
   return (
-    <div className="flex flex-col h-full max-w-md mx-auto dt-page text-white">
-      {children}
-    </div>
+    <div className="flex flex-col h-full max-w-md mx-auto dt-page text-white">{children}</div>
   );
 }
 
@@ -96,7 +96,10 @@ export function OnboardingProgress({
   onJump?: (i: number) => void;
 }) {
   return (
-    <nav className="flex items-center justify-center px-8 py-3 shrink-0" aria-label="Progresso do onboarding">
+    <nav
+      className="flex items-center justify-center px-8 py-3 shrink-0"
+      aria-label="Progresso do onboarding"
+    >
       {Array.from({ length: total }).map((_, i) => {
         const active = i === current;
         const done = i < current;
@@ -105,23 +108,45 @@ export function OnboardingProgress({
             <button
               type="button"
               disabled={!onJump || i > current}
-              onClick={() => { if (onJump && i < current) { haptic(6); onJump(i); } }}
+              onClick={() => {
+                if (onJump && i < current) {
+                  haptic(6);
+                  onJump(i);
+                }
+              }}
               aria-current={active ? 'step' : undefined}
               aria-label={`Passo ${i + 1}${active ? ', atual' : done ? ', concluído' : ''}`}
-              className={[
-                'w-8 h-8 rounded-full text-[13px] font-bold flex items-center justify-center transition-all duration-300',
+              className="w-8 h-8 rounded-full text-[13px] font-bold flex items-center justify-center transition-all duration-300"
+              style={
                 active
-                  ? 'bg-primary text-white shadow-sm shadow-primary/30 scale-105'
+                  ? {
+                      background: 'linear-gradient(145deg, #A855F7, #8B5CF6)',
+                      color: '#fff',
+                      boxShadow: '0 0 0 3px rgba(139,92,246,0.35), 0 0 18px rgba(139,92,246,0.5)',
+                      transform: 'scale(1.05)',
+                    }
                   : done
-                    ? 'bg-primary/15 text-primary border border-primary/30'
-                    : 'bg-surface text-text-faint border border-border',
-                onJump && i < current ? 'cursor-pointer' : 'cursor-default',
-              ].join(' ')}
+                    ? {
+                        background: 'rgba(139,92,246,0.18)',
+                        color: '#A855F7',
+                        border: '1px solid rgba(168,85,247,0.4)',
+                      }
+                    : {
+                        ...glassStyle,
+                        color: '#64748B',
+                      }
+              }
             >
               {i + 1}
             </button>
             {i < total - 1 && (
-              <span className={`w-6 sm:w-8 h-[2px] mx-0.5 rounded-full transition-colors ${i < current ? 'bg-primary/50' : 'bg-border'}`} aria-hidden />
+              <span
+                className="w-6 sm:w-8 h-[2px] mx-0.5 rounded-full transition-colors"
+                style={{
+                  background: i < current ? 'rgba(139,92,246,0.55)' : 'rgba(255,255,255,0.08)',
+                }}
+                aria-hidden
+              />
             )}
           </span>
         );
@@ -139,10 +164,7 @@ export function OnboardingSlide({
   dir?: 1 | -1;
 }) {
   return (
-    <div
-      className={dir >= 0 ? 'animate-ob-next' : 'animate-ob-prev'}
-      style={{ minHeight: '100%' }}
-    >
+    <div className={dir >= 0 ? 'animate-ob-next' : 'animate-ob-prev'} style={{ minHeight: '100%' }}>
       {children}
     </div>
   );
@@ -152,8 +174,10 @@ export function OnboardingSlide({
 export function OnboardingQuestion({ title, subtitle }: { title: ReactNode; subtitle: string }) {
   return (
     <div className="mb-5">
-      <h1 className="text-[26px] leading-[1.18] font-bold tracking-tight text-text">{title}</h1>
-      <p className="text-[15px] text-text-muted mt-2 leading-relaxed">{subtitle}</p>
+      <h1 className="text-[26px] leading-[1.18] font-bold tracking-tight text-white font-[family-name:var(--font-display)]">
+        {title}
+      </h1>
+      <p className="text-[15px] text-[#94A3B8] mt-2 leading-relaxed">{subtitle}</p>
     </div>
   );
 }
@@ -177,8 +201,18 @@ export function OnboardingButton({
       type="button"
       aria-label={ariaLabel}
       disabled={disabled}
-      onClick={() => { if (disabled) return; haptic(); onClick(); }}
-      className="w-full min-h-14 rounded-full bg-primary hover:bg-primary-dark text-white text-[16px] font-semibold shadow-md shadow-primary/25 active:scale-[0.98] transition-all inline-flex items-center justify-center gap-2 disabled:opacity-40 disabled:active:scale-100 disabled:shadow-none"
+      onClick={() => {
+        if (disabled) return;
+        haptic();
+        onClick();
+      }}
+      className="w-full min-h-14 rounded-full text-white text-[16px] font-semibold active:scale-[0.98] transition-all inline-flex items-center justify-center gap-2 disabled:opacity-40 disabled:active:scale-100"
+      style={{
+        background: 'linear-gradient(135deg, #8B5CF6 0%, #A855F7 55%, #00F2FE 140%)',
+        boxShadow: disabled
+          ? undefined
+          : '0 0 28px rgba(139,92,246,0.4), 0 8px 24px rgba(0,242,254,0.15)',
+      }}
     >
       {icon}
       {children}
@@ -189,10 +223,20 @@ export function OnboardingButton({
 export function SelectCheck({ selected }: { selected: boolean }) {
   return (
     <span
-      className={[
-        'w-5 h-5 rounded-full border flex items-center justify-center shrink-0 transition-all',
-        selected ? 'bg-primary border-primary text-white' : 'border-border bg-transparent text-transparent',
-      ].join(' ')}
+      className="w-5 h-5 rounded-full border flex items-center justify-center shrink-0 transition-all"
+      style={
+        selected
+          ? {
+              background: '#8B5CF6',
+              borderColor: '#8B5CF6',
+              color: '#fff',
+            }
+          : {
+              borderColor: 'rgba(255,255,255,0.18)',
+              background: 'transparent',
+              color: 'transparent',
+            }
+      }
       aria-hidden
     >
       <IconCheck size={12} />
@@ -200,7 +244,15 @@ export function SelectCheck({ selected }: { selected: boolean }) {
   );
 }
 
-export function ColorIcon({ color, children, size = 'md' }: { color: string; children: ReactNode; size?: 'sm' | 'md' }) {
+export function ColorIcon({
+  color,
+  children,
+  size = 'md',
+}: {
+  color: string;
+  children: ReactNode;
+  size?: 'sm' | 'md';
+}) {
   const box = size === 'sm' ? 'w-9 h-9 rounded-xl' : 'w-11 h-11 rounded-2xl';
   return (
     <span
@@ -224,15 +276,20 @@ export function ProfessionInput({
   return (
     <label className="block">
       <span className="sr-only">Profissão</span>
-      <span className="flex items-center gap-3 w-full min-h-14 px-4 rounded-[22px] bg-surface border border-border shadow-sm focus-within:border-primary focus-within:shadow-md focus-within:shadow-primary/10 transition-all">
-        <span className="text-primary shrink-0" aria-hidden><IconBriefcase size={22} /></span>
+      <span
+        className="flex items-center gap-3 w-full min-h-14 px-4 rounded-[22px] focus-within:ring-2 focus-within:ring-[#8B5CF6]/40 transition-all"
+        style={glassStyle}
+      >
+        <span className="text-[#00F2FE] shrink-0" aria-hidden>
+          <IconBriefcase size={22} />
+        </span>
         <input
           type="text"
           value={value}
           onChange={(e) => onChange(e.target.value)}
           placeholder="Ex: engenheiro, estudante..."
           autoComplete="organization-title"
-          className="flex-1 min-w-0 bg-transparent py-3.5 text-[16px] text-text placeholder:text-text-faint outline-none"
+          className="flex-1 min-w-0 bg-transparent py-3.5 text-[16px] text-white placeholder:text-[#64748B] outline-none"
         />
       </span>
     </label>
@@ -263,8 +320,13 @@ export function ProfessionScreen({
         {floats.map((f, i) => (
           <span
             key={i}
-            className="absolute w-11 h-11 rounded-full bg-surface shadow-md border border-border/60 flex items-center justify-center animate-orb-breathe"
-            style={{ ...f.style, color: f.color, animationDelay: `${i * 0.3}s` }}
+            className="absolute w-11 h-11 rounded-full flex items-center justify-center animate-orb-breathe"
+            style={{
+              ...f.style,
+              ...glassStyle,
+              color: f.color,
+              animationDelay: `${i * 0.3}s`,
+            }}
             aria-hidden
           >
             <f.Icon size={18} />
@@ -272,8 +334,10 @@ export function ProfessionScreen({
         ))}
         <DeutschTurboMascot size="hero" state="idle" />
       </div>
-      <p className="flex items-center justify-center gap-2 text-sm text-text-faint">
-        <span className="text-warning" aria-hidden><IconLightbulb size={16} /></span>
+      <p className="flex items-center justify-center gap-2 text-sm text-[#64748B]">
+        <span className="text-[#F59E0B]" aria-hidden>
+          <IconLightbulb size={16} />
+        </span>
         Você pode pular essa pergunta.
       </p>
     </div>
@@ -281,11 +345,41 @@ export function ProfessionScreen({
 }
 
 /* ---------- Goals ---------- */
-const GOALS: { value: Goal; label: string; desc: string; color: string; Icon: typeof IconBriefcase }[] = [
-  { value: 'work', label: 'Trabalho', desc: 'Alemão para carreira e negócios', color: '#3b82f6', Icon: IconBriefcase },
-  { value: 'daily', label: 'Vida cotidiana', desc: 'Comunicação no dia a dia e situações reais', color: '#22c55e', Icon: IconHouse },
-  { value: 'conversation', label: 'Conversação', desc: 'Falar com mais confiança e fluência', color: '#8b5cf6', Icon: IconChat },
-  { value: 'travel', label: 'Viagem', desc: 'Alemão para viajar com tranquilidade', color: '#f97316', Icon: IconPlane },
+const GOALS: {
+  value: Goal;
+  label: string;
+  desc: string;
+  color: string;
+  Icon: typeof IconBriefcase;
+}[] = [
+  {
+    value: 'work',
+    label: 'Trabalho',
+    desc: 'Alemão para carreira e negócios',
+    color: '#3b82f6',
+    Icon: IconBriefcase,
+  },
+  {
+    value: 'daily',
+    label: 'Vida cotidiana',
+    desc: 'Comunicação no dia a dia e situações reais',
+    color: '#22c55e',
+    Icon: IconHouse,
+  },
+  {
+    value: 'conversation',
+    label: 'Conversação',
+    desc: 'Falar com mais confiança e fluência',
+    color: '#8b5cf6',
+    Icon: IconChat,
+  },
+  {
+    value: 'travel',
+    label: 'Viagem',
+    desc: 'Alemão para viajar com tranquilidade',
+    color: '#f97316',
+    Icon: IconPlane,
+  },
 ];
 
 export function GoalCard({
@@ -307,25 +401,38 @@ export function GoalCard({
     <button
       type="button"
       aria-pressed={selected}
-      onClick={() => { haptic(8); onSelect(); }}
-      className={[
-        'w-full text-left rounded-[20px] px-3.5 py-3 min-h-[64px] border flex items-center gap-3 transition-all duration-200',
+      onClick={() => {
+        haptic(8);
+        onSelect();
+      }}
+      className="w-full text-left rounded-[20px] px-3.5 py-3 min-h-[64px] flex items-center gap-3 transition-all duration-200"
+      style={
         selected
-          ? 'border-primary bg-primary-soft shadow-sm shadow-primary/10'
-          : 'border-border bg-surface hover:border-primary/30',
-      ].join(' ')}
+          ? {
+              background: 'rgba(139,92,246,0.22)',
+              border: '1px solid rgba(168,85,247,0.5)',
+              boxShadow: '0 0 16px rgba(139,92,246,0.25)',
+            }
+          : glassStyle
+      }
     >
       <ColorIcon color={color}>{icon}</ColorIcon>
       <span className="min-w-0 flex-1">
-        <span className="block text-[15px] font-bold text-text leading-tight">{label}</span>
-        <span className="block text-[13px] text-text-muted leading-snug mt-0.5">{desc}</span>
+        <span className="block text-[15px] font-bold text-white leading-tight">{label}</span>
+        <span className="block text-[13px] text-[#94A3B8] leading-snug mt-0.5">{desc}</span>
       </span>
       <SelectCheck selected={selected} />
     </button>
   );
 }
 
-export function GoalScreen({ value, onSelect }: { value: Goal | null; onSelect: (v: Goal) => void }) {
+export function GoalScreen({
+  value,
+  onSelect,
+}: {
+  value: Goal | null;
+  onSelect: (v: Goal) => void;
+}) {
   return (
     <div>
       <OnboardingQuestion
@@ -373,21 +480,33 @@ export function TimeOption({
     <button
       type="button"
       aria-pressed={selected}
-      onClick={() => { haptic(8); onSelect(); }}
-      className={[
-        'relative flex flex-col items-center justify-center gap-1.5 rounded-[20px] min-h-[88px] border py-3 px-2 transition-all duration-200',
+      onClick={() => {
+        haptic(8);
+        onSelect();
+      }}
+      className="relative flex flex-col items-center justify-center gap-1.5 rounded-[20px] min-h-[88px] py-3 px-2 transition-all duration-200"
+      style={
         selected
-          ? 'border-primary bg-primary-soft shadow-sm shadow-primary/10'
-          : 'border-border bg-surface hover:border-primary/30',
-      ].join(' ')}
+          ? {
+              background: 'rgba(139,92,246,0.22)',
+              border: '1px solid rgba(168,85,247,0.5)',
+              boxShadow: '0 0 16px rgba(139,92,246,0.25)',
+            }
+          : glassStyle
+      }
     >
       {selected && (
-        <span className="absolute top-2 right-2 w-5 h-5 rounded-full bg-primary text-white flex items-center justify-center" aria-hidden>
+        <span
+          className="absolute top-2 right-2 w-5 h-5 rounded-full bg-[#8B5CF6] text-white flex items-center justify-center"
+          aria-hidden
+        >
           <IconCheck size={11} />
         </span>
       )}
-      <span style={{ color }} aria-hidden><IconClock size={22} /></span>
-      <span className="text-[15px] font-bold text-text">{minutes} min</span>
+      <span style={{ color }} aria-hidden>
+        <IconClock size={22} />
+      </span>
+      <span className="text-[15px] font-bold text-white">{minutes} min</span>
     </button>
   );
 }
@@ -407,19 +526,39 @@ export function TimeScreen({
       />
       <div className="grid grid-cols-3 gap-2.5">
         {TIMES.slice(0, 3).map((t) => (
-          <TimeOption key={t.value} minutes={t.value} color={t.color} selected={value === t.value} onSelect={() => onSelect(t.value)} />
+          <TimeOption
+            key={t.value}
+            minutes={t.value}
+            color={t.color}
+            selected={value === t.value}
+            onSelect={() => onSelect(t.value)}
+          />
         ))}
       </div>
       <div className="grid grid-cols-2 gap-2.5 mt-2.5">
         {TIMES.slice(3).map((t) => (
-          <TimeOption key={t.value} minutes={t.value} color={t.color} selected={value === t.value} onSelect={() => onSelect(t.value)} />
+          <TimeOption
+            key={t.value}
+            minutes={t.value}
+            color={t.color}
+            selected={value === t.value}
+            onSelect={() => onSelect(t.value)}
+          />
         ))}
       </div>
-      <div className="mt-5 flex items-start gap-3 rounded-[20px] bg-primary-soft border border-primary/20 p-4">
-        <span className="text-primary mt-0.5" aria-hidden><IconClock size={20} /></span>
-        <p className="text-sm text-text leading-snug">
-          <span className="font-bold">O importante é a consistência.</span>{' '}
-          Pequenos passos todos os dias fazem muita diferença.
+      <div
+        className="mt-5 flex items-start gap-3 rounded-[20px] p-4"
+        style={{
+          background: 'rgba(139,92,246,0.14)',
+          border: '1px solid rgba(168,85,247,0.3)',
+        }}
+      >
+        <span className="text-[#A855F7] mt-0.5" aria-hidden>
+          <IconClock size={20} />
+        </span>
+        <p className="text-sm text-[#CBD5E1] leading-snug">
+          <span className="font-bold text-white">O importante é a consistência.</span> Pequenos
+          passos todos os dias fazem muita diferença.
         </p>
       </div>
     </div>
@@ -428,9 +567,24 @@ export function TimeScreen({
 
 /* ---------- Ready ---------- */
 const BENEFITS = [
-  { Icon: IconTarget, color: '#3b82f6', title: 'Conteúdo personalizado', desc: 'Feito para seus objetivos e rotina.' },
-  { Icon: IconBrain, color: '#8b5cf6', title: 'Aprendizado adaptativo', desc: 'Evolui conforme seu desempenho.' },
-  { Icon: IconChart, color: '#f97316', title: 'Evolução contínua', desc: 'Acompanhamos seu progresso.' },
+  {
+    Icon: IconTarget,
+    color: '#3b82f6',
+    title: 'Conteúdo personalizado',
+    desc: 'Feito para seus objetivos e rotina.',
+  },
+  {
+    Icon: IconBrain,
+    color: '#8b5cf6',
+    title: 'Aprendizado adaptativo',
+    desc: 'Evolui conforme seu desempenho.',
+  },
+  {
+    Icon: IconChart,
+    color: '#f97316',
+    title: 'Evolução contínua',
+    desc: 'Acompanhamos seu progresso.',
+  },
 ];
 
 export function ReadyScreen() {
@@ -455,17 +609,25 @@ export function ReadyScreen() {
         ))}
         <DeutschTurboMascot size="onboarding" state="success" />
       </div>
-      <h1 className="text-[28px] font-bold tracking-tight text-text">Tudo pronto!</h1>
-      <p className="text-[15px] text-text-muted mt-1.5 leading-relaxed max-w-[280px]">
+      <h1 className="text-[28px] font-bold tracking-tight text-white font-[family-name:var(--font-display)]">
+        Tudo pronto!
+      </h1>
+      <p className="text-[15px] text-[#94A3B8] mt-1.5 leading-relaxed max-w-[280px]">
         Seu plano de estudos personalizado está sendo preparado.
       </p>
       <ul className="w-full mt-6 space-y-3 text-left">
         {BENEFITS.map((b) => (
-          <li key={b.title} className="flex items-center gap-3 rounded-[18px] bg-surface border border-border/70 px-3.5 py-3 shadow-sm">
-            <ColorIcon color={b.color}><b.Icon size={20} /></ColorIcon>
+          <li
+            key={b.title}
+            className="flex items-center gap-3 rounded-[18px] px-3.5 py-3"
+            style={glassStyle}
+          >
+            <ColorIcon color={b.color}>
+              <b.Icon size={20} />
+            </ColorIcon>
             <span>
-              <span className="block text-[14px] font-bold text-text leading-tight">{b.title}</span>
-              <span className="block text-[12px] text-text-muted mt-0.5">{b.desc}</span>
+              <span className="block text-[14px] font-bold text-white leading-tight">{b.title}</span>
+              <span className="block text-[12px] text-[#94A3B8] mt-0.5">{b.desc}</span>
             </span>
           </li>
         ))}
@@ -485,13 +647,18 @@ export function ReadyCta({
 }) {
   return (
     <div className="space-y-3">
-      <OnboardingButton onClick={onStart} disabled={preparing} icon={<IconPlay size={18} />} ariaLabel="Começar agora">
+      <OnboardingButton
+        onClick={onStart}
+        disabled={preparing}
+        icon={<IconPlay size={18} />}
+        ariaLabel="Começar agora"
+      >
         {preparing ? 'Preparando…' : 'Começar agora'}
       </OnboardingButton>
       <button
         type="button"
         onClick={onLater}
-        className="w-full min-h-11 text-sm font-semibold text-text-muted hover:text-text transition-colors"
+        className="w-full min-h-11 text-sm font-semibold text-[#94A3B8] hover:text-white transition-colors"
       >
         Agora não
       </button>

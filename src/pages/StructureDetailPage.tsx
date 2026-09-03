@@ -1,14 +1,23 @@
 /**
- * Detalhe da Estrutura — Fase 3.
+ * Detalhe da Estrutura — foco na estrutura alemã + anel de domínio + variações.
  * Rota: /estrutura/:baseId
- * Dados: L0_CHUNK_GRAPH + Learning State + l0NextChunkAdvance.
  */
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { BottomNav } from '@/components/layout/BottomNav';
-import { GlassCard, glassStyle } from '@/components/ui/GlassCard';
-import { ProgressRing } from '@/components/ui/ProgressRing';
-import { IconBack } from '@/components/ui/Icons';
+import {
+  DTPage,
+  DTMain,
+  DTTopBar,
+  DTSectionLabel,
+  DTGlassCard,
+  DTProgressRing,
+  DTProgressBar,
+  DTNeonButton,
+  DTBadge,
+  glassStyle,
+} from '@/components/dt';
+import { IconCheck, IconSparkle } from '@/components/ui/Icons';
 import { LoadingScreen } from '@/components/ui/LoadingScreen';
 import { useProfile } from '@/hooks/useProfile';
 import { MemoryService } from '@/services/learning/MemoryService';
@@ -37,15 +46,21 @@ const TOPIC_FOR_BASE: Record<string, string> = {
 };
 
 const ACTION_LABEL: Record<string, string> = {
-  guided: 'Geführte Produktion',
-  transfer: 'Transfer üben',
-  spontaneous: 'Spontanes Sprechen',
-  independent: 'Unabhängige Produktion',
-  introduce: 'Einführen',
-  practice: 'Üben',
-  recall: 'Abrufen',
-  converse: 'Konversation',
-  maintenance: 'Festigen',
+  guided: 'Produção guiada',
+  transfer: 'Praticar transferência',
+  spontaneous: 'Fala espontânea',
+  independent: 'Produção independente',
+  introduce: 'Introduzir',
+  practice: 'Praticar',
+  recall: 'Recuperar',
+  converse: 'Conversar',
+  maintenance: 'Consolidar',
+};
+
+const RESULT_PT: Record<string, string> = {
+  SUCCESS: 'Acertou',
+  FAILED: 'Errou',
+  PARTIAL: 'Parcial',
 };
 
 export function StructureDetailPage() {
@@ -98,7 +113,12 @@ export function StructureDetailPage() {
 
     const topic = TOPIC_FOR_BASE[baseId];
     const situations = topic
-      ? UNIFIED_SIMULATOR_SCENARIOS.filter((s) => s.topic === topic || (topic === 'places' && s.topic === 'home') || (topic === 'help' && s.topic === 'requests'))
+      ? UNIFIED_SIMULATOR_SCENARIOS.filter(
+          (s) =>
+            s.topic === topic ||
+            (topic === 'places' && s.topic === 'home') ||
+            (topic === 'help' && s.topic === 'requests'),
+        )
       : [];
 
     const history =
@@ -114,7 +134,7 @@ export function StructureDetailPage() {
     const advance = l0NextChunkAdvance(learning, baseId);
     let nextLabel = '—';
     if (advance?.kind === 'converse') {
-      nextLabel = 'Konversation in Situation';
+      nextLabel = 'Conversar em situação';
     } else if (advance?.phraseId) {
       nextLabel = seeds.get(advance.phraseId)?.german || advance.phraseId;
     } else {
@@ -137,149 +157,170 @@ export function StructureDetailPage() {
 
   if (!baseId || !view) {
     return (
-      <div className="flex flex-col h-full max-w-md mx-auto items-center justify-center px-6 dt-page">
-        <p className="text-[#94A3B8] text-center">Struktur nicht gefunden.</p>
-        <button
-          type="button"
-          onClick={() => navigate('/chunks')}
-          className="mt-4 px-5 py-3 rounded-[14px] text-white font-semibold"
-          style={glassStyle}
-        >
-          Meus Chunks
-        </button>
-      </div>
+      <DTPage>
+        <div className="flex-1 flex flex-col items-center justify-center px-6">
+          <p className="text-[#94A3B8] text-center">Estrutura não encontrada.</p>
+          <button
+            type="button"
+            onClick={() => navigate('/chunks')}
+            className="mt-4 px-5 py-3 rounded-[14px] text-white font-semibold"
+            style={glassStyle}
+          >
+            Meus Chunks
+          </button>
+        </div>
+      </DTPage>
     );
   }
 
   return (
-    <div className="flex flex-col h-full max-w-md mx-auto dt-page">
-      <header className="px-5 pt-4 safe-top shrink-0 flex items-center gap-3">
-        <button
-          type="button"
-          onClick={() => navigate(-1)}
-          aria-label="Voltar"
-          className="w-10 h-10 rounded-full flex items-center justify-center text-white"
-          style={glassStyle}
-        >
-          <IconBack size={18} />
-        </button>
-        <div className="min-w-0 flex-1">
-          <h1 className="text-[16px] font-bold text-white truncate font-[family-name:var(--font-display)]">
-            {view.german}
-          </h1>
-          <p className="text-[12px] text-[#CBD5E1] truncate">{view.portuguese || '—'}</p>
-        </div>
-      </header>
+    <DTPage>
+      <DTTopBar
+        title={view.german}
+        subtitle={view.portuguese || 'Estrutura'}
+        onBack={() => navigate(-1)}
+      />
 
-      <main className="flex-1 overflow-y-auto scrollbar-hide px-5 pt-4 pb-28 space-y-5">
-        <GlassCard variant="violet" className="p-6 flex flex-col items-center relative overflow-hidden">
-          <span
-            className="absolute -top-16 w-48 h-48 rounded-full pointer-events-none"
-            style={{ background: 'radial-gradient(circle, rgba(139,92,246,0.4), transparent 70%)' }}
-          />
-          <ProgressRing value={view.auto} size={120} stroke={10} color="#8B5CF6" label={`${view.auto}%`} />
-          <p className="relative mt-3 dt-label">Automatisierung</p>
-        </GlassCard>
-
-        <section>
-          <p className="dt-label mb-2">Deine Variationen</p>
-          {view.variations.length === 0 ? (
-            <GlassCard className="p-4">
-              <p className="text-[13px] text-[#64748B]">Noch keine Variationen praktiziert.</p>
-            </GlassCard>
-          ) : (
-            <div className="space-y-2">
-              {view.variations.map((v) => (
-                <GlassCard key={v.id} className="px-4 py-3 flex items-center justify-between gap-2">
-                  <p className="text-[14px] font-semibold text-white truncate">{v.german}</p>
-                  <span className="text-[12px] font-bold text-[#00F2FE] tabular-nums shrink-0">{v.pct}%</span>
-                </GlassCard>
-              ))}
+      <DTMain>
+        <div className="pt-3 space-y-5">
+          <DTGlassCard
+            variant="violet"
+            className="p-6 flex flex-col items-center relative overflow-hidden"
+          >
+            <span
+              className="absolute -top-16 w-48 h-48 rounded-full pointer-events-none"
+              style={{
+                background: 'radial-gradient(circle, rgba(139,92,246,0.45), transparent 70%)',
+              }}
+            />
+            <p className="relative text-[22px] font-extrabold text-white text-center font-[family-name:var(--font-display)] leading-tight">
+              {view.german}
+            </p>
+            {view.portuguese ? (
+              <p className="relative mt-1 text-[13px] text-[#CBD5E1] text-center">{view.portuguese}</p>
+            ) : null}
+            <div className="relative mt-5">
+              <DTProgressRing
+                value={view.auto}
+                size={120}
+                stroke={10}
+                color="#8B5CF6"
+                label={`${view.auto}%`}
+              />
             </div>
-          )}
-        </section>
+            <p className="relative mt-3">
+              <DTSectionLabel>Domínio</DTSectionLabel>
+            </p>
+          </DTGlassCard>
 
-        <section>
-          <p className="dt-label mb-2">Situationen</p>
-          {view.situations.length === 0 ? (
-            <GlassCard className="p-4">
-              <p className="text-[13px] text-[#64748B]">—</p>
-            </GlassCard>
-          ) : (
-            <div className="flex flex-wrap gap-2">
-              {view.situations.map((s) => (
-                <button
-                  key={s.id}
-                  type="button"
-                  onClick={() => navigate('/situacoes')}
-                  className="px-3.5 py-2 rounded-full text-[12px] font-semibold text-white"
-                  style={{
-                    ...glassStyle,
-                    border: '1px solid rgba(0,242,254,0.35)',
-                  }}
-                >
-                  {s.emoji} {s.titleDe}
-                </button>
-              ))}
-            </div>
-          )}
-        </section>
+          <section>
+            <DTSectionLabel className="mb-2">Suas variações</DTSectionLabel>
+            {view.variations.length === 0 ? (
+              <DTGlassCard className="p-4">
+                <p className="text-[13px] text-[#64748B]">Ainda sem variações praticadas.</p>
+              </DTGlassCard>
+            ) : (
+              <div className="space-y-2">
+                {view.variations.map((v) => (
+                  <DTGlassCard key={v.id} className="px-4 py-3">
+                    <div className="flex items-center justify-between gap-2 mb-2">
+                      <p className="text-[14px] font-semibold text-white truncate">{v.german}</p>
+                      <span className="text-[12px] font-bold text-[#00F2FE] tabular-nums shrink-0">
+                        {v.pct}%
+                      </span>
+                    </div>
+                    <DTProgressBar value={v.pct} color="#00F2FE" />
+                  </DTGlassCard>
+                ))}
+              </div>
+            )}
+          </section>
 
-        <section>
-          <p className="dt-label mb-2">Historisch</p>
-          {view.history.length === 0 ? (
-            <GlassCard className="p-4">
-              <p className="text-[13px] text-[#64748B]">Kein Review-Verlauf für diese Struktur.</p>
-            </GlassCard>
-          ) : (
-            <GlassCard className="p-4 space-y-2">
-              {view.history.map((h, i) => (
-                <p key={`${h.at}-${i}`} className="text-[13px] text-white flex justify-between gap-2">
-                  <span className="text-[#94A3B8] truncate">
-                    {new Date(h.at).toLocaleDateString(undefined, {
-                      day: '2-digit',
-                      month: 'short',
-                    })}
-                  </span>
-                  <span
-                    className="font-semibold"
+          <section>
+            <DTSectionLabel className="mb-2">Situações</DTSectionLabel>
+            {view.situations.length === 0 ? (
+              <DTGlassCard className="p-4">
+                <p className="text-[13px] text-[#64748B]">Nenhuma situação vinculada.</p>
+              </DTGlassCard>
+            ) : (
+              <div className="flex flex-wrap gap-2">
+                {view.situations.map((s) => (
+                  <button
+                    key={s.id}
+                    type="button"
+                    onClick={() => navigate('/situacoes')}
+                    className="px-3.5 py-2 rounded-full text-[12px] font-semibold text-white"
                     style={{
-                      color:
+                      ...glassStyle,
+                      border: '1px solid rgba(0,242,254,0.35)',
+                    }}
+                  >
+                    {s.emoji} {s.titleDe}
+                  </button>
+                ))}
+              </div>
+            )}
+          </section>
+
+          <section>
+            <DTSectionLabel className="mb-2">Histórico</DTSectionLabel>
+            {view.history.length === 0 ? (
+              <DTGlassCard className="p-4">
+                <p className="text-[13px] text-[#64748B]">
+                  Nenhum histórico de revisão para esta estrutura.
+                </p>
+              </DTGlassCard>
+            ) : (
+              <DTGlassCard className="p-4 space-y-2.5">
+                {view.history.map((h, i) => (
+                  <div
+                    key={`${h.at}-${i}`}
+                    className="flex items-center justify-between gap-2"
+                  >
+                    <span className="text-[13px] text-[#94A3B8] truncate">
+                      {new Date(h.at).toLocaleDateString('pt-BR', {
+                        day: '2-digit',
+                        month: 'short',
+                      })}
+                    </span>
+                    <DTBadge
+                      color={
                         h.result === 'SUCCESS'
                           ? '#22C55E'
                           : h.result === 'FAILED'
                             ? '#EF4444'
-                            : '#F59E0B',
-                    }}
-                  >
-                    {h.result}
-                  </span>
-                </p>
-              ))}
-            </GlassCard>
-          )}
-        </section>
+                            : '#F59E0B'
+                      }
+                    >
+                      {RESULT_PT[h.result] || h.result}
+                    </DTBadge>
+                  </div>
+                ))}
+              </DTGlassCard>
+            )}
+          </section>
 
-        <section>
-          <p className="dt-label mb-2">Nächster Schritt</p>
-          <GlassCard className="p-4">
-            <p className="text-[15px] font-semibold text-white">{view.nextLabel}</p>
-          </GlassCard>
-        </section>
+          <section>
+            <DTSectionLabel className="mb-2">Próximo passo</DTSectionLabel>
+            <DTGlassCard className="p-4 flex items-start gap-3">
+              <span
+                className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0 text-[#A855F7]"
+                style={{ background: 'rgba(168,85,247,0.18)' }}
+              >
+                <IconSparkle size={16} />
+              </span>
+              <p className="text-[15px] font-semibold text-white pt-1.5">{view.nextLabel}</p>
+            </DTGlassCard>
+          </section>
 
-        <button
-          type="button"
-          onClick={() => navigate('/sessao?type=lesson')}
-          className="w-full py-4 rounded-[20px] text-[15px] font-bold text-white active:scale-[0.98] transition-transform duration-200"
-          style={{
-            background: 'linear-gradient(135deg, #8B5CF6, #EC4899)',
-            boxShadow: '0 0 28px rgba(139,92,246,0.4)',
-          }}
-        >
-          Jetzt üben
-        </button>
-      </main>
+          <DTNeonButton onClick={() => navigate('/sessao?type=lesson')}>
+            <span className="inline-flex items-center gap-2">
+              <IconCheck size={16} /> Treinar agora
+            </span>
+          </DTNeonButton>
+        </div>
+      </DTMain>
       <BottomNav />
-    </div>
+    </DTPage>
   );
 }

@@ -1,22 +1,22 @@
 import type { CSSProperties, HTMLAttributes, ReactNode } from 'react';
 
 export const glassStyle: CSSProperties = {
-  background: 'var(--surface-glass)',
-  border: '1px solid var(--border)',
+  background: 'rgba(11, 16, 34, 0.78)',
+  border: '1px solid rgba(255, 255, 255, 0.08)',
   backdropFilter: 'blur(18px)',
   WebkitBackdropFilter: 'blur(18px)',
 };
 
 export const glassVioletStyle: CSSProperties = {
   ...glassStyle,
-  border: '1px solid var(--border-violet)',
-  boxShadow: '0 0 18px rgba(139, 92, 246, 0.18)',
+  border: '1px solid rgba(139, 92, 246, 0.35)',
+  boxShadow: '0 0 18px rgba(139, 92, 246, 0.22)',
 };
 
 export const glassCyanStyle: CSSProperties = {
   ...glassStyle,
-  border: '1px solid var(--border-cyan)',
-  boxShadow: '0 0 18px rgba(0, 242, 254, 0.14)',
+  border: '1px solid rgba(0, 242, 254, 0.30)',
+  boxShadow: '0 0 18px rgba(0, 242, 254, 0.18)',
 };
 
 type GlassCardProps = HTMLAttributes<HTMLDivElement> & {
