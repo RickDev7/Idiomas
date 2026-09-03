@@ -200,6 +200,9 @@ export function useGeminiLive(profile: UserProfile | null): GeminiLiveUI {
   const sessionGenRef = useRef(0);
   const naturalTeacherResponseExpectedRef = useRef(false);
   const teacherAudioLoggedForTurnRef = useRef('');
+  const deferMicUntilTeacherRef = useRef(false);
+  const micOpenTimeoutRef = useRef(0);
+  const releaseDeferredMicRef = useRef(() => {});
 
   const syncUiFromTeacherUtterance = useCallback((
     teacherUtterance: string,
@@ -560,6 +563,24 @@ export function useGeminiLive(profile: UserProfile | null): GeminiLiveUI {
     }
   }, [profile]);
 
+  releaseDeferredMicRef.current = () => {
+    if (!deferMicUntilTeacherRef.current) return;
+    deferMicUntilTeacherRef.current = false;
+    if (micOpenTimeoutRef.current) {
+      window.clearTimeout(micOpenTimeoutRef.current);
+      micOpenTimeoutRef.current = 0;
+    }
+    const svc = serviceRef.current;
+    if (!svc) return;
+    try {
+      console.log('[LIVE_DEBUG]', 'pcm:user:start');
+      svc.beginSending();
+      setMicActive(true);
+    } catch {
+      /* microfone ainda não adquirido */
+    }
+  };
+
   const wireHandlers = useCallback((): GeminiVoiceHandlers => ({
     onStateChange: (s) => setState(s),
     onMicState: (s) => setMicState(s),
@@ -653,6 +674,7 @@ export function useGeminiLive(profile: UserProfile | null): GeminiLiveUI {
       if (r === 'assistant') {
         naturalTeacherResponseExpectedRef.current = false;
         teacherAudioLoggedForTurnRef.current = '';
+        releaseDeferredMicRef.current();
         setAssistantText(done.text);
         setTeacherTurnStatus('COMPLETE');
         setAssistantSpeaking(false);
@@ -708,6 +730,11 @@ export function useGeminiLive(profile: UserProfile | null): GeminiLiveUI {
     orchQueueRef.current = Promise.resolve();
     naturalTeacherResponseExpectedRef.current = false;
     teacherAudioLoggedForTurnRef.current = '';
+    deferMicUntilTeacherRef.current = false;
+    if (micOpenTimeoutRef.current) {
+      window.clearTimeout(micOpenTimeoutRef.current);
+      micOpenTimeoutRef.current = 0;
+    }
     setTargetPhrase(null);
     setAssistantText('');
     setUserText('');
@@ -868,18 +895,22 @@ export function useGeminiLive(profile: UserProfile | null): GeminiLiveUI {
         return;
       }
       await svc.connect();
-      if (DEV) {
-        console.log('[LIVE_CONNECT]', { session: sessionGen });
-        console.log('[GEMINI_SESSION]', { session: sessionGen });
-      }
+      console.log('[LIVE_DEBUG]', 'startListening:connected', { session: sessionGen });
+      console.log('[LIVE_DEBUG]', 'firstTeacherTurn:waiting', { session: sessionGen });
       if (abandonStaleSession(sessionGen)) {
         try { svc.disconnect(); } catch { /* ignore */ }
         serviceRef.current = null;
         activeVoiceService = null;
         return;
       }
-      svc.beginSending();
-      setMicActive(true);
+      // Kickoff é enviado pelo backend no 'ready'. Não abrir o turno do aluno
+      // até o primeiro turno do professor — senão o Gemini espera o usuário.
+      deferMicUntilTeacherRef.current = true;
+      if (micOpenTimeoutRef.current) window.clearTimeout(micOpenTimeoutRef.current);
+      micOpenTimeoutRef.current = window.setTimeout(() => {
+        console.log('[LIVE_DEBUG]', 'pcm:user:fallback_open', { session: sessionGen });
+        releaseDeferredMicRef.current();
+      }, 8000);
       void orchRef.current?.handle({ type: 'SESSION_STARTED' }).then((d) => {
         if (d) void applyDecision(d);
       });
@@ -889,6 +920,14 @@ export function useGeminiLive(profile: UserProfile | null): GeminiLiveUI {
       } catch { /* ignore */ }
     } catch {
       releaseEarlyMic(earlyCtx, earlyStream);
+      deferMicUntilTeacherRef.current = false;
+      if (micOpenTimeoutRef.current) {
+        window.clearTimeout(micOpenTimeoutRef.current);
+        micOpenTimeoutRef.current = 0;
+      }
+      try { serviceRef.current?.disconnect(); } catch { /* ignore */ }
+      serviceRef.current = null;
+      activeVoiceService = null;
       if (isLiveSessionCurrent(sessionGen)) {
         setError('Não consegui conectar ao professor.');
         setMicState('ERROR');
@@ -974,6 +1013,7 @@ export function useGeminiLive(profile: UserProfile | null): GeminiLiveUI {
       setAssistantText(done.text);
       setTeacherTurnStatus('COMPLETE');
       setAssistantSpeaking(false);
+      releaseDeferredMicRef.current();
     }, 1600);
     return () => clearTimeout(t);
   }, [assistantText, teacherTurnStatus]);

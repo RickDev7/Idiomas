@@ -91,17 +91,20 @@ function deriveFeedback(opts: {
 
 function statusLinePt(opts: {
   liveState: string;
-  micActive: boolean;
+  userSpeaking: boolean;
   assistantSpeaking: boolean;
   teacherTurnStatus: string;
+  awaitingProfessor: boolean;
   responseStatus: 'processing' | 'received' | 'none';
   started: boolean;
 }): string {
   if (opts.liveState === 'connecting') return 'Conectando…';
   if (opts.liveState === 'reconnecting') return 'Reconectando…';
   if (opts.liveState === 'error') return 'Sem conexão';
-  if (opts.micActive) return 'Você está falando…';
   if (opts.assistantSpeaking || opts.teacherTurnStatus === 'RECEIVING') return 'Professor falando…';
+  if (opts.awaitingProfessor) return 'Aguardando o professor…';
+  // micActive/LISTENING ≠ fala real — só transcript RECEIVING do aluno
+  if (opts.userSpeaking) return 'Você está falando…';
   if (opts.responseStatus === 'processing') return 'Pensando…';
   if (opts.started) return 'Sua vez';
   return 'Toque para falar';
@@ -200,24 +203,40 @@ export function GeminiConversation({ profile, onFinish }: { profile: UserProfile
     }
   }, [live.targetPhrase]);
 
+  // Evidência real de fala do aluno (transcript), não mic aberto / listening.
+  const userSpeaking = live.userTurnStatus === 'RECEIVING';
+  const teacherSpeaking =
+    live.assistantSpeaking || live.teacherTurnStatus === 'RECEIVING';
+  // Sessão iniciada, professor ainda não produziu o 1º turno.
+  const awaitingProfessor =
+    started &&
+    !teacherSpeaking &&
+    !userSpeaking &&
+    live.teacherTurnStatus === 'IDLE' &&
+    !live.assistantText.trim() &&
+    responseStatus !== 'processing';
+
   const orbState: OrbState =
     live.state === 'error'
       ? 'error'
       : live.state === 'connecting' || live.state === 'reconnecting'
         ? 'processing'
-        : live.micActive
-          ? 'listening'
-          : live.assistantSpeaking || live.teacherTurnStatus === 'RECEIVING'
-            ? 'speaking'
-            : live.state === 'connected' && responseStatus === 'processing'
+        : teacherSpeaking
+          ? 'speaking'
+          : userSpeaking
+            ? 'listening'
+            : awaitingProfessor
               ? 'processing'
-              : 'idle';
+              : live.state === 'connected' && responseStatus === 'processing'
+                ? 'processing'
+                : 'idle';
 
   const statusBadge = statusLinePt({
     liveState: live.state,
-    micActive: live.micActive,
+    userSpeaking,
     assistantSpeaking: live.assistantSpeaking,
     teacherTurnStatus: live.teacherTurnStatus,
+    awaitingProfessor,
     responseStatus,
     started,
   });
@@ -227,17 +246,19 @@ export function GeminiConversation({ profile, onFinish }: { profile: UserProfile
       ? 'Pedindo microfone…'
       : live.micState === 'ERROR'
         ? 'Microfone indisponível'
-        : live.micActive || live.micState === 'LISTENING'
-          ? 'Você está falando…'
-          : live.assistantSpeaking
+        : live.state === 'connecting' || live.state === 'reconnecting'
+          ? 'Conectando…'
+          : teacherSpeaking
             ? 'Professor falando…'
-            : live.state === 'connecting' || live.state === 'reconnecting'
-              ? 'Conectando…'
-              : responseStatus === 'processing'
-                ? 'Pensando…'
-                : started
-                  ? 'Toque para falar'
-                  : 'Toque para falar';
+            : awaitingProfessor
+              ? 'Aguardando o professor…'
+              : userSpeaking
+                ? 'Você está falando…'
+                : responseStatus === 'processing'
+                  ? 'Pensando…'
+                  : started
+                    ? 'Sua vez'
+                    : 'Toque para falar';
 
   const handleMic = async () => {
     if (startLockRef.current) return;
@@ -337,11 +358,13 @@ export function GeminiConversation({ profile, onFinish }: { profile: UserProfile
 
   const emptyHint = connecting
     ? 'Conectando com seu professor…'
-    : started
+    : awaitingProfessor
       ? 'Aguardando o professor…'
-      : live.returning
-        ? 'Continuando sua prática.'
-        : 'Seu professor de IA está pronto.';
+      : started
+        ? 'Sua vez'
+        : live.returning
+          ? 'Continuando sua prática.'
+          : 'Seu professor de IA está pronto.';
 
   return (
     <div className="flex flex-col h-full max-w-md mx-auto overflow-hidden dt-page talk-live">
