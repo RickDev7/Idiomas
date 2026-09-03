@@ -152,100 +152,38 @@ function buildSystemInstruction(profile) {
   if (profile.miniProvaMode) {
     return buildMiniProvaSystemInstruction(profile);
   }
-  const known = (profile.knownPhrases || []).slice(0, 12).join('\n');
-  const weak = (profile.weakPhrases || []).slice(0, 6).join('\n');
+  const known = (profile.knownPhrases || []).slice(0, 8).join('\n');
+  const weak = (profile.weakPhrases || []).slice(0, 4).join('\n');
   const opening = profile.openingGerman || '';
   const kind = profile.sessionKind || 'RETURNING_SESSION';
-  // Prefer flag do cliente (isZeroLanguageMode). Fallback: level===zero se flag ausente.
   const zeroActive = profile.zeroLanguageMode === true
     || ((profile.level || '') === 'zero' && profile.zeroLanguageMode !== false);
-  const zeroBlock = zeroActive
-    ? [
-        '=== ZERO LANGUAGE MODE (nível 0) ===',
-        'O aluno está no nível ZERO. Ele pode NÃO entender alemão.',
-        'Português = língua principal de EXPLICAÇÃO. Alemão = doses pequenas.',
-        'Ciclo de microaula por voz:',
-        'Vamos aprender… → modelo DE → Significa… → Escute → modelo DE → Agora você → AGUARDE.',
-        'Silêncio do aluno NÃO é erro imediato.',
-        'Se errar: Quase → ponto difícil → Escute novamente → modelo → Agora você. NÃO mude de assunto.',
-        'Produção após modelo = GUIADA (não declare automação).',
-        'UMA frase por vez. Sem perguntas abertas. Continuidade: não reinicie com Hallo/Wie geht\'s por hábito.',
-        '=== FIM ZERO LANGUAGE MODE ===',
-      ]
-    : [];
-  return [
-    'Você é o DEUTSCH COACH, um professor particular de alemão por voz.',
-    'REGRAS:',
-    '1. O aluno pode estar começando do ZERO. Nunca presuma conhecimento que ainda não foi ensinado.',
+
+  // Live: instrução compacta. System instruction longa (≥2.8k) foi medida
+  // causando kickoff aceito sem áudio (sessão aberta, 0 chunks).
+  const lines = [
+    'Você é o DEUTSCH COACH — professor de alemão por voz. Responda SEMPRE em áudio.',
     zeroActive
-      ? '2. No nível 0: use português para explicar significados. Alemão curto para modelar e pedir produção.'
-      : '2. Fale alemão por padrão. Use português (pt-BR) somente para explicar, corrigir ou quando o aluno demonstrar que não entendeu.',
-    '3. OBJETIVO PEDAGÓGICO: transformar conhecimento em USO REAL — compreender → recuperar → falar → variar → usar espontaneamente → automatizar.',
-    zeroActive
-      ? '4. No nível 0, repetir COM modelo faz parte da aquisição. Depois retire a ajuda e peça recall/uso.'
-      : '4. Não peça só "repita". Crie necessidade comunicativa (situações curtas) para o aluno precisar da frase.',
-    '5. Ensine ANTES de exigir produção. Se o aluno não souber, dê ajuda progressiva (pista → palavra → modelo), depois retire a ajuda.',
-    '6. Após acertar com ajuda, peça de novo SEM ajuda e depois em CONTEXTO DIFERENTE (tempo/pessoa/pergunta).',
-    '7. Corrija só o essencial: "Quase! Sag: <correção>. Agora você." AGUARDE a nova tentativa. NÃO mude de assunto após corrigir.',
-    '8. Não interrompa o aluno excessivamente. Deixe ele pensar e falar. Silêncio ≠ erro imediato.',
-    '9. Reforce erros recorrentes criando situações que usem a estrutura correta.',
-    '10. Priorize situações da vida real e o vocabulário conhecido do aluno.',
-    '11. Faça perguntas para o aluno responder. O objetivo é fazê-lo falar com independência.',
-    '12. Varie contexto: se aprendeu "Ich arbeite heute", use "morgen", "gestern", perguntas — um elemento por vez.',
-    '13. Não exija sotaque nativo. Priorize inteligibilidade e uso. Em dúvida de pronúncia: indique a parte difícil, fale devagar, peça nova tentativa.',
-    '14. Responda em áudio de forma natural e clara.',
-    '15. CONTINUIDADE: você LEMBRA da sessão anterior. Não reinicie a aula do zero.',
-    '16. NÃO comece automaticamente com "Hallo" nem "Wie geht es dir?" — isso NÃO é o roteiro padrão.',
-    '17. Só use "Hallo" / "Wie geht es dir?" se a abertura escolhida abaixo for exatamente essa, ou se for revisão pedagógica dessa frase.',
-    '18. Comece a sessão com a ABERTURA ESCOLHIDA. Depois continue a partir dela.',
-    '19. Não precisa saudar em toda sessão. Pode começar direto com uma pergunta ou revisão.',
-    '20. Pareça um professor conversando, não um avaliador de provas. Tom encorajador: Quase / Muito bom / Vamos tentar novamente.',
-    '21. Use memória SOMENTE se estiver listada. Nunca invente fatos sobre o aluno.',
-    '22. Não repita a mesma informação pessoal em toda sessão.',
-    '23. Se o aluno mudar de assunto, acompanhe. O plano não é uma prisão.',
-    '24. Prefira correção breve e conversa; só abra exercício quando for realmente necessário.',
-    ...zeroBlock,
-    '',
-    `TIPO DE SESSÃO: ${kind}`,
-    `ESTRATÉGIA DE ABERTURA: ${profile.openingStrategy || 'advance'}`,
-    opening ? `ABERTURA ESCOLHIDA (fale isto primeiro, em alemão):\n${opening}` : '',
-    profile.lastTopic ? `TEMA DA ÚLTIMA SESSÃO: ${profile.lastTopic} — continue neste contexto se fizer sentido.` : '',
-    profile.lastQuestion ? `ÚLTIMA PERGUNTA DO PROFESSOR: ${profile.lastQuestion}` : '',
-    profile.lastUserAnswer ? `ÚLTIMA RESPOSTA DO ALUNO: ${profile.lastUserAnswer}` : '',
-    profile.unfinishedGoal ? `OBJETIVO INCOMPLETO: ${profile.unfinishedGoal}` : '',
-    profile.nextStep ? `PRÓXIMO PASSO RECOMENDADO: ${profile.nextStep}` : '',
-    Array.isArray(profile.recentMistakes) && profile.recentMistakes.length
-      ? `ERROS RECENTES (trabalhe a forma correta, sem humilhar):\n${profile.recentMistakes.slice(0, 4).join('\n')}`
-      : '',
-    '',
-    `NÍVEL DO ALUNO: ${profile.level || 'zero'}`,
-    `OBJETIVO: ${profile.goal || 'daily'}`,
-    `PROFISSÃO: ${profile.profession || 'não informada'}`,
-    `IMERSÃO (0-100): ${profile.immersionLevel ?? 50}`,
-    profile.immersionGuidance || '',
-    profile.intensiveMode ? 'MODO INTENSIVO: ATIVO' : 'MODO INTENSIVO: OFF',
-    profile.intensiveGuidance || '',
-    profile.helpLevel ? `NÍVEL DE AJUDA DO ALUNO: ${profile.helpLevel}` : '',
-    profile.profession ? `CONTEXTO PROFISSIONAL: ${profile.profession}` : '',
-    known ? `FRASES CONHECIDAS (prefira este vocabulário):\n${known}` : 'FRASES CONHECIDAS: nenhuma ainda.',
-    weak ? `FRASES FRACAS (reforce):\n${weak}` : '',
-    profile.memorySummary ? `MEMÓRIA COMPACTA DO ALUNO:\n${profile.memorySummary}` : '',
-    profile.teacherDirective || '',
-    profile.coachContext ? `=== PROFESSOR PESSOAL ===\n${profile.coachContext}\n=== FIM PROFESSOR PESSOAL ===` : '',
+      ? 'NÍVEL ZERO: explique em português, modele alemão curto, peça produção. Uma frase por vez.'
+      : 'Fale alemão por padrão. Use português só para explicar ou quando o aluno não entender.',
+    'Ensine antes de exigir. Corrija breve. Não reinicie com Hallo/Wie geht\'s por hábito.',
+    'Comece pela ABERTURA escolhida. Faça o aluno falar. Silêncio ≠ erro imediato.',
+    `SESSÃO: ${kind} | NÍVEL: ${profile.level || 'zero'} | OBJETIVO: ${profile.goal || 'daily'}`,
+    opening ? `ABERTURA (fale isto primeiro):\n${opening}` : '',
+    profile.sessionTopic ? `TEMA: ${profile.sessionTopic}` : '',
+    profile.lastTopic ? `ÚLTIMO TEMA: ${profile.lastTopic}` : '',
+    profile.profession ? `PROFISSÃO: ${profile.profession}` : '',
+    known ? `CONHECIDAS:\n${known}` : '',
+    weak ? `FRACAS:\n${weak}` : '',
+    profile.memorySummary ? `MEMÓRIA:\n${String(profile.memorySummary).slice(0, 600)}` : '',
+    profile.teacherDirective ? String(profile.teacherDirective).slice(0, 800) : '',
+    profile.coachContext ? `CONTEXTO:\n${String(profile.coachContext).slice(0, 500)}` : '',
     profile.pedagogicalAction
-      ? `AÇÃO PEDAGÓGICA ATIVA: ${profile.pedagogicalAction}${profile.targetPhrase ? ` | alvo: ${profile.targetPhrase}` : ''}`
+      ? `AÇÃO: ${profile.pedagogicalAction}${profile.targetPhrase ? ` | alvo: ${profile.targetPhrase}` : ''}`
       : '',
-    Number.isFinite(profile.scaffoldLevel) ? `SCAFFOLD MÁXIMO AGORA: ${profile.scaffoldLevel}/5` : '',
-    profile.scaffoldHint ? `PISTA ATUAL (não ultrapasse este nível):\n${profile.scaffoldHint}` : '',
-    profile.sessionTopic ? `TEMA ORQUESTRADO: ${profile.sessionTopic}` : '',
-    profile.trainingStage ? `ESTÁGIO DO TREINO: ${profile.trainingStage}` : '',
-    profile.actionReason ? `MOTIVO DA AÇÃO (interno): ${profile.actionReason}` : '',
-    Number.isFinite(profile.automationScore)
-      ? `AUTOMATION SCORE DO ALVO: ${profile.automationScore}`
-      : '',
-    `PLANO DE HOJE: continue a partir da abertura, da orquestração e da memória compacta.`,
-    `IDIOMA DE APOIO: pt-BR`,
-  ].filter(Boolean).join('\n');
+    profile.targetPhrasePt ? `SIGNIFICADO: ${profile.targetPhrasePt}` : '',
+  ];
+  return lines.filter(Boolean).join('\n');
 }
 
 function sanitizeProfile(input) {
@@ -321,11 +259,13 @@ function buildSessionKickoff(profile) {
   if (zeroActive) {
     return [
       '[INSTRUÇÃO INTERNA — não leia isto em voz alta]',
-      'ZERO LANGUAGE MODE — comece FALANDO agora seguindo o ciclo PT→DE→Escute→Agora você→AGUARDE.',
-      opening ? `Frase-alvo desta abertura: "${opening}"` : '',
+      'ZERO LANGUAGE MODE — FALE AGORA em áudio (obrigatório).',
+      'Ordem desta abertura: 1) significado em português, 2) modelo em alemão, 3) diga "Agora você".',
+      opening ? `Frase-alvo: "${opening}"` : '',
       profile.targetPhrasePt ? `Significado: ${profile.targetPhrasePt}` : '',
       ...memoryBits,
       'NÃO reinicie com "Hallo! Wie geht es dir?" por hábito.',
+      'Só espere o aluno DEPOIS de terminar essa fala. Não fique em silêncio no início.',
       profile.orchestratorKickoff || '',
     ].filter(Boolean).join('\n');
   }
@@ -375,7 +315,108 @@ function logSession(profile) {
   }
 }
 
-// POST /api/gemini/token — emite token efêmero e abre a sessão Live no servidor
+function maybeSendKickoff(entry) {
+  if (!entry || entry.kickoffSent || entry.profile?.skipKickoff) return;
+  if (!entry.setupComplete) return;
+  if (!entry.clientWs || entry.clientWs.readyState !== entry.clientWs.OPEN) return;
+  if (!entry.session) return;
+  entry.kickoffSent = true;
+  const profile = entry.profile || {};
+  const kick = buildSessionKickoff(profile);
+  try {
+    entry.session.sendClientContent({
+      turns: [{ role: 'user', parts: [{ text: kick }] }],
+      turnComplete: true,
+    });
+    console.log(
+      `[KICKOFF] sent token=${entry.token?.slice(0, 8)} level=${profile.level || '?'} ` +
+        `zero=${!!profile.zeroLanguageMode} kickLen=${kick.length} sysReady=1`,
+    );
+  } catch (err) {
+    entry.kickoffSent = false;
+    console.error(`[KICKOFF] fail token=${entry.token?.slice(0, 8)}:`, String(err?.message || err).slice(0, 200));
+    try {
+      entry.clientWs.send(JSON.stringify({ type: 'error', message: 'kickoff_failed' }));
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+function sendReadyOnce(entry) {
+  if (!entry || entry.readySent) return;
+  const ws = entry.clientWs;
+  if (!ws || ws.readyState !== ws.OPEN) return;
+  entry.readySent = true;
+  ws.send(JSON.stringify({ type: 'ready' }));
+  console.log(`[ws] ready token=${entry.token?.slice(0, 8)}`);
+}
+
+async function ensureGeminiSession(entry) {
+  if (entry.session || entry.connecting) return;
+  entry.connecting = true;
+  const token = entry.token;
+  const profile = entry.profile || {};
+  try {
+    const sys = buildSystemInstruction(profile);
+    console.log(
+      `[SESSION] create token=${token.slice(0, 8)} level=${profile.level || '?'} ` +
+        `zero=${!!profile.zeroLanguageMode} sysLen=${sys.length}`,
+    );
+    const session = await ai.live.connect({
+      model: MODEL,
+      callbacks: {
+        onmessage: (e) => handleLiveMessage(entry, e),
+        onerror: (err) => {
+          console.error(
+            `[gemini] onerror token=${token.slice(0, 8)}:`,
+            String(err?.message || err).slice(0, 240),
+          );
+          const ws = entry.clientWs;
+          if (ws && ws.readyState === ws.OPEN) {
+            ws.send(JSON.stringify({ type: 'error', message: 'live_error' }));
+          }
+        },
+        onclose: (ev) => {
+          console.log(
+            `[gemini] session closed (token ${token.slice(0, 8)}) code=${ev?.code ?? '?'} reason=${String(ev?.reason || '').slice(0, 120)}`,
+          );
+          const ws = entry.clientWs;
+          if (ws && ws.readyState === ws.OPEN) {
+            ws.send(JSON.stringify({ type: 'error', message: 'live_closed' }));
+            try { ws.close(); } catch {}
+          }
+          sessions.delete(token);
+        },
+      },
+      config: {
+        responseModalities: [Modality.AUDIO],
+        inputAudioTranscription: {},
+        outputAudioTranscription: {},
+        // Gemini 3.1 Flash Live: languageCode + voz Aoede foram medidos
+        // causando setupComplete + kickoff sem nenhum chunk de áudio.
+        speechConfig: {
+          voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Kore' } },
+        },
+        systemInstruction: sys,
+      },
+    });
+    entry.session = session;
+    logSession(profile);
+  } catch (err) {
+    console.error(`[gemini] connect fail token=${token.slice(0, 8)}:`, String(err?.message || err).slice(0, 240));
+    const ws = entry.clientWs;
+    if (ws && ws.readyState === ws.OPEN) {
+      ws.send(JSON.stringify({ type: 'error', message: 'session_failed' }));
+      try { ws.close(); } catch {}
+    }
+    sessions.delete(token);
+  } finally {
+    entry.connecting = false;
+  }
+}
+
+// POST /api/gemini/token — emite token efêmero; sessão Gemini sobe no WebSocket (após setupComplete).
 app.post('/api/gemini/token', async (req, res) => {
   if (!GEMINI_API_KEY) {
     return res.status(503).json({ error: 'gemini_not_configured' });
@@ -391,48 +432,17 @@ app.post('/api/gemini/token', async (req, res) => {
       clientWs: null,
       profile,
       kickoffSent: false,
+      setupComplete: false,
+      readySent: false,
+      connecting: false,
     };
     sessions.set(token, entry);
 
-    const session = await ai.live.connect({
-      model: MODEL,
-      callbacks: {
-        onmessage: (e) => handleLiveMessage(entry, e),
-        onerror: () => {
-          const ws = entry.clientWs;
-          if (ws && ws.readyState === ws.OPEN) {
-            ws.send(JSON.stringify({ type: 'error', message: 'live_error' }));
-          }
-        },
-        onclose: () => {
-          console.log(`[gemini] session closed (token ${token.slice(0, 8)})`);
-          const ws = entry.clientWs;
-          if (ws && ws.readyState === ws.OPEN) {
-            ws.send(JSON.stringify({ type: 'error', message: 'live_closed' }));
-            try { ws.close(); } catch {}
-          }
-          sessions.delete(token);
-        },
-      },
-      config: {
-        responseModalities: [Modality.AUDIO],
-        inputAudioTranscription: {},
-        outputAudioTranscription: {},
-        speechConfig: {
-          languageCode: 'de-DE',
-          voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Aoede' } },
-        },
-        systemInstruction: buildSystemInstruction(profile),
-      },
-    });
-    entry.session = session;
-    logSession(profile);
-
-    // Kickoff adiado até o WebSocket do cliente conectar (evita áudio perdido/sobreposto).
+    // Limpa tickets sem cliente.
     setTimeout(() => {
       const s = sessions.get(token);
       if (s && !s.clientWs) {
-        try { s.session.close(); } catch {}
+        try { s.session?.close(); } catch {}
         sessions.delete(token);
       }
     }, TOKEN_TTL_MS);
@@ -483,6 +493,10 @@ function handleLiveMessage(entry, e) {
   };
 
   if (e.setupComplete) {
+    entry.setupComplete = true;
+    console.log(`[gemini] setupComplete token=${entry.token?.slice(0, 8)}`);
+    sendReadyOnce(entry);
+    maybeSendKickoff(entry);
     return;
   }
 
@@ -699,33 +713,28 @@ wss.on('connection', (ws, req) => {
   if (!s) {
     ws.send(JSON.stringify({ type: 'error', message: 'invalid_or_expired_token' }));
     ws.close(4001);
-    console.log(`[ws] connect REJECTED (invalid token ${token.slice(0, 8)})`);
+    console.log(`[ws] connect REJECTED (invalid token ${String(token || '').slice(0, 8)})`);
     return;
   }
   if (Date.now() - s.createdAt > TOKEN_TTL_MS) {
     ws.send(JSON.stringify({ type: 'error', message: 'token_expired' }));
     ws.close(4002);
-    try { s.session.close(); } catch {}
+    try { s.session?.close(); } catch {}
     sessions.delete(token);
     console.log(`[ws] connect REJECTED (expired token ${token.slice(0, 8)})`);
     return;
   }
 
   s.clientWs = ws;
-  ws.send(JSON.stringify({ type: 'ready' }));
   console.log(`[ws] connect OK (token ${token.slice(0, 8)})`);
 
-  // Kickoff pedagógico — após cliente conectar (evita áudio antes do player estar pronto).
-  if (!s.kickoffSent && !s.profile?.skipKickoff) {
-    s.kickoffSent = true;
-    const profile = s.profile || {};
-    try {
-      s.session.sendClientContent({
-        turns: [{ role: 'user', parts: [{ text: buildSessionKickoff(profile) }] }],
-        turnComplete: true,
-      });
-    } catch {}
-  }
+  // Sessão Gemini sobe aqui — ready + kickoff só após setupComplete.
+  void ensureGeminiSession(s).then(() => {
+    if (s.setupComplete) {
+      sendReadyOnce(s);
+      maybeSendKickoff(s);
+    }
+  });
 
   let audioPackets = 0;
   ws.on('message', (raw) => {
@@ -741,8 +750,8 @@ wss.on('connection', (ws, req) => {
             let sumSq = 0;
             const n = Math.min(buf.length / 2, 2048);
             for (let i = 0; i < n; i++) {
-              const s = buf.readInt16LE(i * 2);
-              sumSq += s * s;
+              const sample = buf.readInt16LE(i * 2);
+              sumSq += sample * sample;
             }
             const rms = Math.sqrt(sumSq / n);
             console.log(`[ws] audio recv (token ${token.slice(0, 8)}, packets=${audioPackets}, rms=${rms.toFixed(1)})`);
@@ -750,11 +759,13 @@ wss.on('connection', (ws, req) => {
             console.log(`[ws] audio recv (token ${token.slice(0, 8)}, packets=${audioPackets}, rms=ERR)`);
           }
         }
+        if (!s.session) return;
         // A SDK @google/genai espera { data: base64, mimeType }, NÃO um W3C Blob.
         s.session.sendRealtimeInput({
           audio: { data: msg.data, mimeType: 'audio/pcm;rate=16000' },
         });
       } else if (msg.type === 'text' && typeof msg.text === 'string') {
+        if (!s.session) return;
         s.session.sendClientContent({
           turns: [{ role: 'user', parts: [{ text: msg.text }] }],
           turnComplete: true,
@@ -772,7 +783,7 @@ wss.on('connection', (ws, req) => {
     console.log(`[ws] close (token ${token.slice(0, 8)}, code=${code}, reason=${reason?.toString() || ''})`);
     // Só encerra a sessão se este WS for o cliente ativo (órfãos de HMR não derrubam a sessão)
     if (s.clientWs === ws) {
-      try { s.session.close(); } catch {}
+      try { s.session?.close(); } catch {}
       sessions.delete(token);
     }
   });
