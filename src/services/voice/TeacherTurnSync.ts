@@ -165,6 +165,7 @@ export function shouldEmitPedagogicalNudge(
 ): boolean {
   if (!decision.geminiNudge) return false;
   if (isOpeningDecision(decision)) return false;
+  if (decision.reason === 'review_session_complete') return false;
 
   const shouldSendFlow =
     decision.flow === 'intervenePedagogically' ||

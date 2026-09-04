@@ -9,6 +9,8 @@
  */
 import type { Phrase, UserProfile } from '@/types';
 import type { UserLearningProfile } from '@/services/learning/ConfidenceService';
+import { getStoredCourseProgress } from '@/services/course/CourseProgressEngine';
+import { getCurrentLevel } from '@/services/course/LevelPresentation';
 import { methodologyHintsForMode } from './MethodologyKnowledge';
 import { getModePolicy, resolveSessionMode } from './ModePolicies';
 import { decideProgression } from './ProgressionRules';
@@ -21,7 +23,7 @@ import {
   suitableSituationsForLearner,
 } from './ProfessorKnowledge';
 import { listRealCommunicationEvidence } from './RealCommunication';
-import type { ProfessorContext, ProfessorSessionMode } from './Types';
+import type { CurriculumBand, ProfessorContext, ProfessorSessionMode } from './Types';
 
 export interface BuildProfessorContextInput {
   profile: UserProfile;
@@ -38,6 +40,27 @@ export interface BuildProfessorContextInput {
   sessionGoals?: string[];
   dueReview?: boolean;
   persistentErrors?: number;
+  /** Override explícito do band curricular (ex.: A1 Live). */
+  curriculumBand?: CurriculumBand | null;
+}
+
+/** Band efetivo: course/diagnostic > coarse profile.level. */
+export function resolveProfessorBand(
+  profile: Pick<UserProfile, 'level' | 'selfReportedLevel' | 'diagnosticLevel'>,
+  override?: CurriculumBand | null,
+): CurriculumBand {
+  if (override) return override;
+  try {
+    const course = getStoredCourseProgress();
+    const effective = getCurrentLevel(profile, course);
+    const fromCourse = inferCurriculumBand(effective);
+    if (fromCourse !== 'L0' || effective === 'L0') return fromCourse;
+  } catch { /* ignore */ }
+  if (profile.diagnosticLevel) {
+    const d = inferCurriculumBand(profile.diagnosticLevel);
+    if (d !== 'L0' || String(profile.diagnosticLevel).toUpperCase() === 'L0') return d;
+  }
+  return inferCurriculumBand(profile.level);
 }
 
 export function buildProfessorContext(input: BuildProfessorContextInput): ProfessorContext {
@@ -50,7 +73,7 @@ export function buildProfessorContext(input: BuildProfessorContextInput): Profes
       conversation: input.conversation,
     });
   const policy = getModePolicy(mode);
-  const band = inferCurriculumBand(input.profile.level);
+  const band = resolveProfessorBand(input.profile, input.curriculumBand);
   const classified = classifyLearningContent(input.learning, input.phrases);
   const knownGermans = classified.known.map((c) => c.german);
   const targetConf = input.targetPhraseId
@@ -80,7 +103,7 @@ export function buildProfessorContext(input: BuildProfessorContextInput): Profes
   return {
     mode,
     band,
-    levelLabel: String(input.profile.level || 'zero'),
+    levelLabel: band,
     policy,
     knownChunks: classified.known,
     learningChunks: classified.learning,

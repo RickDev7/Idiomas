@@ -19,6 +19,7 @@ export type {
 export {
   buildProfessorContext,
   formatProfessorContextForGemini,
+  resolveProfessorBand,
   resolveSessionMode,
   getModePolicy,
 } from './ProfessorCore';

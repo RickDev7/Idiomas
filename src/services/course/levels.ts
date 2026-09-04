@@ -49,19 +49,19 @@ export const COURSE_LEVELS: CourseLevel[] = [
     realWorldScenario: 'Comprando no supermercado',
     modules: [
       { id: 'a1.m1', level: 'A1', title: 'Apresentação e família', description: 'Família, pronomes, artigos.', units: [
-        { id: 'a1.u1', title: 'Família', phraseIds: [], wordIds: [], competencies: ['a1.family'], prerequisites: [] },
-        { id: 'a1.u2', title: 'Números e horários', phraseIds: [], wordIds: [], competencies: ['a1.numbers_time'], prerequisites: ['a1.u1'] },
+        { id: 'a1.u1', title: 'Família', phraseIds: ['a1-family-mutter', 'a1-family-bruder', 'a1-family-schwester'], wordIds: [], competencies: ['a1.family'], prerequisites: [] },
+        { id: 'a1.u2', title: 'Números e horários', phraseIds: ['a1-time-drei-uhr', 'a1-time-montag', 'a1-time-freitag'], wordIds: [], competencies: ['a1.numbers_time'], prerequisites: ['a1.u1'] },
       ] },
       { id: 'a1.m2', level: 'A1', title: 'Rotina', description: 'Rotina diária, verbos no presente.', units: [
-        { id: 'a1.u3', title: 'Rotina', phraseIds: [], wordIds: [], competencies: ['a1.routine'], prerequisites: ['a1.u2'] },
+        { id: 'a1.u3', title: 'Rotina', phraseIds: ['a1-routine-aufstehen', 'a1-routine-arbeit', 'a1-routine-kochen'], wordIds: [], competencies: ['a1.routine'], prerequisites: ['a1.u2'] },
       ] },
       { id: 'a1.m3', level: 'A1', title: 'Compras e comida', description: 'Supermercado, restaurante.', units: [
-        { id: 'a1.u4', title: 'Compras', phraseIds: [], wordIds: [], competencies: ['a1.shopping'], prerequisites: ['a1.u2'] },
-        { id: 'a1.u5', title: 'Comida', phraseIds: [], wordIds: [], competencies: ['a1.food'], prerequisites: ['a1.u4'] },
+        { id: 'a1.u4', title: 'Compras', phraseIds: ['a1-shopping-kostet', 'a1-shopping-nehme', 'a1-shopping-haben'], wordIds: [], competencies: ['a1.shopping'], prerequisites: ['a1.u2'] },
+        { id: 'a1.u5', title: 'Comida', phraseIds: ['a1-food-kaffee', 'a1-food-rechnung', 'a1-food-wasser'], wordIds: [], competencies: ['a1.food'], prerequisites: ['a1.u4'] },
       ] },
       { id: 'a1.m4', level: 'A1', title: 'Cidade e ajuda', description: 'Pedir informações e ajuda.', units: [
-        { id: 'a1.u6', title: 'Informações', phraseIds: [], wordIds: [], competencies: ['a1.ask_info'], prerequisites: ['a1.u3'] },
-        { id: 'a1.u7', title: 'Ajuda no dia a dia', phraseIds: [], wordIds: [], competencies: ['a1.help'], prerequisites: ['a1.u6'] },
+        { id: 'a1.u6', title: 'Informações', phraseIds: ['a1-info-bahnhof', 'a1-info-hotel', 'a1-info-bus'], wordIds: [], competencies: ['a1.ask_info'], prerequisites: ['a1.u3'] },
+        { id: 'a1.u7', title: 'Ajuda no dia a dia', phraseIds: ['a1-help-koennen', 'a1-help-brauche'], wordIds: [], competencies: ['a1.help'], prerequisites: ['a1.u6'] },
       ] },
     ],
   },

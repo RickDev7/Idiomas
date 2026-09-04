@@ -1204,6 +1204,8 @@ export function teachFromErrorNudge(opts: {
   hardPart?: string;
   errorType?: ProductionErrorType;
   attempt: number;
+  /** Rótulo curricular no nudge (L0 / A1 / …). Default L0 para não regressar callers L0. */
+  tutorBand?: string;
 }): string {
   const words = opts.correction.trim().split(/\s+/).filter(Boolean);
   const partialModel =
@@ -1223,9 +1225,14 @@ export function teachFromErrorNudge(opts: {
     : opts.attempt >= 2
       ? `Modele parcial "${partialModel}", depois completo: "${opts.correction}"`
       : `Modele: "${opts.correction}"`;
+  const band = (opts.tutorBand || 'L0').toUpperCase();
+  const tutorLine =
+    band === 'L0'
+      ? 'TUTOR ATIVO L0 — ensinar a MONTAR a frase (não só repetir):'
+      : `TUTOR ATIVO ${band} — ensinar a MONTAR a frase (não só repetir):`;
   return [
     '[INSTRUÇÃO INTERNA — não leia isto em voz alta]',
-    'TUTOR ATIVO L0 — ensinar a MONTAR a frase (não só repetir):',
+    tutorLine,
     `O aluno disse: "${opts.userSaid}"`,
     `Alvo: "${opts.correction}"`,
     soft,

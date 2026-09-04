@@ -62,6 +62,8 @@ export interface GeminiVoiceHandlers {
   onMicState?: (state: MicCaptureState) => void;
   /** Primeiro chunk PCM do professor neste turno (diagnóstico). */
   onTeacherAudio?: () => void;
+  /** Gemini sinalizou interrupção real do aluno (barge-in). */
+  onInterrupted?: (text?: string) => void;
   /** Generation após invalidate no reconnect — sincroniza ownership do hook. */
   onSessionGenerationChange?: (generation: number) => void;
 }
@@ -144,6 +146,7 @@ export class GeminiVoiceService implements VoiceServiceInterface {
           if (!isLiveSessionCurrent(this.sessionGen)) return;
           stopAllAudio();
           this.speaking = false;
+          this.handlers.onInterrupted?.(text);
           this.handlers.onTurnComplete?.('assistant', text);
         },
         onError: (m) => this.handlers.onError?.(m),

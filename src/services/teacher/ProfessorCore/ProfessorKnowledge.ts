@@ -19,13 +19,22 @@ import type {
 } from './Types';
 
 export function inferCurriculumBand(level: string | undefined): CurriculumBand {
-  const l = (level || 'zero').toLowerCase();
-  if (l === 'zero' || l === 'l0') return 'L0';
-  if (l === 'a1') return 'A1';
-  if (l === 'a1+' || l === 'a1plus') return 'A1+';
-  if (l === 'a2') return 'A2';
-  if (l === 'b1') return 'B1';
-  if (l.startsWith('b2') || l.startsWith('c')) return 'B2';
+  const l = (level || 'zero').toLowerCase().trim();
+  if (l === 'zero' || l === 'l0' || l === 'nível 0' || l === 'nivel 0') return 'L0';
+  // App coarse levels → CEFR band (little = A1 no CourseProgressEngine)
+  if (l === 'little' || l === 'beginner' || l === 'a1') return 'A1';
+  if (l === 'a1+' || l === 'a1plus' || l === 'a1_plus') return 'A1+';
+  if (l === 'basic' || l === 'a2') return 'A2';
+  if (l === 'intermediate' || l === 'b1') return 'B1';
+  if (l.startsWith('b2') || l.startsWith('c') || l === 'advanced' || l === 'very_advanced') return 'B2';
+  // CourseLevelId já em maiúsculas (A1, A2…)
+  const up = (level || '').toUpperCase();
+  if (up === 'L0') return 'L0';
+  if (up === 'A1') return 'A1';
+  if (up === 'A1+' || up === 'A1PLUS') return 'A1+';
+  if (up === 'A2') return 'A2';
+  if (up === 'B1') return 'B1';
+  if (up === 'B2' || up === 'C1' || up === 'C2') return 'B2';
   return 'L0';
 }
 

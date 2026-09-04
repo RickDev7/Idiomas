@@ -142,6 +142,24 @@ async function run() {
     assert('intervenePedagogically → nudge permitido', emit);
   }
 
+  {
+    const emit = shouldEmitPedagogicalNudge(
+      decision({
+        flow: 'continueConversation',
+        reason: 'review_session_complete',
+        geminiNudge: '[INSTRUÇÃO INTERNA — não leia isto em voz alta]\nRevisão concluída.',
+      }),
+      {
+        liveVoiceActive: true,
+        naturalTeacherResponseExpected: true,
+        assistantSpeaking: false,
+        teacherReceiving: false,
+        playerPlaying: false,
+      },
+    );
+    assert('review_session_complete não envia nudge (conclusão visível)', !emit);
+  }
+
   console.log(`\n${passed} passaram, ${failed} falharam.`);
   if (failed > 0) process.exit(1);
 }

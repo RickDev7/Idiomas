@@ -6,6 +6,14 @@ import type { CourseLevelId } from './types';
 export interface CuratedPhrase {
   german: string;
   portuguese: string;
+  /** ID estável do target (obrigatório em A1+ executável). */
+  id?: string;
+  /** Unidade curricular dona deste target. */
+  unitId?: string;
+  /** Ordem dentro da competência/unidade. */
+  order?: number;
+  /** Categoria pedagógica opcional (ex.: statement, question). */
+  type?: string;
 }
 
 export interface CompetencyContent {
@@ -64,38 +72,38 @@ export const CURATED: CompetencyContent[] = [
 
   // ---------------- A1 ----------------
   { competencyId: 'a1.family', level: 'A1', categories: ['family'], core: [
-    { german: 'Das ist meine Mutter.', portuguese: 'Esta é a minha mãe.' },
-    { german: 'Ich habe einen Bruder.', portuguese: 'Eu tenho um irmão.' },
-    { german: 'Meine Schwester heißt …', portuguese: 'Minha irmã se chama …' },
+    { id: 'a1-family-mutter', unitId: 'a1.u1', order: 1, type: 'statement', german: 'Das ist meine Mutter.', portuguese: 'Esta é a minha mãe.' },
+    { id: 'a1-family-bruder', unitId: 'a1.u1', order: 2, type: 'statement', german: 'Ich habe einen Bruder.', portuguese: 'Eu tenho um irmão.' },
+    { id: 'a1-family-schwester', unitId: 'a1.u1', order: 3, type: 'statement', german: 'Meine Schwester heißt …', portuguese: 'Minha irmã se chama …' },
   ] },
   { competencyId: 'a1.numbers_time', level: 'A1', categories: ['time'], core: [
-    { german: 'Es ist drei Uhr.', portuguese: 'São três horas.' },
-    { german: 'Heute ist Montag.', portuguese: 'Hoje é segunda-feira.' },
-    { german: 'Ich habe am Freitag Zeit.', portuguese: 'Tenho tempo na sexta-feira.' },
+    { id: 'a1-time-drei-uhr', unitId: 'a1.u2', order: 4, type: 'statement', german: 'Es ist drei Uhr.', portuguese: 'São três horas.' },
+    { id: 'a1-time-montag', unitId: 'a1.u2', order: 5, type: 'statement', german: 'Heute ist Montag.', portuguese: 'Hoje é segunda-feira.' },
+    { id: 'a1-time-freitag', unitId: 'a1.u2', order: 6, type: 'statement', german: 'Ich habe am Freitag Zeit.', portuguese: 'Tenho tempo na sexta-feira.' },
   ] },
   { competencyId: 'a1.routine', level: 'A1', categories: ['daily'], core: [
-    { german: 'Ich stehe um sieben Uhr auf.', portuguese: 'Eu levanto às sete horas.' },
-    { german: 'Ich gehe zur Arbeit.', portuguese: 'Eu vou ao trabalho.' },
-    { german: 'Am Abend koche ich.', portuguese: 'À noite eu cozinho.' },
+    { id: 'a1-routine-aufstehen', unitId: 'a1.u3', order: 7, type: 'statement', german: 'Ich stehe um sieben Uhr auf.', portuguese: 'Eu levanto às sete horas.' },
+    { id: 'a1-routine-arbeit', unitId: 'a1.u3', order: 8, type: 'statement', german: 'Ich gehe zur Arbeit.', portuguese: 'Eu vou ao trabalho.' },
+    { id: 'a1-routine-kochen', unitId: 'a1.u3', order: 9, type: 'statement', german: 'Am Abend koche ich.', portuguese: 'À noite eu cozinho.' },
   ] },
   { competencyId: 'a1.shopping', level: 'A1', categories: ['shopping'], core: [
-    { german: 'Was kostet das?', portuguese: 'Quanto custa isso?' },
-    { german: 'Ich nehme das.', portuguese: 'Eu fico com isso.' },
-    { german: 'Haben Sie …?', portuguese: 'Você tem …?' },
+    { id: 'a1-shopping-kostet', unitId: 'a1.u4', order: 10, type: 'question', german: 'Was kostet das?', portuguese: 'Quanto custa isso?' },
+    { id: 'a1-shopping-nehme', unitId: 'a1.u4', order: 11, type: 'statement', german: 'Ich nehme das.', portuguese: 'Eu fico com isso.' },
+    { id: 'a1-shopping-haben', unitId: 'a1.u4', order: 12, type: 'question', german: 'Haben Sie …?', portuguese: 'Você tem …?' },
   ] },
   { competencyId: 'a1.food', level: 'A1', categories: ['food'], core: [
-    { german: 'Ich möchte einen Kaffee.', portuguese: 'Eu gostaria de um café.' },
-    { german: 'Die Rechnung, bitte.', portuguese: 'A conta, por favor.' },
-    { german: 'Ich nehme ein Wasser.', portuguese: 'Eu pego uma água.' },
+    { id: 'a1-food-kaffee', unitId: 'a1.u5', order: 13, type: 'statement', german: 'Ich möchte einen Kaffee.', portuguese: 'Eu gostaria de um café.' },
+    { id: 'a1-food-rechnung', unitId: 'a1.u5', order: 14, type: 'request', german: 'Die Rechnung, bitte.', portuguese: 'A conta, por favor.' },
+    { id: 'a1-food-wasser', unitId: 'a1.u5', order: 15, type: 'statement', german: 'Ich nehme ein Wasser.', portuguese: 'Eu pego uma água.' },
   ] },
   { competencyId: 'a1.ask_info', level: 'A1', categories: ['directions', 'transport'], core: [
-    { german: 'Wo ist der Bahnhof?', portuguese: 'Onde é a estação?' },
-    { german: 'Wie komme ich zum Hotel?', portuguese: 'Como chego ao hotel?' },
-    { german: 'Wann fährt der Bus?', portuguese: 'Quando sai o ônibus?' },
+    { id: 'a1-info-bahnhof', unitId: 'a1.u6', order: 16, type: 'question', german: 'Wo ist der Bahnhof?', portuguese: 'Onde é a estação?' },
+    { id: 'a1-info-hotel', unitId: 'a1.u6', order: 17, type: 'question', german: 'Wie komme ich zum Hotel?', portuguese: 'Como chego ao hotel?' },
+    { id: 'a1-info-bus', unitId: 'a1.u6', order: 18, type: 'question', german: 'Wann fährt der Bus?', portuguese: 'Quando sai o ônibus?' },
   ] },
   { competencyId: 'a1.help', level: 'A1', categories: ['survival'], core: [
-    { german: 'Können Sie mir helfen, bitte?', portuguese: 'Você pode me ajudar, por favor?' },
-    { german: 'Ich brauche Hilfe.', portuguese: 'Eu preciso de ajuda.' },
+    { id: 'a1-help-koennen', unitId: 'a1.u7', order: 19, type: 'request', german: 'Können Sie mir helfen, bitte?', portuguese: 'Você pode me ajudar, por favor?' },
+    { id: 'a1-help-brauche', unitId: 'a1.u7', order: 20, type: 'statement', german: 'Ich brauche Hilfe.', portuguese: 'Eu preciso de ajuda.' },
   ] },
 
   // ---------------- A2 ----------------

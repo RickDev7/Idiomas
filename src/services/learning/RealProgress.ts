@@ -22,6 +22,14 @@ import {
   zeroLanguageSeedPhrases,
   l0ChunkBaseForPhraseId,
 } from '@/services/teacher/ZeroLanguageMode';
+import {
+  a1CurriculumSeedPhrases,
+  getA1Targets,
+  isA1TargetId,
+  isA1UnitComplete,
+  a1UnitIdsInOrder,
+} from '@/services/course/A1Curriculum';
+import { competenciesForLevel } from '@/services/course/competencies';
 
 const MAP_LEVELS: CourseLevelId[] = ['L0', 'A1', 'A2', 'B1', 'B2', 'C1', 'C2'];
 
@@ -84,7 +92,10 @@ export type RealProgressInput = {
   variationsToday?: number;
 };
 
-const phraseGerman = new Map(zeroLanguageSeedPhrases().map((p) => [p.id, p.german]));
+const phraseGerman = new Map([
+  ...zeroLanguageSeedPhrases().map((p) => [p.id, p.german] as const),
+  ...a1CurriculumSeedPhrases().map((p) => [p.id, p.german] as const),
+]);
 
 export function l0CurriculumTotals(): { baseCount: number; variationCount: number } {
   let variationCount = 0;
@@ -181,6 +192,13 @@ function buildLevelProgress(learning: UserLearningProfile, currentLevel: CourseL
   const { baseCount, variationCount } = l0CurriculumTotals();
   const matured = Object.keys(L0_CHUNK_GRAPH).filter((id) => isL0ChunkMature(learning, id)).length;
   const { learnedChunkIds, totalVariationsCreated } = deriveLearningCounts(learning);
+  const a1Targets = getA1Targets();
+  const a1Ready = a1Targets.filter((t) => {
+    const c = learning.phrases[t.id];
+    return c && ((c.timesCorrect ?? 0) >= 2 || isMastered(c) || stateIndex(c.state) >= stateIndex('answeredAlone'));
+  }).length;
+  const a1UnitsDone = a1UnitIdsInOrder().filter((u) => isA1UnitComplete(u, learning)).length;
+  const a1Comps = competenciesForLevel('A1').length;
 
   return MAP_LEVELS.map((level) => {
     const availability = getLevelAvailability(level, currentLevel);
@@ -195,8 +213,24 @@ function buildLevelProgress(learning: UserLearningProfile, currentLevel: CourseL
       };
     }
 
+    if (level === 'A1') {
+      if (availability === 'locked') {
+        return { level, availability, progressPercent: null, detail: 'Bloqueado' };
+      }
+      if (availability === 'completed') {
+        return { level, availability, progressPercent: 100, detail: 'Concluído' };
+      }
+      const pct = a1Targets.length > 0 ? Math.round((a1Ready / a1Targets.length) * 100) : 0;
+      return {
+        level,
+        availability,
+        progressPercent: pct,
+        detail: `${a1Ready}/${a1Targets.length} targets · ${a1UnitsDone}/7 unidades · ${a1Comps} competências`,
+      };
+    }
+
     if (availability === 'locked') {
-      return { level, availability, progressPercent: null, detail: 'Bloqueado' };
+      return { level, availability, progressPercent: null, detail: 'Bloqueado — currículo ainda não disponível' };
     }
 
     if (availability === 'completed') {
@@ -227,7 +261,8 @@ function buildWeakAreas(learning: UserLearningProfile, limit = 5): WeakArea[] {
       const inL0 =
         L0_CHUNK_GRAPH[c.phraseId] ||
         l0ChunkBaseForPhraseId(c.phraseId) !== null;
-      if (!inL0) return false;
+      const inA1 = isA1TargetId(c.phraseId);
+      if (!inL0 && !inA1) return false;
       return (
         c.needsHelp ||
         c.confidence < 40 ||
