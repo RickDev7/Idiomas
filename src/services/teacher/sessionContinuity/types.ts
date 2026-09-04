@@ -14,7 +14,9 @@ export type OpeningStrategy =
   | 'review_mistake'
   | 'recall_old'
   | 'advance'
-  | 'natural';
+  | 'natural'
+  /** Home / Meus Chunks / Estrutura — target explícito do usuário. */
+  | 'selected_target';
 
 export type SessionStatus = 'CREATED' | 'ACTIVE' | 'PAUSED' | 'COMPLETED' | 'ABANDONED';
 

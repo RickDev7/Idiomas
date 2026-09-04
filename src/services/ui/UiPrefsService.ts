@@ -104,6 +104,47 @@ export function helpLevelToNumber(level: HelpLevelPref): number {
   return 2; // auto: começa moderado; ScaffoldingEngine faz fade
 }
 
+/**
+ * Ajusta o scaffold do motor no INÍCIO da sessão.
+ * auto = o motor decide; extra/normal/minimal = preferência do usuário.
+ */
+export function applyHelpPrefToScaffold(engineLevel: number, pref: HelpLevelPref): number {
+  const e = Math.max(0, Math.min(5, Math.round(Number.isFinite(engineLevel) ? engineLevel : 2)));
+  if (pref === 'auto') return e;
+  if (pref === 'extra') return Math.max(e, 4);
+  if (pref === 'normal') return 2;
+  return 0;
+}
+
+export function helpLevelGuidanceForTeacher(level: HelpLevelPref): string {
+  if (level === 'extra') {
+    return 'AJUDA ALTA: contexto + pista + primeira palavra; frase parcial; completa só se o aluno travar.';
+  }
+  if (level === 'normal') {
+    return 'AJUDA NORMAL: menos pistas; deixe o aluno tentar antes de modelar a frase inteira.';
+  }
+  if (level === 'minimal') {
+    return 'AJUDA MÍNIMA: máxima tentativa independente; pista só após bloqueio claro.';
+  }
+  return 'AJUDA AUTOMÁTICA: ajuste o suporte ao desempenho real; reduza ajuda quando acertar sozinho.';
+}
+
+/** Texto curto para o teacherDirective (o compact prompt do Live não inclui help/imersão/intensivo). */
+export function livePrefsDirective(opts: {
+  helpLevel: HelpLevelPref;
+  immersionPct: number;
+  zeroLanguage: boolean;
+  immersionGuidance: string;
+  intensiveGuidance: string;
+}): string {
+  const immersion = opts.zeroLanguage
+    ? `META DE IMERSÃO: ${opts.immersionPct}%. Nível iniciante: explicações em português e modelo em alemão. Não force alemão 100%.`
+    : opts.immersionGuidance;
+  return [helpLevelGuidanceForTeacher(opts.helpLevel), immersion, opts.intensiveGuidance]
+    .filter(Boolean)
+    .join('\n');
+}
+
 export function immersionBand(pct: number): 'low' | 'mid' | 'high' | 'max' {
   if (pct <= 25) return 'low';
   if (pct <= 50) return 'mid';

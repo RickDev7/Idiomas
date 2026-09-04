@@ -15,10 +15,13 @@ import {
 } from '@/services/learning/ReviewEngine';
 import {
   MAX_REVIEW_ITEM_ATTEMPTS,
+  advanceReviewQueueAfterItem,
   persistReviewSession,
   readReviewSessionSnapshot,
   type ReviewSessionSnapshot,
 } from '@/services/learning/ReviewSession';
+import { applyHelpPrefToScaffold, UiPrefsService } from '@/services/ui/UiPrefsService';
+import { targetFlow } from '@/services/ui/TargetFlowTrace';
 import {
   getNextBestLearningAction,
   decideNextBestAction,
@@ -738,6 +741,43 @@ export interface OrchestratorDeps {
   miniProvaSnapshot?: MiniProvaSnapshot | null;
   /** Geração LiveSession — idempotência do kickoff do simulador. */
   liveSessionGeneration?: number;
+  /** Home / estrutura: frase-alvo só na inicialização desta sessão. */
+  startPhraseId?: string;
+}
+
+/** Seleção explícita da Home/Chunks não pôde ser aplicada — sem fallback para currículo. */
+export class SelectedStartTargetError extends Error {
+  readonly startPhraseId: string;
+  readonly planTargetId: string | null;
+
+  constructor(startPhraseId: string, planTargetId: string | null, message?: string) {
+    super(
+      message
+        || `SELECTED_START_TARGET_FAILED: requested=${startPhraseId} plan=${planTargetId ?? 'null'}`,
+    );
+    this.name = 'SelectedStartTargetError';
+    this.startPhraseId = startPhraseId;
+    this.planTargetId = planTargetId;
+  }
+}
+
+/** True se o plano efetivamente usa o id solicitado (ou base L0 equivalente). */
+export function selectedStartIdsMatch(requestedRaw: string, planTargetId: string | null | undefined): boolean {
+  if (!planTargetId) return false;
+  let requested = requestedRaw.trim();
+  if (!requested) return false;
+  try {
+    requested = decodeURIComponent(requested).trim();
+  } catch {
+    /* already decoded */
+  }
+  if (requested === planTargetId) return true;
+  const baseReq = l0ChunkBaseForPhraseId(requested);
+  const basePlan = l0ChunkBaseForPhraseId(planTargetId);
+  if (baseReq && baseReq === planTargetId) return true;
+  if (basePlan && basePlan === requested) return true;
+  if (baseReq && basePlan && baseReq === basePlan) return true;
+  return false;
 }
 
 export class ConversationOrchestrator {
@@ -782,6 +822,9 @@ export class ConversationOrchestrator {
   private simulatorConversationHints: string[] = [];
   private miniProvaSnapshot: MiniProvaSnapshot | null = null;
   private miniProvaMode = false;
+  /** Home/Chunks: startPhraseId aplicado com sucesso neste create(). */
+  private selectedStartApplied = false;
+  private requestedStartPhraseId: string | null = null;
   private followUpEventId: string | undefined;
   private followUpOpening: string | undefined;
   /** Ciclo correção: aguarda nova tentativa após modelo (Fase 11 §§26–28). */
@@ -907,7 +950,11 @@ export class ConversationOrchestrator {
       turnsSinceIntervention: 99,
     };
     const orch = new ConversationOrchestrator(merged, plan, ctx);
-    orch.sessionSupport = plan.scaffoldLevel;
+    const helpPref = UiPrefsService.get().helpLevel;
+    orch.sessionSupport = applyHelpPrefToScaffold(plan.scaffoldLevel, helpPref) as SupportLevel;
+    if (orch.sessionSupport !== plan.scaffoldLevel) {
+      orch.plan = { ...orch.plan, scaffoldLevel: orch.sessionSupport };
+    }
     if (merged.reviewIntent || merged.reviewSessionSnapshot) {
       orch.reviewSession = true;
       const snapshot = merged.reviewSessionSnapshot
@@ -931,6 +978,35 @@ export class ConversationOrchestrator {
       orch.applyMiniProvaQuestion(0);
     } else if (merged.simulatorIntent) {
       orch.applySimulatorIntent(merged.simulatorIntent, merged.liveSessionGeneration ?? 0);
+    } else if (merged.startPhraseId) {
+      orch.requestedStartPhraseId = merged.startPhraseId.trim();
+      let ok = orch.applySelectedStartTarget(merged.startPhraseId);
+      if (!ok || !selectedStartIdsMatch(merged.startPhraseId, orch.getPlan().target?.id)) {
+        targetFlow('APPLY_SELECTED_START', {
+          startPhraseId: merged.startPhraseId,
+          planTarget: orch.getPlan().target?.german ?? null,
+          planTargetId: orch.getPlan().target?.id ?? null,
+          note: 'primeira tentativa falhou — reaplicando uma vez',
+        });
+        ok = orch.applySelectedStartTarget(merged.startPhraseId);
+      }
+      const planId = orch.getPlan().target?.id ?? null;
+      const invariantOk = ok && selectedStartIdsMatch(merged.startPhraseId, planId);
+      targetFlow('APPLY_SELECTED_START', {
+        startPhraseId: merged.startPhraseId,
+        planTarget: orch.getPlan().target?.german ?? null,
+        planTargetId: planId,
+        actionReason: orch.getPlan().actionReason ?? null,
+        selectedStart: invariantOk,
+        note: invariantOk
+          ? 'applySelectedStartTarget OK — invariante plan.target.id ≡ startPhraseId'
+          : 'SELECTED_START_INVARIANT_FAILED — sem fallback para currículo',
+      });
+      if (!invariantOk) {
+        orch.selectedStartApplied = false;
+        throw new SelectedStartTargetError(merged.startPhraseId, planId);
+      }
+      orch.selectedStartApplied = true;
     } else if (merged.conversationIntent) {
       orch.applyConversationTopicIntent(merged.conversationIntent);
     }
@@ -1225,6 +1301,71 @@ export class ConversationOrchestrator {
     };
   }
 
+  /**
+   * Target explícito da Home / detalhe da estrutura — só no create().
+   * TRUE só se o plano ficou efetivamente com esse target (não só “achei a frase”).
+   * Depois o refreshPlan segue a progressão normal (variação → pergunta → conversa).
+   */
+  applySelectedStartTarget(phraseId: string): boolean {
+    const pool = mergeZeroLanguagePhrases(this.phrases);
+    let decoded = phraseId.trim();
+    if (!decoded) return false;
+    try {
+      decoded = decodeURIComponent(decoded).trim();
+    } catch {
+      /* id já decodificado */
+    }
+    const baseId = l0ChunkBaseForPhraseId(decoded);
+    const resolved =
+      resolvePhrase(decoded, pool)
+      || (baseId ? resolvePhrase(baseId, pool) : null)
+      || pool.find((p) => p.german === decoded)
+      || null;
+    if (!resolved) {
+      this.selectedStartApplied = false;
+      return false;
+    }
+
+    const conf = this.learning.phrases[resolved.id];
+    const times = conf?.timesCorrect ?? 0;
+    const action: OrchestratorAction =
+      !conf || conf.state === 'new' || times === 0 ? 'introduce' : 'practice';
+    const zero = isZeroLanguageMode(this.profile);
+    let scaffoldLevel = scaffoldFor(conf, action, resolved.id);
+    if (zero) {
+      scaffoldLevel = Math.max(scaffoldLevel, action === 'introduce' ? 4 : 3) as SupportLevel;
+    }
+    const helpPref = UiPrefsService.get().helpLevel;
+    this.sessionSupport = applyHelpPrefToScaffold(scaffoldLevel, helpPref) as SupportLevel;
+    const target = phraseToTarget(resolved, conf);
+    this.plan = {
+      ...this.plan,
+      action,
+      actionReason: `selected_home_target:${resolved.id}`,
+      target,
+      scaffoldLevel: this.sessionSupport,
+    };
+    this.plan.teacherDirective = buildDirective(this.plan, zero, this.plan.training?.totalMinutes);
+    this.plan.actionKickoff = buildActionKickoff(this.plan, zero);
+    this.ctx.targetItem = target.german;
+    this.ctx.lastAction = action;
+    this.ctx.currentGoal = action;
+    this.ctx.mode = 'GUIDED_CONVERSATION';
+
+    const applied = selectedStartIdsMatch(decoded, this.plan.target?.id);
+    this.selectedStartApplied = applied;
+    return applied;
+  }
+
+  /** Seleção explícita da Home/Chunks aplicada com sucesso neste create(). */
+  wasSelectedStartApplied(): boolean {
+    return this.selectedStartApplied;
+  }
+
+  getRequestedStartPhraseId(): string | null {
+    return this.requestedStartPhraseId;
+  }
+
   /** Tema escolhido na tela Conversar — conversa guiada pelo progresso real. */
   applyConversationTopicIntent(intent: ConversationTopicContext) {
     const opening = pickConversationOpening(intent);
@@ -1482,14 +1623,12 @@ export class ConversationOrchestrator {
       this.pendingReview = null;
       this.justErrored = storedResult === 'DEFERRED' || storedResult === 'FAILED';
 
-      const nextIndex = this.reviewQueueSnapshot.currentIndex + 1;
-      if (nextIndex < this.reviewQueueSnapshot.items.length) {
-        this.reviewQueueSnapshot.currentIndex = nextIndex;
-        this.reviewQueueSnapshot.itemAttempts = 0;
+      const advanced = advanceReviewQueueAfterItem(this.reviewQueueSnapshot);
+      if (!advanced.finished && advanced.nextIndex != null) {
         persistReviewSession(this.reviewQueueSnapshot);
-        this.applyReviewQueueItem(nextIndex);
+        this.applyReviewQueueItem(advanced.nextIndex);
         const nextOpp = this.pendingReview!;
-        const pos = nextIndex + 1;
+        const pos = advanced.nextIndex + 1;
         const total = this.reviewQueueSnapshot.total;
         return {
           flow: 'continueConversation',

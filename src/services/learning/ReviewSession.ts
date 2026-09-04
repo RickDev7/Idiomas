@@ -87,7 +87,33 @@ export function startReviewSession(items: ReviewQueueItem[]): ReviewSessionSnaps
 
 export function getCurrentReviewQueueItem(snapshot: ReviewSessionSnapshot): ReviewQueueItem | null {
   if (snapshot.completed) return null;
+  if (snapshot.currentIndex < 0 || snapshot.currentIndex >= snapshot.items.length) return null;
   return snapshot.items[snapshot.currentIndex] ?? null;
+}
+
+/**
+ * Avança após um item já gravado em `results`.
+ * Nunca deixa currentIndex === items.length como pergunta ativa:
+ * no fim marca completed e mantém o índice no último item.
+ */
+export function advanceReviewQueueAfterItem(snapshot: ReviewSessionSnapshot): {
+  finished: boolean;
+  nextIndex: number | null;
+} {
+  if (snapshot.completed) {
+    return { finished: true, nextIndex: null };
+  }
+  const nextIndex = snapshot.currentIndex + 1;
+  if (nextIndex < snapshot.items.length) {
+    snapshot.currentIndex = nextIndex;
+    snapshot.itemAttempts = 0;
+    snapshot.completed = false;
+    return { finished: false, nextIndex };
+  }
+  snapshot.completed = true;
+  snapshot.itemAttempts = 0;
+  snapshot.currentIndex = Math.max(0, snapshot.items.length - 1);
+  return { finished: true, nextIndex: null };
 }
 
 export function reviewSessionProgress(snapshot: ReviewSessionSnapshot | null): {

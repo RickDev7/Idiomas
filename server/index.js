@@ -231,6 +231,36 @@ function sanitizeProfile(input) {
   };
 }
 
+function isGreetingLike(s) {
+  if (!s || typeof s !== 'string') return false;
+  const t = s
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '')
+    .replace(/[''`´]/g, '')
+    .replace(/[!?.…,;:"""«»]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!t) return false;
+  if (/^(guten morgen|guten tag|guten abend|gute nacht)(\s|$)/.test(t)) return true;
+  if (/wie geht(s| es dir| es ihnen)?(\s|$)/.test(t)) return true;
+  if (/primeira microaula/.test(t) && /guten morgen/.test(t)) return true;
+  if (/guten morgen|guten tag|guten abend|gute nacht/.test(t) && /ultima pergunta|proximo passo|objetivo incompleto/.test(t)) {
+    return true;
+  }
+  return false;
+}
+
+/** Se a abertura pedagógica não é saudação, não reinjetar saudações da continuidade. */
+function continuityConflictsWithOpening(line, openingGerman) {
+  const opening = (openingGerman || '').trim();
+  if (!opening || isGreetingLike(opening)) return false;
+  if (isGreetingLike(line)) return true;
+  if (/guten (morgen|tag|abend)|gute nacht/i.test(line) && !/guten/i.test(opening)) return true;
+  if (/primeira microaula\s*[—\-–]?\s*guten morgen/i.test(line)) return true;
+  return false;
+}
+
 function buildSessionKickoff(profile) {
   if (profile.simulatorMode || profile.miniProvaMode) {
     return buildImmersionSessionKickoff(profile);
@@ -254,10 +284,10 @@ function buildSessionKickoff(profile) {
     profile.nextStep ? `Próximo passo: ${profile.nextStep}` : '',
     profile.lastTopic ? `Tema: ${profile.lastTopic}` : '',
     Array.isArray(profile.recentMistakes) && profile.recentMistakes.length ? `Erros: ${profile.recentMistakes.slice(0, 3).join(' | ')}` : '',
-  ].filter(Boolean);
+  ].filter(Boolean).filter((line) => !continuityConflictsWithOpening(line, opening));
 
   if (zeroActive) {
-    return [
+    const kick = [
       '[INSTRUÇÃO INTERNA — não leia isto em voz alta]',
       'ZERO LANGUAGE MODE — FALE AGORA em áudio (obrigatório).',
       'Ordem desta abertura: 1) significado em português, 2) modelo em alemão, 3) diga "Agora você".',
@@ -268,6 +298,13 @@ function buildSessionKickoff(profile) {
       'Só espere o aluno DEPOIS de terminar essa fala. Não fique em silêncio no início.',
       profile.orchestratorKickoff || '',
     ].filter(Boolean).join('\n');
+    if (process.env.NODE_ENV !== 'production' || process.env.LOG_SESSION === '1' || process.env.TARGET_TRACE === '1') {
+      console.log(
+        `[TARGET_TRACE] KICKOFF opening=${JSON.stringify(opening).slice(0, 80)} ` +
+          `hasGuten=${/Guten (Morgen|Tag|Abend)|Gute Nacht/i.test(kick)} kickLen=${kick.length}`,
+      );
+    }
+    return kick;
   }
 
   if (kind === 'FIRST_SESSION' && opening) {
@@ -332,6 +369,17 @@ function maybeSendKickoff(entry) {
       `[KICKOFF] sent token=${entry.token?.slice(0, 8)} level=${profile.level || '?'} ` +
         `zero=${!!profile.zeroLanguageMode} kickLen=${kick.length} sysReady=1`,
     );
+    if (process.env.NODE_ENV !== 'production' || process.env.TARGET_FLOW === '1' || process.env.TARGET_TRACE === '1') {
+      console.log('[TARGET_FLOW] BACKEND_KICKOFF', {
+        openingGerman: profile.openingGerman || null,
+        targetPhrase: profile.targetPhrase || null,
+        actionReason: profile.actionReason || null,
+        nextStep: profile.nextStep || null,
+        lastQuestion: profile.lastQuestion || null,
+        kickoffHasGutenAbend: /Guten Abend/i.test(kick),
+        kickSnippet: kick.split('\n').slice(0, 8).join(' | ').slice(0, 400),
+      });
+    }
   } catch (err) {
     entry.kickoffSent = false;
     console.error(`[KICKOFF] fail token=${entry.token?.slice(0, 8)}:`, String(err?.message || err).slice(0, 200));

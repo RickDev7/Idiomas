@@ -181,27 +181,55 @@ export function generateLocalSummary(input: EndSessionInput, session: LearningSe
   };
 }
 
+export type PrepareSessionOpts = {
+  /**
+   * Abertura forçada (ex.: clique em “Ich arbeite.” na Home).
+   * Tem prioridade sobre SessionOpeningEngine — evita gravar Guten Morgen
+   * e injetar “Próximo passo: primeira microaula — Guten Morgen” no kickoff.
+   */
+  forcedOpening?: {
+    german: string;
+    portuguese: string;
+    topic?: string;
+    reason?: string;
+  };
+};
+
 export function prepareSession(
   profile: UserProfile,
   learning: UserLearningProfile | null,
+  opts?: PrepareSessionOpts,
 ): PreparedSession {
   const ctx = loadLearningContext(profile, learning);
   const { state, last, incomplete, knownPhrases, weakPhrases } = ctx;
   const hours = hoursSince(incomplete?.startedAt || last?.date);
 
-  const opening = getSessionOpening({
-    sessionCount: state.sessionCount,
-    lastSession: last,
-    recentOpenings: state.recentOpenings.map((o) => o.german),
-    hoursSinceLast: hours,
-    weakPhrases,
-    knownPhrases,
-    goal: profile.goal,
-    profession: profile.profession,
-    name: profile.name,
-    incomplete,
-    zeroLanguageMode: isZeroLanguageMode(profile),
-  });
+  const forced = opts?.forcedOpening;
+  const opening = forced?.german
+    ? ({
+        kind: 'NEW_CONTENT_SESSION' as const,
+        strategy: 'selected_target' as const,
+        german: forced.german,
+        portuguese: forced.portuguese || forced.german,
+        expected: forced.german.toLowerCase().split(/\s+/).slice(0, 3).join(' '),
+        hint: forced.german.split(/\s+/)[0] + '...',
+        topic: forced.topic || 'selected',
+        reason: forced.reason || `selected_target:${forced.german}`,
+        pedagogicalRepeat: false,
+      } satisfies SessionOpening)
+    : getSessionOpening({
+        sessionCount: state.sessionCount,
+        lastSession: last,
+        recentOpenings: state.recentOpenings.map((o) => o.german),
+        hoursSinceLast: hours,
+        weakPhrases,
+        knownPhrases,
+        goal: profile.goal,
+        profession: profile.profession,
+        name: profile.name,
+        incomplete,
+        zeroLanguageMode: isZeroLanguageMode(profile),
+      });
 
   recordOpening(state, opening.german);
   ensureSessionStub(loadContinuityState(), {

@@ -27,6 +27,10 @@ import {
 } from '@/services/course';
 import { getIncompleteSession } from '@/services/teacher/sessionContinuity';
 import { SoundService } from '@/services/ui/SoundService';
+import {
+  beginSelectedLearningSession,
+  clearSelectedLearningTarget,
+} from '@/services/teacher/LessonStartIntent';
 import { MemoryService } from '@/services/learning/MemoryService';
 import { getRealProgress, type RealProgress } from '@/services/learning/RealProgress';
 import { readAutomationScore } from '@/services/learning/AutomationScoreEngine';
@@ -207,7 +211,15 @@ export function HomePage() {
         ...r,
         tint: meta.tint,
         icon: meta.icon,
-        onClick: () => navigate(`/estrutura/${encodeURIComponent(r.id)}`),
+        onClick: () => {
+          SoundService.play('start');
+          beginSelectedLearningSession(navigate, {
+            source: 'home',
+            targetId: r.id,
+            baseId: r.id,
+            targetPhrase: r.german,
+          });
+        },
       };
     });
   }, [learning, progress?.weakAreas, activeChunk?.baseId, navigate]);
@@ -226,6 +238,7 @@ export function HomePage() {
   };
 
   const startTraining = async () => {
+    clearSelectedLearningTarget();
     await getTodaySession(profile);
     const type = profile.firstLessonComplete ? 'lesson' : 'first';
     SoundService.play('start');

@@ -16,7 +16,7 @@ import {
 } from '@/services/voice/TeacherTurnSync';
 import { recordTalkSegment, beginTeacherTalkSession, setTeacherTalkMode } from '@/services/teacher/TeacherTalkMetrics';
 import { GeminiVoiceService, type GeminiVoiceHandlers, type MicCaptureState } from '@/services/voice/GeminiVoiceService';
-import type { LiveSessionState } from '@/services/ai/GeminiLiveService';
+import type { LiveProfile, LiveSessionState } from '@/services/ai/GeminiLiveService';
 import type { UserProfile } from '@/types';
 import { MemoryService } from '@/services/learning/MemoryService';
 import { StorageService } from '@/services/storage/StorageService';
@@ -25,6 +25,7 @@ import type { TurnStatus } from '@/services/ai/GeminiResponseParser';
 import { getIncompleteSession, getLastSession } from '@/services/teacher/sessionContinuity';
 import {
   ConversationOrchestrator,
+  SelectedStartTargetError,
 } from '@/services/teacher/ConversationOrchestrator';
 import type { ReviewType } from '@/services/learning/ReviewEngine';
 import { readConversationTopicContext } from '@/services/teacher/ConversationTopicIntent';
@@ -40,8 +41,53 @@ import {
   startSimulatorSession,
 } from '@/services/teacher/SimulatorSession';
 import { readReviewSessionSnapshot } from '@/services/learning/ReviewSession';
+import { livePrefsDirective, UiPrefsService } from '@/services/ui/UiPrefsService';
+import { clearSelectedLearningTarget, readSelectedLearningTarget } from '@/services/teacher/LessonStartIntent';
+import { isScriptedGreeting } from '@/services/teacher/sessionContinuity/SessionOpeningEngine';
+import { buildSessionKickoffFromProfile } from '@/services/voice/LiveSessionKickoff';
+import { targetFlow } from '@/services/ui/TargetFlowTrace';
+
+const DEV = typeof import.meta !== 'undefined' && !!(import.meta as { env?: { DEV?: boolean } }).env?.DEV;
+
+function flowSessionId(): string | null {
+  try {
+    return sessionStorage.getItem('dt_target_flow_session');
+  } catch {
+    return null;
+  }
+}
 
 let activeVoiceService: GeminiVoiceService | null = null;
+
+async function attachUiPrefsToLive<T extends LiveProfile>(
+  live: T,
+  profile: UserProfile,
+  zeroLanguage: boolean,
+): Promise<T> {
+  const prefs = UiPrefsService.get();
+  const { immersionGuidanceForTeacher, intensiveGuidanceForTeacher } = await import(
+    '@/services/teacher/TeacherEngine'
+  );
+  const pct = profile.germanPercentage ?? prefs.immersionTarget ?? 80;
+  const immersionGuidance = immersionGuidanceForTeacher(pct);
+  const intensiveGuidance = intensiveGuidanceForTeacher(!!profile.turboMode);
+  const overlay = livePrefsDirective({
+    helpLevel: prefs.helpLevel,
+    immersionPct: pct,
+    zeroLanguage,
+    immersionGuidance,
+    intensiveGuidance,
+  });
+  return {
+    ...live,
+    helpLevel: prefs.helpLevel,
+    immersionLevel: pct,
+    intensiveMode: !!profile.turboMode,
+    immersionGuidance,
+    intensiveGuidance,
+    teacherDirective: [live.teacherDirective, overlay].filter(Boolean).join('\n'),
+  } as T;
+}
 
 function readReviewIntent(): { phraseId?: string; reviewType?: ReviewType } | undefined {
   if (typeof window === 'undefined') return undefined;
@@ -84,8 +130,6 @@ function isMiniProvaSession(): boolean {
   if (typeof window === 'undefined') return false;
   return new URLSearchParams(window.location.search).get('type') === 'miniprova';
 }
-
-const DEV = typeof import.meta !== 'undefined' && !!(import.meta as { env?: { DEV?: boolean } }).env?.DEV;
 
 export interface UserCurrentTurn {
   id: string;
@@ -145,6 +189,8 @@ export interface GeminiLiveUI {
   miniProvaProgress: { current: number; total: number };
   /** Mini prova concluída — navegar para resultado. */
   miniProvaComplete: boolean;
+  /** Revisão da fila concluída — navegar para /sessao/concluida. */
+  reviewComplete: boolean;
   /** Tempo decorrido MM:SS (simulador). */
   simulatorElapsed: string;
   /** Label do cenário (simulador). */
@@ -182,6 +228,7 @@ export function useGeminiLive(profile: UserProfile | null): GeminiLiveUI {
   const [simulatorTimeUp, setSimulatorTimeUp] = useState(false);
   const [miniProvaProgress, setMiniProvaProgress] = useState({ current: 0, total: 0 });
   const [miniProvaComplete, setMiniProvaComplete] = useState(false);
+  const [reviewComplete, setReviewComplete] = useState(false);
   const simulatorTimeUpRef = useRef(false);
   const accRef = useRef(new GeminiTurnAccumulator());
   const turnIdsRef = useRef({ assistant: '', user: '' });
@@ -228,6 +275,9 @@ export function useGeminiLive(profile: UserProfile | null): GeminiLiveUI {
     }
     if (decision.reason === 'miniprova_done') {
       setMiniProvaComplete(true);
+    }
+    if (decision.reason === 'review_session_complete') {
+      setReviewComplete(true);
     }
     const mpSnap = orchRef.current?.getMiniProvaSnapshot();
     if (mpSnap) {
@@ -362,7 +412,33 @@ export function useGeminiLive(profile: UserProfile | null): GeminiLiveUI {
       const reviewSessionSnapshot = readReviewSessionSnapshot();
       const miniProvaIntent = readMiniProvaIntent();
       const simulatorIntent = miniProvaIntent ? undefined : readSimulatorIntent();
-      const conversationIntent = simulatorIntent || miniProvaIntent ? undefined : readFreeConversationIntent();
+      const startSel = reviewIntent || miniProvaIntent || simulatorIntent
+        ? undefined
+        : readSelectedLearningTarget();
+      const startPhraseId = startSel?.targetId;
+      if (!startPhraseId && !reviewIntent && !miniProvaIntent && !simulatorIntent) {
+        clearSelectedLearningTarget();
+      }
+      const fid = flowSessionId();
+      targetFlow('SESSION_ROUTE', {
+        sessionId: fid,
+        startPhraseId: startPhraseId ?? null,
+        selectedTarget: startSel?.targetPhrase ?? null,
+        selectedTargetId: startSel?.targetId ?? null,
+        note: `review=${!!reviewIntent} sim=${!!simulatorIntent} mp=${!!miniProvaIntent}`,
+      });
+      targetFlow('SELECTED_TARGET_READ', {
+        sessionId: fid,
+        startPhraseId: startPhraseId ?? null,
+        selectedTarget: startSel?.targetPhrase ?? null,
+        selectedTargetId: startSel?.targetId ?? null,
+        note: startPhraseId
+          ? 'phrase presente na URL/seleção'
+          : 'SEM startPhraseId — currículo L0 genérico (ex.: Guten Abend) pode ganhar',
+      });
+      const conversationIntent = startPhraseId || simulatorIntent || miniProvaIntent
+        ? undefined
+        : readFreeConversationIntent();
       if (simulatorIntent) {
         startSimulatorSession(simulatorIntent);
         simulatorTimeUpRef.current = false;
@@ -379,23 +455,77 @@ export function useGeminiLive(profile: UserProfile | null): GeminiLiveUI {
           total: miniProvaSnapshot.total,
         });
       }
-      const orch = ConversationOrchestrator.create({
-        profile,
-        learning,
-        phrases,
-        reviewIntent,
-        reviewSessionSnapshot,
-        conversationIntent,
-        simulatorIntent,
-        miniProvaSnapshot,
-        liveSessionGeneration: sessionGenRef.current,
-      });
+      let orch: ConversationOrchestrator;
+      try {
+        orch = ConversationOrchestrator.create({
+          profile,
+          learning,
+          phrases,
+          reviewIntent,
+          reviewSessionSnapshot,
+          conversationIntent,
+          startPhraseId,
+          simulatorIntent,
+          miniProvaSnapshot,
+          liveSessionGeneration: sessionGenRef.current,
+        });
+      } catch (err) {
+        if (err instanceof SelectedStartTargetError) {
+          targetFlow('SELECTED_START_INVARIANT_FAILED', {
+            sessionId: fid,
+            startPhraseId: err.startPhraseId,
+            planTargetId: err.planTargetId,
+            note: 'create() abortou — sem kickoff com currículo (ex. Guten Abend)',
+          });
+          setError('Não consegui abrir o conteúdo selecionado. Volte e tente de novo.');
+          return attachUiPrefsToLive(
+            { level: profile.level, goal: profile.goal, profession: profile.profession, skipKickoff: true },
+            profile,
+            false,
+          );
+        }
+        throw err;
+      }
       orchRef.current = orch;
       userTurnsRef.current = 0;
       setUserTurns(0);
       const plan = orch.getPlan();
       const live = orch.toLiveFields();
       const pendingReview = orch.getPendingReview();
+      // Fonte estrutural: flag do orchestrator + invariante id — não actionReason string.
+      const selectedStart = !!(
+        startPhraseId
+        && orch.wasSelectedStartApplied()
+        && plan.target?.german
+        && (plan.target.id === startPhraseId
+          || plan.target.id === startSel?.baseId
+          || startSel?.baseId === plan.target.id)
+      );
+      targetFlow('ORCHESTRATOR_CREATE', {
+        sessionId: fid,
+        startPhraseId: startPhraseId ?? null,
+        selectedTarget: startSel?.targetPhrase ?? null,
+        selectedTargetId: startSel?.targetId ?? null,
+        planTarget: plan.target?.german ?? null,
+        planTargetId: plan.target?.id ?? null,
+        actionReason: plan.actionReason ?? null,
+        selectedStart,
+        pedagogicalTarget: plan.target?.german ?? null,
+        note: selectedStart
+          ? 'selectedStartApplied=true — abertura forçada pelo target'
+          : (startPhraseId
+            ? 'FALHA inesperada: startPhraseId sem selectedStartApplied'
+            : 'sem startPhraseId — plan veio de pickZeroLanguageTarget'),
+      });
+      targetFlow('PLAN_CREATED', {
+        sessionId: fid,
+        startPhraseId: startPhraseId ?? null,
+        planTarget: plan.target?.german ?? null,
+        planTargetId: plan.target?.id ?? null,
+        actionReason: plan.actionReason ?? null,
+        pedagogicalTarget: plan.target?.german ?? null,
+        selectedStart,
+      });
       setPedagogicalAction(plan.action);
       setPedagogicalReason(plan.actionReason || (reviewIntent ? 'review_session' : 'session_start'));
       // targetPhrase: sincronizado só após transcript do professor (syncUiFromTeacherUtterance)
@@ -417,7 +547,41 @@ export function useGeminiLive(profile: UserProfile | null): GeminiLiveUI {
       }
 
       const { prepareSession } = await import('@/services/teacher/sessionContinuity');
-      const prepared = prepareSession(profile, learning);
+      targetFlow('PREPARE_SESSION_BEFORE', {
+        sessionId: fid,
+        startPhraseId: startPhraseId ?? null,
+        planTarget: plan.target?.german ?? null,
+        selectedStart,
+        note: selectedStart ? 'vai forcedOpening' : 'vai SessionOpeningEngine (genérico)',
+      });
+      // Target explícito: forçar abertura pedagógica — senão SessionOpeningEngine
+      // grava Guten Morgen e injeta “Próximo passo: primeira microaula — Guten Morgen”.
+      const prepared = prepareSession(
+        profile,
+        learning,
+        selectedStart && plan.target
+          ? {
+              forcedOpening: {
+                german: plan.target.german,
+                portuguese: plan.target.portuguese,
+                topic: plan.topic,
+                reason: plan.actionReason || `selected_target:${plan.target.id}`,
+              },
+            }
+          : undefined,
+      );
+      targetFlow('PREPARE_SESSION_AFTER', {
+        sessionId: fid,
+        startPhraseId: startPhraseId ?? null,
+        openingGerman: prepared.opening.german,
+        planTarget: plan.target?.german ?? null,
+        nextStep: prepared.sessionContext.recommendedContinuation,
+        recommendedContinuation: prepared.sessionContext.recommendedContinuation,
+        lastQuestion: prepared.sessionContext.lastTeacherQuestion,
+        unfinishedGoal: prepared.sessionContext.unfinishedGoal,
+        selectedStart,
+        note: `strategy=${prepared.opening.strategy}`,
+      });
       let known = Object.values(learning.phrases).filter((c) => c.confidence >= 50).map((c) => c.phraseId).slice(0, 12);
       let weak = Object.values(learning.phrases).filter((c) => c.confidence > 0 && c.confidence < 40).map((c) => c.phraseId).slice(0, 6);
       const ctx = prepared.sessionContext;
@@ -440,7 +604,7 @@ export function useGeminiLive(profile: UserProfile | null): GeminiLiveUI {
             claimed: orch.wasSimulatorKickoffClaimed(),
           });
         }
-        return {
+        const simLive = {
           level: profile.level,
           goal: profile.goal,
           profession: profile.profession,
@@ -464,6 +628,7 @@ export function useGeminiLive(profile: UserProfile | null): GeminiLiveUI {
           lastTopic: plan.topic,
           skipKickoff: !orch.wasSimulatorKickoffClaimed(),
         };
+        return attachUiPrefsToLive(simLive, profile, false);
       }
 
       if (mpMode && miniProvaSnapshot) {
@@ -479,7 +644,7 @@ export function useGeminiLive(profile: UserProfile | null): GeminiLiveUI {
         if (DEV) {
           console.log('[SIMULATOR_INIT]', { session: sessionGen, mode: 'miniprova' });
         }
-        return {
+        const mpLive = {
           level: profile.level,
           goal: profile.goal,
           profession: profile.profession,
@@ -500,15 +665,16 @@ export function useGeminiLive(profile: UserProfile | null): GeminiLiveUI {
           sessionTopic: plan.topic,
           lastTopic: plan.topic,
         };
+        return attachUiPrefsToLive(mpLive, profile, false);
       }
 
       openingRef.current = {
-        german: pendingReview?.prompt || prepared.opening.german,
+        german: pendingReview?.prompt || (selectedStart ? plan.target!.german : prepared.opening.german),
         kind: reviewIntent ? 'REVIEW_SESSION' : prepared.opening.kind,
         topic: plan.topic || prepared.opening.topic,
-        returning: prepared.returning,
+        returning: selectedStart ? false : prepared.returning,
       };
-      setReturning(prepared.returning);
+      setReturning(selectedStart ? false : prepared.returning);
       // L0: aceitas NÃO vão para "FRACAS (reforce)" — senão Gemini volta para Wie geht's após erro novo
       if (zeroMode) {
         const { l0PhrasesForLiveProfile } = await import('@/services/teacher/ZeroLanguageMode');
@@ -516,18 +682,30 @@ export function useGeminiLive(profile: UserProfile | null): GeminiLiveUI {
         known = buckets.knownPhrases;
         weak = buckets.weakPhrases;
       }
-      const openingGerman = zeroMode
-        ? (plan.target?.german || prepared.opening.german)
-        : (openingRef.current?.german || prepared.opening.german);
-      if (zeroMode) {
-        openingRef.current = {
-          german: openingGerman,
-          kind: reviewIntent ? 'REVIEW_SESSION' : prepared.opening.kind,
-          topic: plan.topic || prepared.opening.topic,
-          returning: prepared.returning,
-        };
-      }
-      return {
+      // Prioridade: target explícito > L0 plan.target > continuidade genérica
+      const openingGerman = selectedStart
+        ? plan.target!.german
+        : zeroMode
+          ? (plan.target?.german || prepared.opening.german)
+          : (openingRef.current?.german || prepared.opening.german);
+      openingRef.current = {
+        german: openingGerman,
+        kind: reviewIntent ? 'REVIEW_SESSION' : prepared.opening.kind,
+        topic: plan.topic || prepared.opening.topic,
+        returning: selectedStart ? false : prepared.returning,
+      };
+      // Com seleção explícita: não enviar continuidade de saudação que compete com o alvo
+      const lastQuestion = selectedStart
+        ? ''
+        : (isScriptedGreeting(ctx.lastTeacherQuestion) ? '' : ctx.lastTeacherQuestion);
+      const unfinishedGoal = selectedStart
+        ? ''
+        : (isScriptedGreeting(ctx.unfinishedGoal) ? '' : ctx.unfinishedGoal);
+      const nextStep = selectedStart
+        ? `trabalhar agora: ${plan.target!.german}`
+        : ctx.recommendedContinuation;
+
+      const liveProfileBase = {
         level: profile.level,
         goal: profile.goal,
         profession: profile.profession,
@@ -548,18 +726,65 @@ export function useGeminiLive(profile: UserProfile | null): GeminiLiveUI {
               `Comece falando: "${pendingReview.prompt}"`,
             ].join('\n')
           : (zeroMode ? (live.orchestratorKickoff || prepared.kickoff) : prepared.kickoff),
-        lastTopic: ctx.recentTopic || plan.topic,
-        lastQuestion: ctx.lastTeacherQuestion,
-        lastUserAnswer: ctx.lastUserAnswer,
-        unfinishedGoal: ctx.unfinishedGoal,
-        nextStep: ctx.recommendedContinuation,
-        recentMistakes: ctx.recentMistakes,
+        lastTopic: selectedStart ? (plan.topic || '') : (ctx.recentTopic || plan.topic),
+        lastQuestion,
+        lastUserAnswer: selectedStart ? '' : ctx.lastUserAnswer,
+        unfinishedGoal,
+        nextStep,
+        recentMistakes: selectedStart ? [] : ctx.recentMistakes,
         ...live,
         zeroLanguageMode: zeroMode,
         openingGerman,
       };
+
+      targetFlow('PROFILE_BUILT', {
+        sessionId: fid,
+        startPhraseId: startPhraseId ?? null,
+        selectedTarget: startSel?.targetPhrase ?? null,
+        openingGerman,
+        planTarget: plan.target?.german ?? null,
+        planTargetId: plan.target?.id ?? null,
+        nextStep,
+        lastQuestion: lastQuestion || null,
+        unfinishedGoal: unfinishedGoal || null,
+        pedagogicalTarget: plan.target?.german ?? null,
+        selectedStart,
+      });
+
+      const kickPreview = buildSessionKickoffFromProfile({
+        openingGerman,
+        sessionKind: liveProfileBase.sessionKind,
+        zeroLanguageMode: zeroMode,
+        level: profile.level,
+        lastQuestion,
+        unfinishedGoal,
+        nextStep,
+        targetPhrasePt: live.targetPhrasePt,
+        orchestratorKickoff: live.orchestratorKickoff,
+      });
+      targetFlow('KICKOFF_BUILT', {
+        sessionId: fid,
+        startPhraseId: startPhraseId ?? null,
+        selectedTarget: startSel?.targetPhrase ?? null,
+        openingGerman,
+        planTarget: plan.target?.german ?? null,
+        pedagogicalTarget: plan.target?.german ?? null,
+        nextStep,
+        lastQuestion: lastQuestion || null,
+        kickoffHasGutenAbend: /Guten Abend/i.test(kickPreview),
+        kickoffSnippet: kickPreview.split('\n').slice(0, 10).join(' | '),
+        note: /Guten Abend/i.test(kickPreview) && startPhraseId
+          ? 'BUG: kickoff tem Guten Abend apesar de startPhraseId'
+          : undefined,
+      });
+
+      return attachUiPrefsToLive(liveProfileBase, profile, zeroMode);
     } catch {
-      return { level: profile.level, goal: profile.goal, profession: profile.profession };
+      return attachUiPrefsToLive(
+        { level: profile.level, goal: profile.goal, profession: profile.profession },
+        profile,
+        false,
+      );
     }
   }, [profile]);
 
@@ -647,6 +872,24 @@ export function useGeminiLive(profile: UserProfile | null): GeminiLiveUI {
           },
           turn.text,
         );
+        if (!(window as unknown as { __tfFirstTeacher?: boolean }).__tfFirstTeacher && turn.text.length > 12) {
+          (window as unknown as { __tfFirstTeacher?: boolean }).__tfFirstTeacher = true;
+          const planNow = orchRef.current?.getPlan();
+          targetFlow('FIRST_TEACHER_TRANSCRIPT', {
+            sessionId: flowSessionId(),
+            planTarget: planNow?.target?.german ?? null,
+            planTargetId: planNow?.target?.id ?? null,
+            pedagogicalTarget: planNow?.target?.german ?? null,
+            openingGerman: openingRef.current?.german ?? null,
+            note: turn.text.slice(0, 220),
+          });
+          targetFlow('TEACHER_TURN', {
+            sessionId: flowSessionId(),
+            pedagogicalTarget: planNow?.target?.german ?? null,
+            planTarget: planNow?.target?.german ?? null,
+            note: turn.text.slice(0, 220),
+          });
+        }
       } else if (turn.text) {
         setUserText(turn.text);
         setUserTurnStatus(turn.status);
@@ -1164,6 +1407,7 @@ export function useGeminiLive(profile: UserProfile | null): GeminiLiveUI {
     immersionMode,
     miniProvaProgress,
     miniProvaComplete,
+    reviewComplete,
     simulatorElapsed,
     simulatorScenarioLabel,
     simulatorTimeUp,
