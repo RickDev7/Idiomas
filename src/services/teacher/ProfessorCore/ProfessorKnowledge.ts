@@ -26,7 +26,9 @@ export function inferCurriculumBand(level: string | undefined): CurriculumBand {
   if (l === 'a1+' || l === 'a1plus' || l === 'a1_plus') return 'A1+';
   if (l === 'basic' || l === 'a2') return 'A2';
   if (l === 'intermediate' || l === 'b1') return 'B1';
-  if (l.startsWith('b2') || l.startsWith('c') || l === 'advanced' || l === 'very_advanced') return 'B2';
+  if (l.startsWith('b2') || l === 'advanced') return 'B2';
+  if (l.startsWith('c2')) return 'C2';
+  if (l.startsWith('c1') || l === 'very_advanced') return 'C1';
   // CourseLevelId já em maiúsculas (A1, A2…)
   const up = (level || '').toUpperCase();
   if (up === 'L0') return 'L0';
@@ -34,7 +36,9 @@ export function inferCurriculumBand(level: string | undefined): CurriculumBand {
   if (up === 'A1+' || up === 'A1PLUS') return 'A1+';
   if (up === 'A2') return 'A2';
   if (up === 'B1') return 'B1';
-  if (up === 'B2' || up === 'C1' || up === 'C2') return 'B2';
+  if (up === 'B2') return 'B2';
+  if (up === 'C2') return 'C2';
+  if (up === 'C1') return 'C1';
   return 'L0';
 }
 

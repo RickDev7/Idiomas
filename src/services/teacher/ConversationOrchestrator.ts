@@ -183,11 +183,47 @@ import {
   pickA2PlannerTarget,
 } from '@/services/course/A2Curriculum';
 import {
+  b1FirstTarget,
+  getB1TargetById,
+  isB1TargetId,
+  mergeB1CurriculumPhrases,
+  pickB1PlannerTarget,
+} from '@/services/course/B1Curriculum';
+import {
+  b2FirstTarget,
+  getB2TargetById,
+  isB2TargetId,
+  mergeB2CurriculumPhrases,
+  pickB2PlannerTarget,
+} from '@/services/course/B2Curriculum';
+import {
+  c1FirstTarget,
+  getC1TargetById,
+  isC1TargetId,
+  mergeC1CurriculumPhrases,
+  pickC1PlannerTarget,
+} from '@/services/course/C1Curriculum';
+import {
+  c2FirstTarget,
+  getC2TargetById,
+  isC2TargetId,
+  mergeC2CurriculumPhrases,
+  pickC2PlannerTarget,
+} from '@/services/course/C2Curriculum';
+import {
   maybeGraduateL0ToA1,
   maybeGraduateA1ToA2,
   maybeGraduateA2ToB1,
+  maybeGraduateB1ToB2,
+  maybeGraduateB2ToC1,
+  maybeGraduateC1ToC2,
+  maybeGraduateC2ToHigher,
   recordA1TargetSuccess,
   recordA2TargetSuccess,
+  recordB1TargetSuccess,
+  recordB2TargetSuccess,
+  recordC1TargetSuccess,
+  recordC2TargetSuccess,
   applyProfileLevelAfterGraduation,
 } from '@/services/course/L0ToA1Graduation';
 import { getStoredCourseProgress } from '@/services/course/CourseProgressEngine';
@@ -219,7 +255,85 @@ export function isA2LiveMode(
     const level = getCurrentLevel(profile, course);
     return level === 'A2' || course?.currentLevel === 'A2';
   } catch {
-    return profile.level === 'basic' || profile.diagnosticLevel === 'A2';
+    // Não usar level==='basic' — B1 também é basic no UserProfile.
+    return profile.diagnosticLevel === 'A2';
+  }
+}
+
+/** B1 curricular ativo (exclusivo — nunca L0/A1/A2 como pool curricular). */
+export function isB1LiveMode(
+  profile: Pick<UserProfile, 'level' | 'selfReportedLevel' | 'diagnosticLevel'>,
+): boolean {
+  if (isZeroLanguageMode(profile)) return false;
+  if (isA1LiveMode(profile) || isA2LiveMode(profile)) return false;
+  try {
+    const course = getStoredCourseProgress();
+    const level = getCurrentLevel(profile, course);
+    return level === 'B1' || course?.currentLevel === 'B1';
+  } catch {
+    return profile.diagnosticLevel === 'B1';
+  }
+}
+
+/** B2 curricular ativo (exclusivo — nunca L0/A1/A2/B1/C1 como pool curricular). */
+export function isB2LiveMode(
+  profile: Pick<UserProfile, 'level' | 'selfReportedLevel' | 'diagnosticLevel'>,
+): boolean {
+  if (isZeroLanguageMode(profile)) return false;
+  if (isA1LiveMode(profile) || isA2LiveMode(profile) || isB1LiveMode(profile)) return false;
+  try {
+    const course = getStoredCourseProgress();
+    const level = getCurrentLevel(profile, course);
+    if (level === 'C1' || course?.currentLevel === 'C1') return false;
+    return level === 'B2' || course?.currentLevel === 'B2';
+  } catch {
+    return profile.diagnosticLevel === 'B2';
+  }
+}
+
+/** C1 curricular ativo (exclusivo — nunca L0/A1/A2/B1/B2/C2 como pool curricular). */
+export function isC1LiveMode(
+  profile: Pick<UserProfile, 'level' | 'selfReportedLevel' | 'diagnosticLevel'>,
+): boolean {
+  if (isZeroLanguageMode(profile)) return false;
+  if (
+    isA1LiveMode(profile) ||
+    isA2LiveMode(profile) ||
+    isB1LiveMode(profile) ||
+    isB2LiveMode(profile)
+  ) {
+    return false;
+  }
+  try {
+    const course = getStoredCourseProgress();
+    const level = getCurrentLevel(profile, course);
+    if (level === 'C2' || course?.currentLevel === 'C2') return false;
+    return level === 'C1' || course?.currentLevel === 'C1';
+  } catch {
+    return profile.diagnosticLevel === 'C1';
+  }
+}
+
+/** C2 curricular ativo (exclusivo — nunca L0/A1/A2/B1/B2/C1 como pool curricular). */
+export function isC2LiveMode(
+  profile: Pick<UserProfile, 'level' | 'selfReportedLevel' | 'diagnosticLevel'>,
+): boolean {
+  if (isZeroLanguageMode(profile)) return false;
+  if (
+    isA1LiveMode(profile) ||
+    isA2LiveMode(profile) ||
+    isB1LiveMode(profile) ||
+    isB2LiveMode(profile) ||
+    isC1LiveMode(profile)
+  ) {
+    return false;
+  }
+  try {
+    const course = getStoredCourseProgress();
+    const level = getCurrentLevel(profile, course);
+    return level === 'C2' || course?.currentLevel === 'C2';
+  } catch {
+    return profile.diagnosticLevel === 'C2';
   }
 }
 
@@ -326,6 +440,222 @@ export function buildA2TurnPedagogicalDirective(input: {
     input.verdict ? `LAST VERDICT: ${input.verdict}` : '',
     'PROIBIDO: voltar para targets l0-* ou a1-* como currículo.',
     'Preferir produção independente após modelo curto.',
+    '=== FIM PEDAGOGICAL TURN ===',
+  ]
+    .filter(Boolean)
+    .join('\n');
+}
+
+/** Diretiva turn-level B1 — produção independente / justificação / narrativa. */
+export function buildB1TurnPedagogicalDirective(input: {
+  targetId: string;
+  german: string;
+  portuguese: string;
+  action: OrchestratorAction;
+  objective?: string;
+  allowedNext?: string;
+  verdict?: string;
+}): string {
+  const objective =
+    input.objective ||
+    (input.action === 'introduce'
+      ? 'EXPOSE_AND_MODEL_BRIEF'
+      : input.action === 'practice'
+        ? 'INDEPENDENT_PRODUCTION_WITH_LIGHT_SCAFFOLD'
+        : input.action === 'recall'
+          ? 'INDEPENDENT_RECALL_B1'
+          : input.action === 'transfer'
+            ? 'TRANSFER_JUSTIFY_OR_NARRATE'
+            : input.action === 'converse'
+              ? 'CONTEXTUAL_CONVERSATION_B1'
+              : input.action === 'automation'
+                ? 'AUTOMATION_SPONTANEOUS_CHECK'
+                : 'PRODUCE_TARGET_INDEPENDENTLY');
+  const allowed =
+    input.allowedNext ||
+    (input.action === 'introduce'
+      ? 'BRIEF_MODEL → ASK_INDEPENDENT_PRODUCTION → WAIT'
+      : input.action === 'practice'
+        ? 'BRIEF_CORRECTION → RETRY → REDUCE_SCAFFOLD'
+        : input.action === 'transfer'
+          ? 'ONE_AXIS_CHANGE → ASK_JUSTIFICATION_OR_NARRATION'
+          : input.action === 'converse'
+            ? 'USE_TARGET_IN_DIALOGUE → DO_NOT_SWITCH_TO_A2_A1_OR_L0'
+            : 'EVALUATE → STAY_ON_B1_OR_ADVANCE');
+  return [
+    '[INSTRUÇÃO INTERNA — não leia isto em voz alta]',
+    '=== PEDAGOGICAL TURN (B1) ===',
+    'NÍVEL: B1 — exigir mais produção independente; justificativa e narrativa quando couber.',
+    `TARGET: ${input.targetId}`,
+    `DE: ${input.german}`,
+    `PT: ${input.portuguese}`,
+    `CURRENT OBJECTIVE: ${objective}`,
+    `ALLOWED NEXT ACTION: ${allowed}`,
+    input.verdict ? `LAST VERDICT: ${input.verdict}` : '',
+    'PROIBIDO: voltar para targets l0-*, a1-* ou a2-* como currículo.',
+    'Não abandonar o target para conversa livre sem uso do target.',
+    '=== FIM PEDAGOGICAL TURN ===',
+  ]
+    .filter(Boolean)
+    .join('\n');
+}
+
+/** Diretiva turn-level B2 — produção independente / argumentação / hipótese. */
+export function buildB2TurnPedagogicalDirective(input: {
+  targetId: string;
+  german: string;
+  portuguese: string;
+  action: OrchestratorAction;
+  objective?: string;
+  allowedNext?: string;
+  verdict?: string;
+}): string {
+  const objective =
+    input.objective ||
+    (input.action === 'introduce'
+      ? 'EXPOSE_AND_MODEL_BRIEF'
+      : input.action === 'practice'
+        ? 'INDEPENDENT_PRODUCTION_WITH_MINIMAL_SCAFFOLD'
+        : input.action === 'recall'
+          ? 'INDEPENDENT_RECALL_B2'
+          : input.action === 'transfer'
+            ? 'ARGUE_OR_JUSTIFY'
+            : input.action === 'converse'
+              ? 'CONTEXTUAL_CONVERSATION_B2'
+              : input.action === 'automation'
+                ? 'AUTOMATION_SPONTANEOUS_CHECK'
+                : 'PRODUCE_TARGET_INDEPENDENTLY');
+  const allowed =
+    input.allowedNext ||
+    (input.action === 'introduce'
+      ? 'MODEL → PRODUÇÃO COM AJUDA → PRODUÇÃO INDEPENDENTE → ARGUMENTAÇÃO → CONVERSAÇÃO'
+      : input.action === 'practice'
+        ? 'BRIEF_CORRECTION → RETRY → MINIMAL_SCAFFOLD → INDEPENDENT'
+        : input.action === 'transfer'
+          ? 'ONE_AXIS_CHANGE → ASK_ARGUMENT_OR_HYPOTHESIS'
+          : input.action === 'converse'
+            ? 'USE_TARGET_IN_DIALOGUE → DO_NOT_SWITCH_TO_B1_A2_A1_OR_L0'
+            : 'EVALUATE → STAY_ON_B2_OR_ADVANCE');
+  return [
+    '[INSTRUÇÃO INTERNA — não leia isto em voz alta]',
+    '=== PEDAGOGICAL TURN (B2) ===',
+    'NÍVEL: B2 — produção independente, argumentação, causa/consequência, opinião, hipótese.',
+    `TARGET: ${input.targetId}`,
+    `DE: ${input.german}`,
+    `PT: ${input.portuguese}`,
+    `CURRENT OBJECTIVE: ${objective}`,
+    `ALLOWED NEXT ACTION: ${allowed}`,
+    input.verdict ? `LAST VERDICT: ${input.verdict}` : '',
+    'PROIBIDO: voltar para targets l0-*, a1-*, a2-* ou b1-* como currículo.',
+    'Não abandonar o target para conversa livre sem uso do target.',
+    '=== FIM PEDAGOGICAL TURN ===',
+  ]
+    .filter(Boolean)
+    .join('\n');
+}
+
+/** Diretiva turn-level C1 — produção independente / reformulação / argumentação / nuance. */
+export function buildC1TurnPedagogicalDirective(input: {
+  targetId: string;
+  german: string;
+  portuguese: string;
+  action: OrchestratorAction;
+  objective?: string;
+  allowedNext?: string;
+  verdict?: string;
+}): string {
+  const objective =
+    input.objective ||
+    (input.action === 'introduce'
+      ? 'EXPOSE_AND_MODEL_BRIEF'
+      : input.action === 'practice'
+        ? 'INDEPENDENT_PRODUCTION_WITH_MINIMAL_SCAFFOLD'
+        : input.action === 'recall'
+          ? 'INDEPENDENT_RECALL_C1'
+          : input.action === 'transfer'
+            ? 'ARGUE_OR_COUNTER_ARGUE'
+            : input.action === 'converse'
+              ? 'SPONTANEOUS_DISCOURSE_C1'
+              : input.action === 'automation'
+                ? 'AUTOMATION_SPONTANEOUS_CHECK'
+                : 'PRODUCE_TARGET_INDEPENDENTLY');
+  const allowed =
+    input.allowedNext ||
+    (input.action === 'introduce'
+      ? 'MODEL → REFORMULAÇÃO → PRODUÇÃO INDEPENDENTE → ARGUMENTAÇÃO → CONTRA-ARGUMENTAÇÃO → DISCURSO ESPONTÂNEO'
+      : input.action === 'practice'
+        ? 'BRIEF_CORRECTION → RETRY → MINIMAL_SCAFFOLD → INDEPENDENT'
+        : input.action === 'transfer'
+          ? 'ONE_AXIS_CHANGE → ASK_ARGUMENT_OR_COUNTER_ARGUMENT'
+          : input.action === 'converse'
+            ? 'USE_TARGET_IN_DIALOGUE → DO_NOT_SWITCH_TO_B2_B1_A2_A1_OR_L0'
+            : 'EVALUATE → STAY_ON_C1_OR_ADVANCE');
+  return [
+    '[INSTRUÇÃO INTERNA — não leia isto em voz alta]',
+    '=== PEDAGOGICAL TURN (C1) ===',
+    'NÍVEL: C1 — produção independente, reformulação, argumentação, contra-argumentação, nuance, registro, discurso espontâneo.',
+    `TARGET: ${input.targetId}`,
+    `DE: ${input.german}`,
+    `PT: ${input.portuguese}`,
+    `CURRENT OBJECTIVE: ${objective}`,
+    `ALLOWED NEXT ACTION: ${allowed}`,
+    input.verdict ? `LAST VERDICT: ${input.verdict}` : '',
+    'PROIBIDO: voltar para targets l0-*, a1-*, a2-*, b1-* ou b2-* como currículo.',
+    'Não abandonar o target para conversa livre sem uso do target.',
+    '=== FIM PEDAGOGICAL TURN ===',
+  ]
+    .filter(Boolean)
+    .join('\n');
+}
+
+/** Diretiva turn-level C2 — nuance extrema / inferência / persuasão / discurso espontâneo. */
+export function buildC2TurnPedagogicalDirective(input: {
+  targetId: string;
+  german: string;
+  portuguese: string;
+  action: OrchestratorAction;
+  objective?: string;
+  allowedNext?: string;
+  verdict?: string;
+}): string {
+  const objective =
+    input.objective ||
+    (input.action === 'introduce'
+      ? 'EXPOSE_AND_MODEL_BRIEF'
+      : input.action === 'practice'
+        ? 'INDEPENDENT_PRODUCTION_WITH_MINIMAL_SCAFFOLD'
+        : input.action === 'recall'
+          ? 'INDEPENDENT_RECALL_C2'
+          : input.action === 'transfer'
+            ? 'PERSUADE_OR_INFER_IMPLICIT'
+            : input.action === 'converse'
+              ? 'SPONTANEOUS_DISCOURSE_C2'
+              : input.action === 'automation'
+                ? 'AUTOMATION_SPONTANEOUS_CHECK'
+                : 'PRODUCE_TARGET_INDEPENDENTLY');
+  const allowed =
+    input.allowedNext ||
+    (input.action === 'introduce'
+      ? 'MODEL → NUANCE → INFERÊNCIA → PERSUASÃO → DISCURSO ESPONTÂNEO'
+      : input.action === 'practice'
+        ? 'BRIEF_CORRECTION → RETRY → MINIMAL_SCAFFOLD → INDEPENDENT'
+        : input.action === 'transfer'
+          ? 'ONE_AXIS_CHANGE → ASK_INFERENCE_OR_PERSUASION'
+          : input.action === 'converse'
+            ? 'USE_TARGET_IN_DIALOGUE → DO_NOT_SWITCH_TO_C1_B2_B1_A2_A1_OR_L0'
+            : 'EVALUATE → STAY_ON_C2');
+  return [
+    '[INSTRUÇÃO INTERNA — não leia isto em voz alta]',
+    '=== PEDAGOGICAL TURN (C2) ===',
+    'NÍVEL: C2 — nuance extrema, inferência, persuasão, discurso espontâneo.',
+    `TARGET: ${input.targetId}`,
+    `DE: ${input.german}`,
+    `PT: ${input.portuguese}`,
+    `CURRENT OBJECTIVE: ${objective}`,
+    `ALLOWED NEXT ACTION: ${allowed}`,
+    input.verdict ? `LAST VERDICT: ${input.verdict}` : '',
+    'PROIBIDO: voltar para targets l0-*, a1-*, a2-*, b1-*, b2-* ou c1-* como currículo.',
+    'Não abandonar o target para conversa livre sem uso do target.',
     '=== FIM PEDAGOGICAL TURN ===',
   ]
     .filter(Boolean)
@@ -593,10 +923,58 @@ function buildDirective(
   sessionMinutes?: number,
   a1Mode = false,
   a2Mode = false,
+  b1Mode = false,
+  b2Mode = false,
+  c1Mode = false,
+  c2Mode = false,
 ): string {
   const personal = loadPersonalLearningProfile();
   const adapt = geminiAdaptationSnippet(personal);
-  const curricularMode = a1Mode || a2Mode;
+  const curricularMode = a1Mode || a2Mode || b1Mode || b2Mode || c1Mode || c2Mode;
+  const c2Block =
+    c2Mode && plan.target
+      ? buildC2TurnPedagogicalDirective({
+          targetId: plan.target.id,
+          german: plan.target.german,
+          portuguese: plan.target.portuguese,
+          action: plan.action,
+        })
+      : c2Mode
+        ? '=== C2 MODE — use apenas targets c2-* ==='
+        : '';
+  const c1Block =
+    c1Mode && plan.target
+      ? buildC1TurnPedagogicalDirective({
+          targetId: plan.target.id,
+          german: plan.target.german,
+          portuguese: plan.target.portuguese,
+          action: plan.action,
+        })
+      : c1Mode
+        ? '=== C1 MODE — use apenas targets c1-* ==='
+        : '';
+  const b2Block =
+    b2Mode && plan.target
+      ? buildB2TurnPedagogicalDirective({
+          targetId: plan.target.id,
+          german: plan.target.german,
+          portuguese: plan.target.portuguese,
+          action: plan.action,
+        })
+      : b2Mode
+        ? '=== B2 MODE — use apenas targets b2-* ==='
+        : '';
+  const b1Block =
+    b1Mode && plan.target
+      ? buildB1TurnPedagogicalDirective({
+          targetId: plan.target.id,
+          german: plan.target.german,
+          portuguese: plan.target.portuguese,
+          action: plan.action,
+        })
+      : b1Mode
+        ? '=== B1 MODE — use apenas targets b1-* ==='
+        : '';
   const a2Block =
     a2Mode && plan.target
       ? buildA2TurnPedagogicalDirective({
@@ -632,6 +1010,10 @@ function buildDirective(
       ? `FRASE-ALVO:\n- DE: ${plan.target.german}\n- PT: ${plan.target.portuguese}`
       : 'FRASE-ALVO: nenhuma específica.',
     plan.target?.transferPrompt && plan.action === 'transfer' ? plan.target.transferPrompt : '',
+    c2Block,
+    c1Block,
+    b2Block,
+    b1Block,
     a2Block,
     a1Block,
     zeroMode
@@ -646,6 +1028,10 @@ function buildDirective(
     'REGRAS:',
     '- Gemini conversa; o app orquestra. Não anuncie testes.',
     '- CORREÇÃO: Quase → explique curto → modele → peça nova tentativa → AGUARDE. NÃO mude de assunto após corrigir.',
+    c2Mode ? '- C2: PROIBIDO voltar a targets l0-*, a1-*, a2-*, b1-*, b2-* ou c1-* como currículo.' : '',
+    c1Mode ? '- C1: PROIBIDO voltar a targets l0-*, a1-*, a2-*, b1-* ou b2-* como currículo.' : '',
+    b2Mode ? '- B2: PROIBIDO voltar a targets l0-*, a1-*, a2-* ou b1-* como currículo.' : '',
+    b1Mode ? '- B1: PROIBIDO voltar a targets l0-*, a1-* ou a2-* como currículo.' : '',
     a2Mode ? '- A2: PROIBIDO voltar a targets l0-* ou a1-* como currículo.' : '',
     a1Mode ? '- A1: PROIBIDO voltar a cumprimentos/targets L0 (l0-*).' : '',
     personal.teachingStrategy.correctionStyle === 'brief_explanation' && !zeroMode
@@ -672,6 +1058,10 @@ function buildActionKickoff(
   zeroMode = false,
   a1Mode = false,
   a2Mode = false,
+  b1Mode = false,
+  b2Mode = false,
+  c1Mode = false,
+  c2Mode = false,
 ): string {
   const target = plan.target;
   if (zeroMode) {
@@ -687,6 +1077,70 @@ function buildActionKickoff(
       scaffoldLevel: plan.scaffoldLevel,
       returning: plan.action === 'recall' || plan.action === 'practice',
     });
+  }
+  if (c2Mode && target) {
+    return [
+      buildC2TurnPedagogicalDirective({
+        targetId: target.id,
+        german: target.german,
+        portuguese: target.portuguese,
+        action: plan.action,
+      }),
+      `AÇÃO PEDAGÓGICA: ${plan.action.toUpperCase()}.`,
+      plan.actionReason ? `Motivo: ${plan.actionReason}` : '',
+      scaffoldingDirective(plan.scaffoldLevel, target.german),
+      'Comece: contexto breve → modele curto → peça NUANCE / INFERÊNCIA / PERSUASÃO / DISCURSO ESPONTÂNEO (C2) → AGUARDE.',
+    ]
+      .filter(Boolean)
+      .join('\n');
+  }
+  if (c1Mode && target) {
+    return [
+      buildC1TurnPedagogicalDirective({
+        targetId: target.id,
+        german: target.german,
+        portuguese: target.portuguese,
+        action: plan.action,
+      }),
+      `AÇÃO PEDAGÓGICA: ${plan.action.toUpperCase()}.`,
+      plan.actionReason ? `Motivo: ${plan.actionReason}` : '',
+      scaffoldingDirective(plan.scaffoldLevel, target.german),
+      'Comece: contexto breve → modele curto → peça PRODUÇÃO INDEPENDENTE / REFORMULAÇÃO / ARGUMENTAÇÃO (C1) → AGUARDE.',
+    ]
+      .filter(Boolean)
+      .join('\n');
+  }
+  if (b2Mode && target) {
+    return [
+      buildB2TurnPedagogicalDirective({
+        targetId: target.id,
+        german: target.german,
+        portuguese: target.portuguese,
+        action: plan.action,
+      }),
+      `AÇÃO PEDAGÓGICA: ${plan.action.toUpperCase()}.`,
+      plan.actionReason ? `Motivo: ${plan.actionReason}` : '',
+      scaffoldingDirective(plan.scaffoldLevel, target.german),
+      'Comece: contexto breve → modele curto → peça PRODUÇÃO INDEPENDENTE / ARGUMENTAÇÃO (B2) → AGUARDE.',
+    ]
+      .filter(Boolean)
+      .join('\n');
+  }
+  if (b1Mode && target) {
+    return [
+      buildB1TurnPedagogicalDirective({
+        targetId: target.id,
+        german: target.german,
+        portuguese: target.portuguese,
+        action: plan.action,
+      }),
+      `AÇÃO PEDAGÓGICA: ${plan.action.toUpperCase()}.`,
+      plan.actionReason ? `Motivo: ${plan.actionReason}` : '',
+      scaffoldingDirective(plan.scaffoldLevel, target.german),
+      'Comece: contexto breve → modele curto → peça PRODUÇÃO INDEPENDENTE (B1) → AGUARDE.',
+    ]
+      .filter(Boolean)
+      .join('\n');
   }
   if (a2Mode && target) {
     return [
@@ -750,26 +1204,45 @@ export function buildConversationPlan(
   const zeroMode = isZeroLanguageMode(profile);
   const a1Mode = !zeroMode && isA1LiveMode(profile);
   const a2Mode = !zeroMode && !a1Mode && isA2LiveMode(profile);
+  const b1Mode = !zeroMode && !a1Mode && !a2Mode && isB1LiveMode(profile);
+  const b2Mode = !zeroMode && !a1Mode && !a2Mode && !b1Mode && isB2LiveMode(profile);
+  const c1Mode = !zeroMode && !a1Mode && !a2Mode && !b1Mode && !b2Mode && isC1LiveMode(profile);
+  const c2Mode =
+    !zeroMode && !a1Mode && !a2Mode && !b1Mode && !b2Mode && !c1Mode && isC2LiveMode(profile);
   const course = getStoredCourseProgress();
   const higherBlocked =
     !zeroMode &&
     !a1Mode &&
     !a2Mode &&
+    !b1Mode &&
+    !b2Mode &&
+    !c1Mode &&
+    !c2Mode &&
     !!course &&
     isHigherLevelCurriculumBlocked(course.currentLevel);
-  // B1+ bloqueado: reforça A2 (último currículo executável)
-  const reinforceA2 = higherBlocked;
+  // C2 é o último currículo executável. Níveis desconhecidos reforçam C2.
+  const reinforceB2 = false;
+  const reinforceC1 = false;
+  const reinforceC2 = higherBlocked;
 
   const phrasePool = zeroMode
     ? mergeZeroLanguagePhrases(phrases)
-    : a2Mode || reinforceA2
-      ? mergeA2CurriculumPhrases(phrases)
-      : a1Mode
-        ? mergeA1CurriculumPhrases(phrases)
-        : phrases;
+    : c2Mode || reinforceC2
+      ? mergeC2CurriculumPhrases(phrases)
+      : c1Mode || reinforceC1
+        ? mergeC1CurriculumPhrases(phrases)
+        : b2Mode || reinforceB2
+          ? mergeB2CurriculumPhrases(phrases)
+          : b1Mode
+            ? mergeB1CurriculumPhrases(phrases)
+            : a2Mode
+              ? mergeA2CurriculumPhrases(phrases)
+              : a1Mode
+                ? mergeA1CurriculumPhrases(phrases)
+                : phrases;
 
   const dueAsPhrases = Object.values(learning.phrases)
-    .filter((c) => c.state !== 'automatic' && c.confidence > 0 && c.confidence < 85)
+    .filter((c): c is NonNullable<typeof c> => !!c && c.state !== 'automatic' && c.confidence > 0 && c.confidence < 85)
     .slice(0, 5)
     .map((c) => resolvePhrase(c.phraseId, phrasePool))
     .filter((p): p is Phrase => !!p);
@@ -777,11 +1250,19 @@ export function buildConversationPlan(
   const training = planTodaysTraining(profile, dueAsPhrases, learning);
   const topic = zeroMode
     ? (profile.profession ? 'apresentação e sobrevivência no trabalho' : 'primeiras frases')
-    : a2Mode || reinforceA2
-      ? 'A2 — autonomia cotidiana'
-      : a1Mode
-        ? 'A1 — comunicação cotidiana'
-        : (training.topic || suggestConversationTopic(profile));
+    : c2Mode || reinforceC2
+      ? 'C2 — nuance extrema, inferência e discurso espontâneo'
+      : c1Mode || reinforceC1
+        ? 'C1 — nuance, argumentação e discurso espontâneo'
+        : b2Mode || reinforceB2
+          ? 'B2 — argumentação e produção independente'
+          : b1Mode
+            ? 'B1 — narrativa e justificação'
+            : a2Mode
+              ? 'A2 — autonomia cotidiana'
+              : a1Mode
+                ? 'A1 — comunicação cotidiana'
+                : (training.topic || suggestConversationTopic(profile));
   const stageIdx = stageFromElapsed(elapsedMs, training);
   const stageId = training.stages[stageIdx]?.id ?? 'conversation';
   const personal = loadPersonalLearningProfile();
@@ -800,8 +1281,40 @@ export function buildConversationPlan(
     })
     : null;
 
+  const c2Pick =
+    !zeroMode && (c2Mode || reinforceC2)
+      ? pickC2PlannerTarget(learning, phrasePool, {
+        excludePhraseId: opts?.l0ExcludePhraseId,
+        skipPhraseIds: opts?.l0SkipPhraseIds,
+      })
+      : null;
+
+  const c1Pick =
+    !zeroMode && (c1Mode || reinforceC1)
+      ? pickC1PlannerTarget(learning, phrasePool, {
+        excludePhraseId: opts?.l0ExcludePhraseId,
+        skipPhraseIds: opts?.l0SkipPhraseIds,
+      })
+      : null;
+
+  const b2Pick =
+    !zeroMode && (b2Mode || reinforceB2)
+      ? pickB2PlannerTarget(learning, phrasePool, {
+        excludePhraseId: opts?.l0ExcludePhraseId,
+        skipPhraseIds: opts?.l0SkipPhraseIds,
+      })
+      : null;
+
+  const b1Pick =
+    !zeroMode && b1Mode
+      ? pickB1PlannerTarget(learning, phrasePool, {
+        excludePhraseId: opts?.l0ExcludePhraseId,
+        skipPhraseIds: opts?.l0SkipPhraseIds,
+      })
+      : null;
+
   const a2Pick =
-    !zeroMode && (a2Mode || reinforceA2)
+    !zeroMode && a2Mode
       ? pickA2PlannerTarget(learning, phrasePool, {
         excludePhraseId: opts?.l0ExcludePhraseId,
         skipPhraseIds: opts?.l0SkipPhraseIds,
@@ -818,14 +1331,66 @@ export function buildConversationPlan(
 
   let picked = zeroPick
     ? { conf: zeroPick.conf, phrase: zeroPick.phrase, action: zeroPick.action as OrchestratorAction }
-    : a2Pick
-      ? { conf: a2Pick.conf, phrase: a2Pick.phrase, action: a2Pick.action as OrchestratorAction }
-      : a1Pick
-        ? { conf: a1Pick.conf, phrase: a1Pick.phrase, action: a1Pick.action as OrchestratorAction }
-        : pickPrimaryTarget(learning, phrasePool);
+    : c2Pick
+      ? { conf: c2Pick.conf, phrase: c2Pick.phrase, action: c2Pick.action as OrchestratorAction }
+      : c1Pick
+        ? { conf: c1Pick.conf, phrase: c1Pick.phrase, action: c1Pick.action as OrchestratorAction }
+        : b2Pick
+          ? { conf: b2Pick.conf, phrase: b2Pick.phrase, action: b2Pick.action as OrchestratorAction }
+          : b1Pick
+            ? { conf: b1Pick.conf, phrase: b1Pick.phrase, action: b1Pick.action as OrchestratorAction }
+            : a2Pick
+              ? { conf: a2Pick.conf, phrase: a2Pick.phrase, action: a2Pick.action as OrchestratorAction }
+              : a1Pick
+                ? { conf: a1Pick.conf, phrase: a1Pick.phrase, action: a1Pick.action as OrchestratorAction }
+                : pickPrimaryTarget(learning, phrasePool);
+
+  // Invariante C2: nunca escolher l0/a1/a2/b1/b2/c1 como currículo automático
+  if ((c2Mode || reinforceC2) && picked.phrase && !isC2TargetId(picked.phrase.id)) {
+    const fallback = c2FirstTarget();
+    const fp = phrasePool.find((p) => p.id === fallback.id) ?? mergeC2CurriculumPhrases([])[0];
+    picked = {
+      phrase: fp,
+      conf: learning.phrases[fp.id],
+      action: 'introduce',
+    };
+  }
+
+  // Invariante C1: nunca escolher l0/a1/a2/b1/b2 como currículo automático
+  if ((c1Mode || reinforceC1) && picked.phrase && !isC1TargetId(picked.phrase.id)) {
+    const fallback = c1FirstTarget();
+    const fp = phrasePool.find((p) => p.id === fallback.id) ?? mergeC1CurriculumPhrases([])[0];
+    picked = {
+      phrase: fp,
+      conf: learning.phrases[fp.id],
+      action: 'introduce',
+    };
+  }
+
+  // Invariante B2: nunca escolher l0/a1/a2/b1 como currículo automático
+  if ((b2Mode || reinforceB2) && picked.phrase && !isB2TargetId(picked.phrase.id)) {
+    const fallback = b2FirstTarget();
+    const fp = phrasePool.find((p) => p.id === fallback.id) ?? mergeB2CurriculumPhrases([])[0];
+    picked = {
+      phrase: fp,
+      conf: learning.phrases[fp.id],
+      action: 'introduce',
+    };
+  }
+
+  // Invariante B1: nunca escolher l0/a1/a2 como currículo automático
+  if (b1Mode && picked.phrase && !isB1TargetId(picked.phrase.id)) {
+    const fallback = b1FirstTarget();
+    const fp = phrasePool.find((p) => p.id === fallback.id) ?? mergeB1CurriculumPhrases([])[0];
+    picked = {
+      phrase: fp,
+      conf: learning.phrases[fp.id],
+      action: 'introduce',
+    };
+  }
 
   // Invariante A2: nunca escolher l0/a1 como currículo automático
-  if ((a2Mode || reinforceA2) && picked.phrase && !isA2TargetId(picked.phrase.id)) {
+  if (a2Mode && picked.phrase && !isA2TargetId(picked.phrase.id)) {
     const fallback = a2FirstTarget();
     const fp = phrasePool.find((p) => p.id === fallback.id) ?? mergeA2CurriculumPhrases([])[0];
     picked = {
@@ -853,7 +1418,8 @@ export function buildConversationPlan(
     dueReview: sessionMode.decision === 'REVIEW',
     reviewType: sessionMode.opportunity?.type,
   });
-  const curricularLive = a1Mode || a2Mode || reinforceA2;
+  const curricularLive =
+    a1Mode || a2Mode || b1Mode || b2Mode || reinforceB2 || c1Mode || reinforceC1 || c2Mode || reinforceC2;
   let action = zeroMode
     ? (picked.action as OrchestratorAction)
     : curricularLive
@@ -905,12 +1471,39 @@ export function buildConversationPlan(
   if (a1Mode && action === 'introduce') {
     scaffoldLevel = Math.max(scaffoldLevel, 3) as SupportLevel;
   }
-  if ((a2Mode || reinforceA2) && action === 'introduce') {
+  if (a2Mode && action === 'introduce') {
     scaffoldLevel = Math.max(scaffoldLevel, 2) as SupportLevel;
   }
-  // A2: reduzir scaffold após produção correta
-  if ((a2Mode || reinforceA2) && picked.conf && (picked.conf.timesCorrect ?? 0) >= 2) {
+  if ((a2Mode) && picked.conf && (picked.conf.timesCorrect ?? 0) >= 2) {
     scaffoldLevel = Math.min(scaffoldLevel, 2) as SupportLevel;
+  }
+  // B1: scaffold mais baixo — privilégio à produção independente
+  if (b1Mode && action === 'introduce') {
+    scaffoldLevel = Math.max(scaffoldLevel, 1) as SupportLevel;
+  }
+  if (b1Mode && picked.conf && (picked.conf.timesCorrect ?? 0) >= 1) {
+    scaffoldLevel = Math.min(scaffoldLevel, 1) as SupportLevel;
+  }
+  // B2: scaffold mínimo — privilégio à produção independente / argumentação
+  if ((b2Mode || reinforceB2) && action === 'introduce') {
+    scaffoldLevel = Math.max(scaffoldLevel, 1) as SupportLevel;
+  }
+  if ((b2Mode || reinforceB2) && picked.conf && (picked.conf.timesCorrect ?? 0) >= 1) {
+    scaffoldLevel = Math.min(scaffoldLevel, 1) as SupportLevel;
+  }
+  // C1: scaffold mínimo — produção independente / reformulação / argumentação
+  if ((c1Mode || reinforceC1) && action === 'introduce') {
+    scaffoldLevel = Math.max(scaffoldLevel, 1) as SupportLevel;
+  }
+  if ((c1Mode || reinforceC1) && picked.conf && (picked.conf.timesCorrect ?? 0) >= 1) {
+    scaffoldLevel = Math.min(scaffoldLevel, 1) as SupportLevel;
+  }
+  // C2: scaffold mínimo — nuance / inferência / persuasão / discurso espontâneo
+  if ((c2Mode || reinforceC2) && action === 'introduce') {
+    scaffoldLevel = Math.max(scaffoldLevel, 1) as SupportLevel;
+  }
+  if ((c2Mode || reinforceC2) && picked.conf && (picked.conf.timesCorrect ?? 0) >= 1) {
+    scaffoldLevel = Math.min(scaffoldLevel, 1) as SupportLevel;
   }
 
   const partial = {
@@ -923,9 +1516,15 @@ export function buildConversationPlan(
     bottleneck: effectiveBottleneck?.type ?? null,
     actionReason: [
       zeroMode ? 'ZERO_LANGUAGE_MODE — aquisição guiada' : '',
+      c2Mode ? 'C2_CURRICULUM — planner curricular' : '',
+      c1Mode ? 'C1_CURRICULUM — planner curricular' : '',
+      b2Mode ? 'B2_CURRICULUM — planner curricular' : '',
+      b1Mode ? 'B1_CURRICULUM — planner curricular' : '',
       a2Mode ? 'A2_CURRICULUM — planner curricular' : '',
       a1Mode ? 'A1_CURRICULUM — planner curricular' : '',
-      reinforceA2 ? 'HIGHER_LEVEL_BLOCKED — reforço A2 até currículo B1+' : '',
+      reinforceC2 ? 'HIGHER_LEVEL_BLOCKED — reforço C2 (sem currículo superior)' : '',
+      reinforceC1 ? 'HIGHER_LEVEL_BLOCKED — reforço C1' : '',
+      reinforceB2 ? 'HIGHER_LEVEL_BLOCKED — reforço B2 até currículo C1+' : '',
       zeroMode && zeroPick?.action === 'introduce' && isL0CoreCurriculumComplete(learning)
         ? 'L0_BRIDGE_A1 — conteúdo funcional após currículo inicial'
         : '',
@@ -943,13 +1542,21 @@ export function buildConversationPlan(
       zeroMode,
       training.totalMinutes,
       a1Mode,
-      a2Mode || reinforceA2,
+      a2Mode,
+      b1Mode,
+      b2Mode || reinforceB2,
+      c1Mode || reinforceC1,
+      c2Mode || reinforceC2,
     ),
     actionKickoff: buildActionKickoff(
       partial,
       zeroMode,
       a1Mode,
-      a2Mode || reinforceA2,
+      a2Mode,
+      b1Mode,
+      b2Mode || reinforceB2,
+      c1Mode || reinforceC1,
+      c2Mode || reinforceC2,
     ),
   };
 }
@@ -1011,6 +1618,10 @@ export function reevaluatePlan(
   if (stickTarget && previous.target && prevConf) {
     const a1Mode = isA1LiveMode(profile);
     const a2Mode = isA2LiveMode(profile);
+    const b1Mode = isB1LiveMode(profile);
+    const b2Mode = isB2LiveMode(profile);
+    const c1Mode = isC1LiveMode(profile);
+    const c2Mode = isC2LiveMode(profile);
     const nba = decideNextBestAction(prevConf, { bottleneck: learning.bottleneck, sessionGoal: 'auto' });
     const action = mapKind(nba.action);
     const stageIdx = stageFromElapsed(elapsedMs, previous.training);
@@ -1036,8 +1647,12 @@ export function reevaluatePlan(
         previous.training.totalMinutes,
         a1Mode,
         a2Mode,
+        b1Mode,
+        b2Mode,
+        c1Mode,
+        c2Mode,
       ),
-      actionKickoff: buildActionKickoff(partial, false, a1Mode, a2Mode),
+      actionKickoff: buildActionKickoff(partial, false, a1Mode, a2Mode, b1Mode, b2Mode, c1Mode, c2Mode),
     };
   }
   return fresh;
@@ -1270,11 +1885,19 @@ export class ConversationOrchestrator {
   static create(deps: OrchestratorDeps): ConversationOrchestrator {
     const phrases = isZeroLanguageMode(deps.profile)
       ? mergeZeroLanguagePhrases(deps.phrases)
-      : isA2LiveMode(deps.profile)
-        ? mergeA2CurriculumPhrases(deps.phrases)
-        : isA1LiveMode(deps.profile)
-          ? mergeA1CurriculumPhrases(deps.phrases)
-          : deps.phrases;
+      : isC2LiveMode(deps.profile)
+        ? mergeC2CurriculumPhrases(deps.phrases)
+        : isC1LiveMode(deps.profile)
+          ? mergeC1CurriculumPhrases(deps.phrases)
+          : isB2LiveMode(deps.profile)
+            ? mergeB2CurriculumPhrases(deps.phrases)
+            : isB1LiveMode(deps.profile)
+              ? mergeB1CurriculumPhrases(deps.phrases)
+              : isA2LiveMode(deps.profile)
+                ? mergeA2CurriculumPhrases(deps.phrases)
+                : isA1LiveMode(deps.profile)
+                  ? mergeA1CurriculumPhrases(deps.phrases)
+                  : deps.phrases;
     const merged = { ...deps, phrases };
     const plan = buildConversationPlan(merged.profile, merged.learning, phrases, 0);
     const sessionId = merged.sessionId || `live-${Date.now()}`;
@@ -1389,13 +2012,21 @@ export class ConversationOrchestrator {
         recentErrors: orch.ctx.recentMistakes,
         helpLevelAllowed: orch.sessionSupport,
         dueReview: !!merged.reviewIntent || !!merged.reviewSessionSnapshot,
-        curriculumBand: isA2LiveMode(merged.profile)
-          ? 'A2'
-          : isA1LiveMode(merged.profile)
-            ? 'A1'
-            : isZeroLanguageMode(merged.profile)
-              ? 'L0'
-              : null,
+        curriculumBand: isC2LiveMode(merged.profile)
+          ? 'C2'
+          : isC1LiveMode(merged.profile)
+            ? 'C1'
+            : isB2LiveMode(merged.profile)
+              ? 'B2'
+              : isB1LiveMode(merged.profile)
+                ? 'B1'
+                : isA2LiveMode(merged.profile)
+                  ? 'A2'
+                  : isA1LiveMode(merged.profile)
+                    ? 'A1'
+                    : isZeroLanguageMode(merged.profile)
+                      ? 'L0'
+                      : null,
       });
       const professorBlock = formatProfessorContextForGemini(professorCtx, 900);
       orch.coachContextText = [orch.coachContextText, professorBlock].filter(Boolean).join('\n\n');
@@ -1412,6 +2043,10 @@ export class ConversationOrchestrator {
   /** Rótulo do tutor no nudge de correção — NÃO forçar L0 em sessão A1. */
   private tutorBandLabel(): string {
     if (isZeroLanguageMode(this.profile)) return 'L0';
+    if (isC2LiveMode(this.profile)) return 'C2';
+    if (isC1LiveMode(this.profile)) return 'C1';
+    if (isB2LiveMode(this.profile)) return 'B2';
+    if (isB1LiveMode(this.profile)) return 'B1';
     if (isA2LiveMode(this.profile)) return 'A2';
     if (isA1LiveMode(this.profile)) return 'A1';
     try {
@@ -1678,15 +2313,37 @@ export class ConversationOrchestrator {
    * Depois o refreshPlan segue a progressão normal (variação → pergunta → conversa).
    */
   applySelectedStartTarget(phraseId: string): boolean {
+    const c2 = isC2LiveMode(this.profile);
+    const c1 = isC1LiveMode(this.profile);
+    const b2 = isB2LiveMode(this.profile);
+    const b1 = isB1LiveMode(this.profile);
     const a2 = isA2LiveMode(this.profile);
     const a1 = isA1LiveMode(this.profile);
     const pool = isZeroLanguageMode(this.profile)
       ? mergeZeroLanguagePhrases(this.phrases)
-      : a2
-        ? mergeA2CurriculumPhrases(this.phrases)
-        : a1
-          ? mergeA1CurriculumPhrases(this.phrases)
-          : mergeZeroLanguagePhrases(mergeA1CurriculumPhrases(mergeA2CurriculumPhrases(this.phrases)));
+      : c2
+        ? mergeC2CurriculumPhrases(this.phrases)
+        : c1
+          ? mergeC1CurriculumPhrases(this.phrases)
+          : b2
+            ? mergeB2CurriculumPhrases(this.phrases)
+            : b1
+              ? mergeB1CurriculumPhrases(this.phrases)
+              : a2
+                ? mergeA2CurriculumPhrases(this.phrases)
+                : a1
+                  ? mergeA1CurriculumPhrases(this.phrases)
+                  : mergeZeroLanguagePhrases(
+                    mergeA1CurriculumPhrases(
+                      mergeA2CurriculumPhrases(
+                        mergeB1CurriculumPhrases(
+                          mergeB2CurriculumPhrases(
+                            mergeC1CurriculumPhrases(mergeC2CurriculumPhrases(this.phrases)),
+                          ),
+                        ),
+                      ),
+                    ),
+                  );
     let decoded = phraseId.trim();
     if (!decoded) return false;
     try {
@@ -1720,6 +2377,18 @@ export class ConversationOrchestrator {
     if (a2 && action === 'introduce') {
       scaffoldLevel = Math.max(scaffoldLevel, 2) as SupportLevel;
     }
+    if (b1 && action === 'introduce') {
+      scaffoldLevel = Math.max(scaffoldLevel, 1) as SupportLevel;
+    }
+    if (b2 && action === 'introduce') {
+      scaffoldLevel = Math.max(scaffoldLevel, 1) as SupportLevel;
+    }
+    if (c1 && action === 'introduce') {
+      scaffoldLevel = Math.max(scaffoldLevel, 1) as SupportLevel;
+    }
+    if (c2 && action === 'introduce') {
+      scaffoldLevel = Math.max(scaffoldLevel, 1) as SupportLevel;
+    }
     const helpPref = UiPrefsService.get().helpLevel;
     this.sessionSupport = applyHelpPrefToScaffold(scaffoldLevel, helpPref) as SupportLevel;
     const target = phraseToTarget(resolved, conf);
@@ -1736,8 +2405,11 @@ export class ConversationOrchestrator {
       this.plan.training?.totalMinutes,
       a1,
       a2,
+      b1,
+      b2,
+      c1,
     );
-    this.plan.actionKickoff = buildActionKickoff(this.plan, zero, a1, a2);
+    this.plan.actionKickoff = buildActionKickoff(this.plan, zero, a1, a2, b1, b2, c1);
     this.ctx.targetItem = target.german;
     this.ctx.lastAction = action;
     this.ctx.currentGoal = action;
@@ -2167,8 +2839,12 @@ export class ConversationOrchestrator {
     const zero = isZeroLanguageMode(this.profile);
     const a1 = isA1LiveMode(this.profile);
     const a2 = isA2LiveMode(this.profile);
+    const b1 = isB1LiveMode(this.profile);
+    const b2 = isB2LiveMode(this.profile);
+    const c1 = isC1LiveMode(this.profile);
+    const c2 = isC2LiveMode(this.profile);
     const pedagogicalTurn =
-      (a1 || a2) && this.plan.target
+      (a1 || a2 || b1 || b2 || c1 || c2) && this.plan.target
         ? {
             target: this.plan.target.id,
             currentObjective: this.plan.action.toUpperCase(),
@@ -2177,15 +2853,27 @@ export class ConversationOrchestrator {
                 ? 'CORRECT_OR_SCAFFOLD → RETRY_SAME_TARGET'
                 : this.plan.action === 'transfer'
                   ? 'ONE_AXIS_CHANGE → ASK_PRODUCTION'
-                  : a2
-                    ? 'EVALUATE → STAY_ON_A2_OR_ADVANCE'
-                    : 'EVALUATE → STAY_ON_A1_OR_ADVANCE',
+                  : c2
+                    ? 'EVALUATE → STAY_ON_C2'
+                    : c1
+                      ? 'EVALUATE → STAY_ON_C1_OR_ADVANCE'
+                      : b2
+                        ? 'EVALUATE → STAY_ON_B2_OR_ADVANCE'
+                        : b1
+                          ? 'EVALUATE → STAY_ON_B1_OR_ADVANCE'
+                          : a2
+                            ? 'EVALUATE → STAY_ON_A2_OR_ADVANCE'
+                            : 'EVALUATE → STAY_ON_A1_OR_ADVANCE',
           }
         : null;
     return {
       zeroLanguageMode: zero,
-      a1CurriculumMode: a1,
-      a2CurriculumMode: a2,
+      a1CurriculumMode: a1 && !b2 && !c1 && !c2,
+      a2CurriculumMode: a2 && !b2 && !c1 && !c2,
+      b1CurriculumMode: b1 && !b2 && !c1 && !c2,
+      b2CurriculumMode: b2 && !c1 && !c2,
+      c1CurriculumMode: c1 && !c2,
+      c2CurriculumMode: c2,
       teacherDirective: this.plan.teacherDirective,
       pedagogicalAction: this.pendingTransfer
         ? 'transfer'
@@ -2535,7 +3223,7 @@ export class ConversationOrchestrator {
       }
     }
 
-    // A2 curricular: avanço + nudge + gate B1 (sem currículo B1)
+    // A2 curricular: avanço + nudge + graduação A2→B1 (currículo B1 executável)
     if (isA2LiveMode(this.profile) && isA2TargetId(phraseId)) {
       const a2Meta = getA2TargetById(phraseId);
       if (a2Meta) {
@@ -2551,9 +3239,29 @@ export class ConversationOrchestrator {
           gradB1.progress,
           (p) => StorageService.saveProfile(p),
         );
-        // Currículo B1 bloqueado — reforço A2 continua
-        this.phrases = mergeA2CurriculumPhrases(this.phrases);
+        this.phrases = mergeB1CurriculumPhrases(this.phrases);
         this.refreshPlan(phraseId);
+        const first = this.plan.target ?? phraseToTarget(
+          mergeB1CurriculumPhrases([])[0],
+          this.learning.phrases[b1FirstTarget().id],
+        );
+        return {
+          flow: 'continueConversation',
+          action: 'introduce',
+          mode: 'GUIDED_CONVERSATION',
+          reason: `A2→B1 graduated (${gradB1.reason})`,
+          targetItem: first.german,
+          geminiNudge: buildB1TurnPedagogicalDirective({
+            targetId: first.id,
+            german: first.german,
+            portuguese: first.portuguese,
+            action: 'introduce',
+            objective: 'FIRST_B1_TARGET',
+            allowedNext: 'BRIEF_MODEL → ASK_INDEPENDENT_PRODUCTION → WAIT',
+            verdict: 'GRADUATED_FROM_A2',
+          }),
+          eventsRecorded: [],
+        };
       }
       const nbaA2 = decideNextBestAction(conf, {
         bottleneck: this.learning.bottleneck,
@@ -2575,11 +3283,9 @@ export class ConversationOrchestrator {
           flow: 'continueConversation',
           action,
           mode: 'GUIDED_CONVERSATION',
-          reason: gradB1.graduated
-            ? `A2→B1 gate (${gradB1.reason}) — reforço A2`
-            : nextMeta && next && next.id !== phraseId
-              ? `A2_ADVANCE → ${next.id}`
-              : `A2_CONTINUE — ${nbaA2.reason}`,
+          reason: nextMeta && next && next.id !== phraseId
+            ? `A2_ADVANCE → ${next.id}`
+            : `A2_CONTINUE — ${nbaA2.reason}`,
           targetItem: focus.german,
           geminiNudge: buildA2TurnPedagogicalDirective({
             targetId: focus.id,
@@ -2590,7 +3296,310 @@ export class ConversationOrchestrator {
             allowedNext: next && next.id !== phraseId
               ? 'MODEL → ASK_PRODUCTION → WAIT'
               : 'VARIATION_OR_TRANSFER_OR_INDEPENDENT_OR_CONVERSE',
-            verdict: gradB1.graduated ? 'GRADUATED_A2_B1_GATE' : 'CORRECT',
+            verdict: 'CORRECT',
+          }),
+          eventsRecorded: [],
+        };
+      }
+    }
+
+    // B1 curricular: avanço + nudge + graduação B1→B2 (currículo B2 executável)
+    if (isB1LiveMode(this.profile) && isB1TargetId(phraseId)) {
+      const b1Meta = getB1TargetById(phraseId);
+      if (b1Meta) {
+        await recordB1TargetSuccess(this.profile, b1Meta.competencyId, 8);
+      }
+      this.refreshPlan(phraseId);
+      const next = this.plan.target;
+      const nextMeta = next ? getB1TargetById(next.id) : null;
+      const gradB2 = await maybeGraduateB1ToB2(this.profile, this.learning);
+      if (gradB2.graduated && gradB2.progress) {
+        this.profile = await applyProfileLevelAfterGraduation(
+          this.profile,
+          gradB2.progress,
+          (p) => StorageService.saveProfile(p),
+        );
+        this.phrases = mergeB2CurriculumPhrases(this.phrases);
+        this.refreshPlan(phraseId);
+        const first = this.plan.target ?? phraseToTarget(
+          mergeB2CurriculumPhrases([])[0],
+          this.learning.phrases[b2FirstTarget().id],
+        );
+        return {
+          flow: 'continueConversation',
+          action: 'introduce',
+          mode: 'GUIDED_CONVERSATION',
+          reason: `B1→B2 graduated (${gradB2.reason})`,
+          targetItem: first.german,
+          geminiNudge: buildB2TurnPedagogicalDirective({
+            targetId: first.id,
+            german: first.german,
+            portuguese: first.portuguese,
+            action: 'introduce',
+            objective: 'FIRST_B2_TARGET',
+            allowedNext: 'MODEL → PRODUÇÃO COM AJUDA → PRODUÇÃO INDEPENDENTE → ARGUMENTAÇÃO → CONVERSAÇÃO',
+            verdict: 'GRADUATED_FROM_B1',
+          }),
+          eventsRecorded: [],
+        };
+      }
+      const nbaB1 = decideNextBestAction(conf, {
+        bottleneck: this.learning.bottleneck,
+        recentError: this.justErrored,
+        pendingTransfer: !!this.pendingTransfer,
+        inMicroPractice: !!this.micro && this.micro.phase !== 'done',
+        sessionGoal: this.reviewSession || this.pendingReview ? 'review' : 'auto',
+        dueReview: !!this.pendingReview,
+        reviewType: this.pendingReview?.type,
+      });
+      if (nbaB1.action === 'transfer') {
+        const phrase = resolvePhrase(phraseId, this.phrases);
+        if (phrase) return this.tryBeginTransfer('nba_transfer', phrase, true);
+      }
+      const action = (next && next.id !== phraseId ? this.plan.action : mapKind(nbaB1.action)) as OrchestratorAction;
+      const focus = next && isB1TargetId(next.id) ? next : resolvePhrase(phraseId, this.phrases);
+      if (focus) {
+        return {
+          flow: 'continueConversation',
+          action,
+          mode: 'GUIDED_CONVERSATION',
+          reason: nextMeta && next && next.id !== phraseId
+            ? `B1_ADVANCE → ${next.id}`
+            : `B1_CONTINUE — ${nbaB1.reason}`,
+          targetItem: focus.german,
+          geminiNudge: buildB1TurnPedagogicalDirective({
+            targetId: focus.id,
+            german: focus.german,
+            portuguese: focus.portuguese,
+            action,
+            objective: next && next.id !== phraseId ? 'NEXT_B1_TARGET' : action.toUpperCase(),
+            allowedNext: next && next.id !== phraseId
+              ? 'BRIEF_MODEL → ASK_INDEPENDENT_PRODUCTION → WAIT'
+              : 'VARIATION_OR_TRANSFER_OR_INDEPENDENT_OR_CONVERSE',
+            verdict: 'CORRECT',
+          }),
+          eventsRecorded: [],
+        };
+      }
+    }
+
+    // B2 curricular: avanço + nudge + graduação B2→C1 (currículo C1 executável)
+    if (isB2LiveMode(this.profile) && isB2TargetId(phraseId)) {
+      const b2Meta = getB2TargetById(phraseId);
+      if (b2Meta) {
+        await recordB2TargetSuccess(this.profile, b2Meta.competencyId, 8);
+      }
+      this.refreshPlan(phraseId);
+      const next = this.plan.target;
+      const nextMeta = next ? getB2TargetById(next.id) : null;
+      const gradC1 = await maybeGraduateB2ToC1(this.profile, this.learning);
+      if (gradC1.graduated && gradC1.progress) {
+        this.profile = await applyProfileLevelAfterGraduation(
+          this.profile,
+          gradC1.progress,
+          (p) => StorageService.saveProfile(p),
+        );
+        this.phrases = mergeC1CurriculumPhrases(this.phrases);
+        this.refreshPlan(phraseId);
+        const first = this.plan.target ?? phraseToTarget(
+          mergeC1CurriculumPhrases([])[0],
+          this.learning.phrases[c1FirstTarget().id],
+        );
+        return {
+          flow: 'continueConversation',
+          action: 'introduce',
+          mode: 'GUIDED_CONVERSATION',
+          reason: `B2→C1 graduated (${gradC1.reason})`,
+          targetItem: first.german,
+          geminiNudge: buildC1TurnPedagogicalDirective({
+            targetId: first.id,
+            german: first.german,
+            portuguese: first.portuguese,
+            action: 'introduce',
+            objective: 'FIRST_C1_TARGET',
+            allowedNext: 'MODEL → REFORMULAÇÃO → PRODUÇÃO INDEPENDENTE → ARGUMENTAÇÃO → CONTRA-ARGUMENTAÇÃO → DISCURSO ESPONTÂNEO',
+            verdict: 'GRADUATED_FROM_B2',
+          }),
+          eventsRecorded: [],
+        };
+      }
+      const nbaB2 = decideNextBestAction(conf, {
+        bottleneck: this.learning.bottleneck,
+        recentError: this.justErrored,
+        pendingTransfer: !!this.pendingTransfer,
+        inMicroPractice: !!this.micro && this.micro.phase !== 'done',
+        sessionGoal: this.reviewSession || this.pendingReview ? 'review' : 'auto',
+        dueReview: !!this.pendingReview,
+        reviewType: this.pendingReview?.type,
+      });
+      if (nbaB2.action === 'transfer') {
+        const phrase = resolvePhrase(phraseId, this.phrases);
+        if (phrase) return this.tryBeginTransfer('nba_transfer', phrase, true);
+      }
+      const action = (next && next.id !== phraseId ? this.plan.action : mapKind(nbaB2.action)) as OrchestratorAction;
+      const focus = next && isB2TargetId(next.id) ? next : resolvePhrase(phraseId, this.phrases);
+      if (focus) {
+        return {
+          flow: 'continueConversation',
+          action,
+          mode: 'GUIDED_CONVERSATION',
+          reason: nextMeta && next && next.id !== phraseId
+            ? `B2_ADVANCE → ${next.id}`
+            : `B2_CONTINUE — ${nbaB2.reason}`,
+          targetItem: focus.german,
+          geminiNudge: buildB2TurnPedagogicalDirective({
+            targetId: focus.id,
+            german: focus.german,
+            portuguese: focus.portuguese,
+            action,
+            objective: next && next.id !== phraseId ? 'NEXT_B2_TARGET' : action.toUpperCase(),
+            allowedNext: next && next.id !== phraseId
+              ? 'MODEL → PRODUÇÃO COM AJUDA → PRODUÇÃO INDEPENDENTE → ARGUMENTAÇÃO → CONVERSAÇÃO'
+              : 'VARIATION_OR_TRANSFER_OR_ARGUMENT_OR_CONVERSE',
+            verdict: 'CORRECT',
+          }),
+          eventsRecorded: [],
+        };
+      }
+    }
+
+    // C1 curricular: avanço + nudge + graduação C1→C2 (currículo C2 executável)
+    if (isC1LiveMode(this.profile) && isC1TargetId(phraseId)) {
+      const c1Meta = getC1TargetById(phraseId);
+      if (c1Meta) {
+        await recordC1TargetSuccess(this.profile, c1Meta.competencyId, 8);
+      }
+      this.refreshPlan(phraseId);
+      const next = this.plan.target;
+      const nextMeta = next ? getC1TargetById(next.id) : null;
+      const gradC2 = await maybeGraduateC1ToC2(this.profile, this.learning);
+      if (gradC2.graduated && gradC2.progress) {
+        this.profile = await applyProfileLevelAfterGraduation(
+          this.profile,
+          gradC2.progress,
+          (p) => StorageService.saveProfile(p),
+        );
+        this.phrases = mergeC2CurriculumPhrases(this.phrases);
+        this.refreshPlan(phraseId);
+        const first = this.plan.target ?? phraseToTarget(
+          mergeC2CurriculumPhrases([])[0],
+          this.learning.phrases[c2FirstTarget().id],
+        );
+        return {
+          flow: 'continueConversation',
+          action: 'introduce',
+          mode: 'GUIDED_CONVERSATION',
+          reason: `C1→C2 graduated (${gradC2.reason})`,
+          targetItem: first.german,
+          geminiNudge: buildC2TurnPedagogicalDirective({
+            targetId: first.id,
+            german: first.german,
+            portuguese: first.portuguese,
+            action: 'introduce',
+            objective: 'FIRST_C2_TARGET',
+            allowedNext: 'MODEL → NUANCE → INFERÊNCIA → PERSUASÃO → DISCURSO ESPONTÂNEO',
+            verdict: 'GRADUATED_FROM_C1',
+          }),
+          eventsRecorded: [],
+        };
+      }
+      const nbaC1 = decideNextBestAction(conf, {
+        bottleneck: this.learning.bottleneck,
+        recentError: this.justErrored,
+        pendingTransfer: !!this.pendingTransfer,
+        inMicroPractice: !!this.micro && this.micro.phase !== 'done',
+        sessionGoal: this.reviewSession || this.pendingReview ? 'review' : 'auto',
+        dueReview: !!this.pendingReview,
+        reviewType: this.pendingReview?.type,
+      });
+      if (nbaC1.action === 'transfer') {
+        const phrase = resolvePhrase(phraseId, this.phrases);
+        if (phrase) return this.tryBeginTransfer('nba_transfer', phrase, true);
+      }
+      const action = (next && next.id !== phraseId ? this.plan.action : mapKind(nbaC1.action)) as OrchestratorAction;
+      const focus = next && isC1TargetId(next.id) ? next : resolvePhrase(phraseId, this.phrases);
+      if (focus) {
+        return {
+          flow: 'continueConversation',
+          action,
+          mode: 'GUIDED_CONVERSATION',
+          reason: nextMeta && next && next.id !== phraseId
+            ? `C1_ADVANCE → ${next.id}`
+            : `C1_CONTINUE — ${nbaC1.reason}`,
+          targetItem: focus.german,
+          geminiNudge: buildC1TurnPedagogicalDirective({
+            targetId: focus.id,
+            german: focus.german,
+            portuguese: focus.portuguese,
+            action,
+            objective: next && next.id !== phraseId ? 'NEXT_C1_TARGET' : action.toUpperCase(),
+            allowedNext: next && next.id !== phraseId
+              ? 'MODEL → REFORMULAÇÃO → PRODUÇÃO INDEPENDENTE → ARGUMENTAÇÃO → CONTRA-ARGUMENTAÇÃO → DISCURSO ESPONTÂNEO'
+              : 'VARIATION_OR_TRANSFER_OR_ARGUMENT_OR_CONVERSE',
+            verdict: 'CORRECT',
+          }),
+          eventsRecorded: [],
+        };
+      }
+    }
+
+    // C2 curricular: avanço + nudge + terminal (sem currículo superior)
+    if (isC2LiveMode(this.profile) && isC2TargetId(phraseId)) {
+      const c2Meta = getC2TargetById(phraseId);
+      if (c2Meta) {
+        await recordC2TargetSuccess(this.profile, c2Meta.competencyId, 8);
+      }
+      this.refreshPlan(phraseId);
+      const next = this.plan.target;
+      const nextMeta = next ? getC2TargetById(next.id) : null;
+      const gradHigher = await maybeGraduateC2ToHigher(this.profile, this.learning);
+      if (gradHigher.reason === 'c2_terminal_no_higher_curriculum' && gradHigher.progress) {
+        this.profile = await applyProfileLevelAfterGraduation(
+          this.profile,
+          gradHigher.progress,
+          (p) => StorageService.saveProfile(p),
+        );
+        this.phrases = mergeC2CurriculumPhrases(this.phrases);
+        this.refreshPlan(phraseId);
+      }
+      const nbaC2 = decideNextBestAction(conf, {
+        bottleneck: this.learning.bottleneck,
+        recentError: this.justErrored,
+        pendingTransfer: !!this.pendingTransfer,
+        inMicroPractice: !!this.micro && this.micro.phase !== 'done',
+        sessionGoal: this.reviewSession || this.pendingReview ? 'review' : 'auto',
+        dueReview: !!this.pendingReview,
+        reviewType: this.pendingReview?.type,
+      });
+      if (nbaC2.action === 'transfer') {
+        const phrase = resolvePhrase(phraseId, this.phrases);
+        if (phrase) return this.tryBeginTransfer('nba_transfer', phrase, true);
+      }
+      const action = (next && next.id !== phraseId ? this.plan.action : mapKind(nbaC2.action)) as OrchestratorAction;
+      const focus = next && isC2TargetId(next.id) ? next : resolvePhrase(phraseId, this.phrases);
+      if (focus) {
+        return {
+          flow: 'continueConversation',
+          action,
+          mode: 'GUIDED_CONVERSATION',
+          reason: gradHigher.reason === 'c2_terminal_no_higher_curriculum'
+            ? `C2_TERMINAL (${gradHigher.reason})`
+            : nextMeta && next && next.id !== phraseId
+              ? `C2_ADVANCE → ${next.id}`
+              : `C2_CONTINUE — ${nbaC2.reason}`,
+          targetItem: focus.german,
+          geminiNudge: buildC2TurnPedagogicalDirective({
+            targetId: focus.id,
+            german: focus.german,
+            portuguese: focus.portuguese,
+            action,
+            objective: next && next.id !== phraseId ? 'NEXT_C2_TARGET' : action.toUpperCase(),
+            allowedNext: next && next.id !== phraseId
+              ? 'MODEL → NUANCE → INFERÊNCIA → PERSUASÃO → DISCURSO ESPONTÂNEO'
+              : 'VARIATION_OR_TRANSFER_OR_INFERENCE_OR_CONVERSE',
+            verdict: gradHigher.reason === 'c2_terminal_no_higher_curriculum'
+              ? 'C2_TERMINAL'
+              : 'CORRECT',
           }),
           eventsRecorded: [],
         };

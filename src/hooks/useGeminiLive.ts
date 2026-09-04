@@ -44,9 +44,17 @@ import {
   SelectedStartTargetError,
   isA1LiveMode,
   isA2LiveMode,
+  isB1LiveMode,
+  isB2LiveMode,
+  isC1LiveMode,
+  isC2LiveMode,
 } from '@/services/teacher/ConversationOrchestrator';
 import { mergeA1CurriculumPhrases } from '@/services/course/A1Curriculum';
 import { mergeA2CurriculumPhrases } from '@/services/course/A2Curriculum';
+import { mergeB1CurriculumPhrases } from '@/services/course/B1Curriculum';
+import { mergeB2CurriculumPhrases } from '@/services/course/B2Curriculum';
+import { mergeC1CurriculumPhrases } from '@/services/course/C1Curriculum';
+import { mergeC2CurriculumPhrases } from '@/services/course/C2Curriculum';
 import type { ReviewType } from '@/services/learning/ReviewEngine';
 import { readConversationTopicContext } from '@/services/teacher/ConversationTopicIntent';
 import { readSimulatorContext } from '@/services/teacher/SimulatorIntent';
@@ -63,7 +71,7 @@ import {
 import { readReviewSessionSnapshot } from '@/services/learning/ReviewSession';
 import { livePrefsDirective, UiPrefsService } from '@/services/ui/UiPrefsService';
 import { clearSelectedLearningTarget, readSelectedLearningTarget } from '@/services/teacher/LessonStartIntent';
-import { isScriptedGreeting } from '@/services/teacher/sessionContinuity/SessionOpeningEngine';
+import { isScriptedGreeting, isActiveCurriculumTargetId } from '@/services/teacher/sessionContinuity/SessionOpeningEngine';
 import { buildSessionKickoffFromProfile } from '@/services/voice/LiveSessionKickoff';
 import { targetFlow } from '@/services/ui/TargetFlowTrace';
 
@@ -555,11 +563,19 @@ export function useGeminiLive(profile: UserProfile | null): GeminiLiveUI {
       await MemoryService.ensureAutomationScores();
       const learning = await MemoryService.loadProfile(profile);
       const rawPhrases = await StorageService.getAllPhrases();
-      const phrases = isA2LiveMode(profile)
-        ? mergeA2CurriculumPhrases(rawPhrases)
-        : isA1LiveMode(profile)
-          ? mergeA1CurriculumPhrases(rawPhrases)
-          : rawPhrases;
+      const phrases = isC2LiveMode(profile)
+        ? mergeC2CurriculumPhrases(rawPhrases)
+        : isC1LiveMode(profile)
+          ? mergeC1CurriculumPhrases(rawPhrases)
+          : isB2LiveMode(profile)
+            ? mergeB2CurriculumPhrases(rawPhrases)
+            : isB1LiveMode(profile)
+              ? mergeB1CurriculumPhrases(rawPhrases)
+              : isA2LiveMode(profile)
+                ? mergeA2CurriculumPhrases(rawPhrases)
+                : isA1LiveMode(profile)
+                  ? mergeA1CurriculumPhrases(rawPhrases)
+                  : rawPhrases;
       const reviewIntent = readReviewIntent();
       const reviewSessionSnapshot = readReviewSessionSnapshot();
       const miniProvaIntent = readMiniProvaIntent();
@@ -704,10 +720,15 @@ export function useGeminiLive(profile: UserProfile | null): GeminiLiveUI {
         startPhraseId: startPhraseId ?? null,
         planTarget: plan.target?.german ?? null,
         selectedStart,
-        note: selectedStart ? 'vai forcedOpening' : 'vai SessionOpeningEngine (genérico)',
+        note: selectedStart
+          ? 'vai forcedOpening'
+          : plan.target && isActiveCurriculumTargetId(plan.target.id)
+            ? 'vai plannedCurricularTarget'
+            : 'vai SessionOpeningEngine (genérico)',
       });
-      // Target explícito: forçar abertura pedagógica — senão SessionOpeningEngine
-      // grava Guten Morgen e injeta “Próximo passo: primeira microaula — Guten Morgen”.
+      // Target explícito: forçar abertura pedagógica.
+      // Target curricular planejado (A1–B2): passar ao SessionOpeningEngine para
+      // vencer first_intro L0 — sem startPhraseId o planner já escolheu b2-*/etc.
       const prepared = prepareSession(
         profile,
         learning,
@@ -720,7 +741,17 @@ export function useGeminiLive(profile: UserProfile | null): GeminiLiveUI {
                 reason: plan.actionReason || `selected_target:${plan.target.id}`,
               },
             }
-          : undefined,
+          : plan.target && isActiveCurriculumTargetId(plan.target.id)
+            ? {
+                plannedCurricularTarget: {
+                  id: plan.target.id,
+                  german: plan.target.german,
+                  portuguese: plan.target.portuguese,
+                  topic: plan.topic,
+                  reason: plan.actionReason || `planned_curricular:${plan.target.id}`,
+                },
+              }
+            : undefined,
       );
       targetFlow('PREPARE_SESSION_AFTER', {
         sessionId: fid,
@@ -734,8 +765,15 @@ export function useGeminiLive(profile: UserProfile | null): GeminiLiveUI {
         selectedStart,
         note: `strategy=${prepared.opening.strategy}`,
       });
-      let known = Object.values(learning.phrases).filter((c) => c.confidence >= 50).map((c) => c.phraseId).slice(0, 12);
-      let weak = Object.values(learning.phrases).filter((c) => c.confidence > 0 && c.confidence < 40).map((c) => c.phraseId).slice(0, 6);
+      // Entradas null em learning.phrases quebravam buildProfile → catch sem openingGerman.
+      let known = Object.values(learning.phrases)
+        .filter((c): c is NonNullable<typeof c> => !!c && typeof c.confidence === 'number' && c.confidence >= 50)
+        .map((c) => c.phraseId)
+        .slice(0, 12);
+      let weak = Object.values(learning.phrases)
+        .filter((c): c is NonNullable<typeof c> => !!c && typeof c.confidence === 'number' && c.confidence > 0 && c.confidence < 40)
+        .map((c) => c.phraseId)
+        .slice(0, 6);
       const ctx = prepared.sessionContext;
 
       if (simMode && simulatorIntent) {
@@ -826,7 +864,6 @@ export function useGeminiLive(profile: UserProfile | null): GeminiLiveUI {
         topic: plan.topic || prepared.opening.topic,
         returning: selectedStart ? false : prepared.returning,
       };
-      setReturning(selectedStart ? false : prepared.returning);
       // L0: aceitas NÃO vão para "FRACAS (reforce)" — senão Gemini volta para Wie geht's após erro novo
       if (zeroMode) {
         const { l0PhrasesForLiveProfile } = await import('@/services/teacher/ZeroLanguageMode');
@@ -834,8 +871,12 @@ export function useGeminiLive(profile: UserProfile | null): GeminiLiveUI {
         known = buckets.knownPhrases;
         weak = buckets.weakPhrases;
       }
-      // Prioridade: target explícito > L0 plan.target > continuidade genérica
-      const openingGerman = selectedStart
+      // Prioridade: startPhraseId/plan.target (autoridade) > L0 plan.target > continuidade
+      // Curricular A1–B2 planejado: mesmo openingGerman do target (nunca first_intro L0).
+      const plannedCurricular =
+        !!plan.target && isActiveCurriculumTargetId(plan.target.id);
+      setReturning(selectedStart || plannedCurricular ? false : prepared.returning);
+      const openingGerman = selectedStart || plannedCurricular
         ? plan.target!.german
         : zeroMode
           ? (plan.target?.german || prepared.opening.german)
@@ -844,18 +885,24 @@ export function useGeminiLive(profile: UserProfile | null): GeminiLiveUI {
         german: openingGerman,
         kind: reviewIntent ? 'REVIEW_SESSION' : prepared.opening.kind,
         topic: plan.topic || prepared.opening.topic,
-        returning: selectedStart ? false : prepared.returning,
+        returning: selectedStart || plannedCurricular ? false : prepared.returning,
       };
-      // Com seleção explícita: não enviar continuidade de saudação que compete com o alvo
-      const lastQuestion = selectedStart
+      // Com seleção explícita ou target curricular planejado: não enviar continuidade
+      // de saudação que compete com o alvo (first_intro / Guten Morgen).
+      const lastQuestion = selectedStart || plannedCurricular
         ? ''
         : (isScriptedGreeting(ctx.lastTeacherQuestion) ? '' : ctx.lastTeacherQuestion);
-      const unfinishedGoal = selectedStart
+      const unfinishedGoal = selectedStart || plannedCurricular
         ? ''
         : (isScriptedGreeting(ctx.unfinishedGoal) ? '' : ctx.unfinishedGoal);
-      const nextStep = selectedStart
+      const nextStep = selectedStart || plannedCurricular
         ? `trabalhar agora: ${plan.target!.german}`
         : ctx.recommendedContinuation;
+
+      // Kickoff pedagógico do orchestrator tem prioridade sobre prepared.kickoff (continuidade)
+      // em TODOS os níveis (L0/A1/A2/B1). Antes: só L0 usava orchestratorKickoff → A1/A2/B1
+      // caiam em prepared.kickoff e o Gemini improvisava (ex.: Berufe) sem openingGerman.
+      const curricularKickoff = live.orchestratorKickoff || prepared.kickoff;
 
       const liveProfileBase = {
         level: profile.level,
@@ -866,9 +913,9 @@ export function useGeminiLive(profile: UserProfile | null): GeminiLiveUI {
         helpLevel: (await import('@/services/ui/UiPrefsService')).UiPrefsService.get().helpLevel,
         immersionGuidance: (await import('@/services/teacher/TeacherEngine')).immersionGuidanceForTeacher(profile.germanPercentage ?? 80),
         intensiveGuidance: (await import('@/services/teacher/TeacherEngine')).intensiveGuidanceForTeacher(!!profile.turboMode),
-        knownPhrases: known.length ? known : ctx.recentPhrases,
-        weakPhrases: weak.length ? weak : ctx.weakPhrases,
-        memorySummary: prepared.memorySummaryText,
+        knownPhrases: known.length ? known : (selectedStart || plannedCurricular ? [] : ctx.recentPhrases),
+        weakPhrases: weak.length ? weak : (selectedStart || plannedCurricular ? [] : ctx.weakPhrases),
+        memorySummary: selectedStart || plannedCurricular ? '' : prepared.memorySummaryText,
         openingStrategy: reviewIntent ? 'review' : prepared.opening.strategy,
         sessionKind: openingRef.current?.kind || prepared.opening.kind,
         sessionKickoff: pendingReview
@@ -877,16 +924,22 @@ export function useGeminiLive(profile: UserProfile | null): GeminiLiveUI {
               'Sessão de revisão em conversa. Não diga a palavra review.',
               `Comece falando: "${pendingReview.prompt}"`,
             ].join('\n')
-          : (zeroMode ? (live.orchestratorKickoff || prepared.kickoff) : prepared.kickoff),
-        lastTopic: selectedStart ? (plan.topic || '') : (ctx.recentTopic || plan.topic),
+          : curricularKickoff,
+        lastTopic: selectedStart || plannedCurricular ? (plan.topic || '') : (ctx.recentTopic || plan.topic),
         lastQuestion,
-        lastUserAnswer: selectedStart ? '' : ctx.lastUserAnswer,
+        lastUserAnswer: selectedStart || plannedCurricular ? '' : ctx.lastUserAnswer,
         unfinishedGoal,
         nextStep,
-        recentMistakes: selectedStart ? [] : ctx.recentMistakes,
+        recentMistakes: selectedStart || plannedCurricular ? [] : ctx.recentMistakes,
         ...live,
         zeroLanguageMode: zeroMode,
+        // Reafirmar após ...live: autoridade do target selecionado / curricular
         openingGerman,
+        orchestratorKickoff: live.orchestratorKickoff || curricularKickoff,
+        teacherDirective: live.teacherDirective,
+        targetPhrase: live.targetPhrase || openingGerman,
+        targetPhrasePt: live.targetPhrasePt || ((selectedStart || plannedCurricular) ? plan.target?.portuguese : undefined),
+        targetId: live.targetId || ((selectedStart || plannedCurricular) ? plan.target?.id : undefined),
       };
 
       targetFlow('PROFILE_BUILT', {
@@ -931,7 +984,59 @@ export function useGeminiLive(profile: UserProfile | null): GeminiLiveUI {
       });
 
       return attachUiPrefsToLive(liveProfileBase, profile, zeroMode);
-    } catch {
+    } catch (err) {
+      console.error(
+        '[LIVE_PROFILE_BUILD_FAILED]',
+        err instanceof Error ? { message: err.message, stack: err.stack?.slice(0, 600) } : err,
+      );
+      // Recovery mínima: target explícito ainda deve chegar ao Live (evita Berufe genérico).
+      try {
+        const startSel = readSelectedLearningTarget();
+        const sid = startSel?.targetId;
+        const german = startSel?.targetPhrase;
+        if (sid && german) {
+          const c2 = /^c2-/i.test(sid);
+          const c1 = /^c1-/i.test(sid);
+          const b2 = /^b2-/i.test(sid);
+          const b1 = /^b1-/i.test(sid);
+          const a2 = /^a2-/i.test(sid);
+          const a1 = /^a1-/i.test(sid);
+          targetFlow('PROFILE_BUILD_RECOVERY', {
+            sessionId: flowSessionId(),
+            startPhraseId: sid,
+            openingGerman: german,
+            note: 'catch recovery — openingGerman do selected target',
+          });
+          return attachUiPrefsToLive(
+            {
+              level: profile.level,
+              goal: profile.goal,
+              profession: profile.profession,
+              openingGerman: german,
+              targetId: sid,
+              targetPhrase: german,
+              c2CurriculumMode: c2 || undefined,
+              c1CurriculumMode: c1 || undefined,
+              b2CurriculumMode: b2 || undefined,
+              b1CurriculumMode: b1 || undefined,
+              a2CurriculumMode: a2 || undefined,
+              a1CurriculumMode: a1 || undefined,
+              sessionKickoff: [
+                '[INSTRUÇÃO INTERNA — não leia isto em voz alta]',
+                `Comece falando exatamente: "${german}"`,
+              ].join('\n'),
+              orchestratorKickoff: [
+                '[INSTRUÇÃO INTERNA — não leia isto em voz alta]',
+                `Comece falando exatamente: "${german}"`,
+              ].join('\n'),
+            },
+            profile,
+            false,
+          );
+        }
+      } catch {
+        /* ignore recovery errors */
+      }
       return attachUiPrefsToLive(
         { level: profile.level, goal: profile.goal, profession: profile.profession },
         profile,

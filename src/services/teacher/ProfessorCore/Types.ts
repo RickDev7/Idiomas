@@ -29,7 +29,7 @@ export type ProgressionAction =
   | 'DEFER'
   | 'ADVANCE';
 
-export type CurriculumBand = 'L0' | 'A1' | 'A1+' | 'A2' | 'B1' | 'B2';
+export type CurriculumBand = 'L0' | 'A1' | 'A1+' | 'A2' | 'B1' | 'B2' | 'C1' | 'C2';
 
 export interface GrammarRule {
   id: string;

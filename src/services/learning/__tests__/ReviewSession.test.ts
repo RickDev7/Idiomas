@@ -9,6 +9,7 @@ import {
   createReviewSessionSnapshot,
   getCurrentReviewQueueItem,
   MAX_REVIEW_ITEM_ATTEMPTS,
+  advanceReviewQueueAfterItem,
   reviewSessionProgress,
   startReviewSession,
   summarizeReviewSession,
@@ -93,7 +94,25 @@ const profile: UserProfile = {
   createdAt: new Date().toISOString(),
 };
 
+function ensureStorage() {
+  const make = () => {
+    const store: Record<string, string> = {};
+    return {
+      getItem: (k: string) => store[k] ?? null,
+      setItem: (k: string, v: string) => { store[k] = String(v); },
+      removeItem: (k: string) => { delete store[k]; },
+      clear: () => { Object.keys(store).forEach((k) => delete store[k]); },
+      key: () => null,
+      length: 0,
+    };
+  };
+  const g = globalThis as unknown as { localStorage?: Storage; sessionStorage?: Storage };
+  if (typeof g.localStorage === 'undefined') g.localStorage = make() as Storage;
+  if (typeof g.sessionStorage === 'undefined') g.sessionStorage = make() as Storage;
+}
+
 async function run() {
+  ensureStorage();
   let passed = 0;
   let failed = 0;
   const assert = (name: string, cond: boolean) => {
@@ -166,6 +185,47 @@ async function run() {
   });
   assert('orch review primeiro item', orch.getPlan().target?.id === queue[0].phraseId);
 
+  const threeQueue = queue.slice(0, 3);
+  const threePhrases = phrases.slice(0, 3);
+  const threeSnap = createReviewSessionSnapshot(threeQueue);
+  const orch3 = ConversationOrchestrator.create({
+    profile,
+    learning,
+    phrases: threePhrases,
+    reviewSessionSnapshot: threeSnap,
+  });
+  for (let i = 0; i < 3; i++) {
+    const german = orch3.getPlan().target?.german;
+    assert(`Q${i + 1} tem alvo`, !!german);
+    const decision = await orch3.handleUserUtterance(german || '');
+    const live = orch3.getReviewSessionSnapshot();
+    if (i < 2) {
+      assert(`Q${i + 1} correta avança`, live?.completed === false && decision.reason.startsWith('review_next:'));
+      assert(`após Q${i + 1} currentIndex=${i + 1}`, live?.currentIndex === i + 1);
+    } else {
+      assert('após Q3 status COMPLETE', live?.completed === true && decision.reason === 'review_session_complete');
+      assert('após Q3 não existe Q4', live?.items.length === 3 && live.items[3] === undefined);
+      assert('currentIndex não sai da fila', live?.currentIndex === 2);
+    }
+  }
+
+  const failSnap = createReviewSessionSnapshot(threeQueue);
+  const orchFail = ConversationOrchestrator.create({
+    profile,
+    learning,
+    phrases: threePhrases,
+    reviewSessionSnapshot: failSnap,
+  });
+  await orchFail.handleUserUtterance(orchFail.getPlan().target?.german || '');
+  await orchFail.handleUserUtterance(orchFail.getPlan().target?.german || '');
+  const retry = await orchFail.handleUserUtterance('zzzzzzzz');
+  assert('última errada pede retry', retry.reason.startsWith('review_retry:'));
+  assert('ainda não COMPLETE no retry', orchFail.getReviewSessionSnapshot()?.completed === false);
+  const afterDefer = await orchFail.handleUserUtterance('zzzzzzzz');
+  assert('última errada/defer → COMPLETE', afterDefer.reason === 'review_session_complete');
+  assert('COMPLETE após defer', orchFail.getReviewSessionSnapshot()?.completed === true);
+  assert('sem Q4 após defer', orchFail.getReviewSessionSnapshot()?.items[3] === undefined);
+
   // simular avanço manual no snapshot
   const snap2 = createReviewSessionSnapshot(queue);
   snap2.results.push({ phraseId: queue[0].phraseId, result: 'SUCCESS', reviewType: queue[0].reviewType });
@@ -192,6 +252,54 @@ async function run() {
   assert('9 dominados', sum.mastered === 9);
   assert('3 para depois', sum.needsLater === 3);
   assert('não confundir revisados com acertos', sum.reviewed === 12 && sum.mastered === 9);
+
+  // 3 perguntas — COMPLETE após Q3, sem Q4
+  const three = createReviewSessionSnapshot(queue.slice(0, 3));
+  three.results.push({ phraseId: three.items[0].phraseId, result: 'SUCCESS', reviewType: three.items[0].reviewType });
+  let step = advanceReviewQueueAfterItem(three);
+  assert('após Q1 correta: não COMPLETE', !step.finished && three.completed === false);
+  assert('após Q1: índice 1 (Q2)', three.currentIndex === 1 && getCurrentReviewQueueItem(three)?.phraseId === three.items[1].phraseId);
+
+  three.results.push({ phraseId: three.items[1].phraseId, result: 'SUCCESS', reviewType: three.items[1].reviewType });
+  step = advanceReviewQueueAfterItem(three);
+  assert('após Q2 correta: ainda ACTIVE', !step.finished && three.completed === false);
+  assert('após Q2: índice 2 (Q3)', three.currentIndex === 2 && getCurrentReviewQueueItem(three)?.phraseId === three.items[2].phraseId);
+  assert('não existe Q4', three.items[3] === undefined);
+
+  three.results.push({ phraseId: three.items[2].phraseId, result: 'SUCCESS', reviewType: three.items[2].reviewType });
+  step = advanceReviewQueueAfterItem(three);
+  assert('após Q3 correta: COMPLETE', step.finished && three.completed === true);
+  assert('após COMPLETE não há pergunta atual', getCurrentReviewQueueItem(three) === null);
+  assert('índice não vira 3 (fora da fila)', three.currentIndex === 2);
+  const again = advanceReviewQueueAfterItem(three);
+  assert('avançar de novo não cria Q4 nem loop', again.finished && three.items.length === 3 && getCurrentReviewQueueItem(three) === null);
+
+  // última resposta errada → DEFERRED (política existente) → COMPLETE
+  const lastFail = createReviewSessionSnapshot(queue.slice(0, 3));
+  lastFail.results.push({ phraseId: lastFail.items[0].phraseId, result: 'SUCCESS', reviewType: lastFail.items[0].reviewType });
+  advanceReviewQueueAfterItem(lastFail);
+  lastFail.results.push({ phraseId: lastFail.items[1].phraseId, result: 'SUCCESS', reviewType: lastFail.items[1].reviewType });
+  advanceReviewQueueAfterItem(lastFail);
+  assert('Q3 ainda ativa antes do defer', getCurrentReviewQueueItem(lastFail)?.phraseId === lastFail.items[2].phraseId);
+  lastFail.itemAttempts = MAX_REVIEW_ITEM_ATTEMPTS;
+  lastFail.results.push({
+    phraseId: lastFail.items[2].phraseId,
+    result: 'DEFERRED',
+    reviewType: lastFail.items[2].reviewType,
+  });
+  const deferredDone = advanceReviewQueueAfterItem(lastFail);
+  assert('última errada/defer → COMPLETE', deferredDone.finished && lastFail.completed === true);
+  assert('sem loop após última errada', getCurrentReviewQueueItem(lastFail) === null && lastFail.currentIndex === 2);
+
+  // contrato UI: última resposta dispara o mesmo padrão da mini prova
+  const { readFileSync } = await import('node:fs');
+  const { resolve, dirname } = await import('node:path');
+  const { fileURLToPath } = await import('node:url');
+  const root = resolve(dirname(fileURLToPath(import.meta.url)), '../../../..');
+  const hook = readFileSync(resolve(root, 'src/hooks/useGeminiLive.ts'), 'utf8');
+  const gemini = readFileSync(resolve(root, 'src/pages/GeminiConversation.tsx'), 'utf8');
+  assert('hook marca reviewComplete', hook.includes("decision.reason === 'review_session_complete'") && hook.includes('setReviewComplete(true)'));
+  assert('GeminiConversation navega ao completar review', gemini.includes('live.reviewComplete') && gemini.includes('onFinish()'));
 
   // fila estável — snapshot não muda items
   const originalLen = snapshot.items.length;

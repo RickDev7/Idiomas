@@ -32,7 +32,21 @@ export class MemoryService {
   static async loadConfidenceMap(): Promise<Record<string, PhraseConfidence>> {
     try {
       const raw = localStorage.getItem(STORE_KEY);
-      return raw ? (JSON.parse(raw) as Record<string, PhraseConfidence>) : {};
+      if (!raw) return {};
+      const parsed = JSON.parse(raw) as Record<string, unknown>;
+      // Aceita mapa plano OU legado com .phrases; descarta chaves que não são PhraseConfidence.
+      const candidate =
+        parsed && typeof parsed === 'object' && parsed.phrases && typeof parsed.phrases === 'object'
+          ? (parsed.phrases as Record<string, unknown>)
+          : parsed;
+      const clean: Record<string, PhraseConfidence> = {};
+      for (const [id, v] of Object.entries(candidate || {})) {
+        if (!v || typeof v !== 'object') continue;
+        const c = v as Partial<PhraseConfidence>;
+        if (typeof c.phraseId !== 'string' || typeof c.confidence !== 'number') continue;
+        clean[id] = v as PhraseConfidence;
+      }
+      return clean;
     } catch {
       return {};
     }
@@ -93,6 +107,12 @@ export class MemoryService {
     let dirty = false;
     for (const id of Object.keys(map)) {
       const c = map[id];
+      // Entradas null/corruptas derrubavam buildProfile → kickoff Live sem openingGerman.
+      if (!c || typeof c !== 'object') {
+        delete map[id];
+        dirty = true;
+        continue;
+      }
       if (typeof c.automationScore !== 'number') {
         map[id] = persistAutomationScore(c);
         dirty = true;

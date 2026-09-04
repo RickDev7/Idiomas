@@ -378,7 +378,7 @@ async function main() {
   check('23. regression: not l0', !afterA2.target!.id.startsWith('l0-'));
   check('23. regression: not a1', !afterA2.target!.id.startsWith('a1-'));
 
-  console.log('\n=== 21. A2→B1 gate (curriculum B1 blocked) ===');
+  console.log('\n=== 21. A2→B1 gate (B1 curriculum active) ===');
   _store.clear();
   await saveCourseProgress({ ...defaultCourseProgress('basic'), currentLevel: 'A2' });
   let learnAllA2 = markMastered(emptyLearningProfile(), getA2Targets().map((t) => t.id));
@@ -397,18 +397,21 @@ async function main() {
   check('assessment B1 can pass with evidence', gradeB1.passed);
   const gradB1 = await maybeGraduateA2ToB1(profileA2(), learnAllA2);
   check('21. A2→B1 gate', gradB1.graduated === true && gradB1.progress?.currentLevel === 'B1');
-  check('21. B1 curriculum blocked', isHigherLevelCurriculumBlocked('B1'));
+  check('21. B1 unlocked', !isHigherLevelCurriculumBlocked('B1'));
+  check('21. B2 unlocked', !isHigherLevelCurriculumBlocked('B2'));
+  check('21. C1 unlocked', !isHigherLevelCurriculumBlocked('C1'));
+  check('21. C2 unlocked', !isHigherLevelCurriculumBlocked('C2'));
   check('21. A2 not blocked', !isHigherLevelCurriculumBlocked('A2'));
 
-  // After B1 gate: planner must reinforce A2, never invent B1 curriculum
+  const { mergeB1CurriculumPhrases, isB1TargetId } = await import('@/services/course/B1Curriculum');
   const planAfterB1 = buildConversationPlan(
     { ...profileA2(), diagnosticLevel: 'B1' },
     emptyLearningProfile(),
-    mergeA2CurriculumPhrases([]),
+    mergeB1CurriculumPhrases([]),
     0,
   );
-  check('21. B1 blocked reforça A2', !!planAfterB1.target && isA2TargetId(planAfterB1.target.id));
-  check('21. no B1 curricular ids', !planAfterB1.target?.id.startsWith('b1-'));
+  check('21. after A2→B1 uses B1 targets', !!planAfterB1.target && isB1TargetId(planAfterB1.target.id));
+  check('21. no A2 curricular after B1', !planAfterB1.target?.id.startsWith('a2-'));
 
   console.log('\n=== E2E chain summary ===');
   console.log(JSON.stringify({
@@ -423,7 +426,10 @@ async function main() {
       livePayload: true,
       a1ToA2: true,
       b1Gate: true,
-      b1CurriculumBlocked: true,
+      b1CurriculumActive: true,
+      b2CurriculumExecutable: true,
+      c1CurriculumBlocked: false,
+      c1CurriculumExecutable: true,
     },
   }, null, 2));
 

@@ -11,9 +11,9 @@ export const ASSESSMENTS: AssessmentSpec[] = [
   { id: 'assess.a1', level: 'A1', title: 'Conversa de A1', competencies: ['a1.family', 'a1.routine', 'a1.shopping'], interactions: 5 },
   { id: 'assess.a2', level: 'A2', title: 'Conversa de A2', competencies: ['a2.past', 'a2.plans', 'a2.opinion'], interactions: 6 },
   { id: 'assess.b1', level: 'B1', title: 'Conversa de B1', competencies: ['b1.story', 'b1.opinion_justify', 'b1.explain_problem'], interactions: 6 },
-  { id: 'assess.b2', level: 'B2', title: 'Debate de B2', competencies: ['b2.argue', 'b2.disagree', 'b2.fluent'], interactions: 7 },
-  { id: 'assess.c1', level: 'C1', title: 'Debate de C1', competencies: ['c1.nuance', 'c1.academic', 'c1.debates'], interactions: 7 },
-  { id: 'assess.c2', level: 'C2', title: 'Conversa de C2', competencies: ['c2.mastery', 'c2.style'], interactions: 8 },
+  { id: 'assess.b2', level: 'B2', title: 'Debate de B2', competencies: ['b2.argue', 'b2.defend', 'b2.fluent'], interactions: 7 },
+  { id: 'assess.c1', level: 'C1', title: 'Debate de C1', competencies: ['c1.nuance', 'c1.argue', 'c1.debate'], interactions: 7 },
+  { id: 'assess.c2', level: 'C2', title: 'Conversa de C2', competencies: ['c2.nuance', 'c2.argue', 'c2.inference'], interactions: 8 },
 ];
 
 export function assessmentFor(target: CourseLevelId): AssessmentSpec | undefined {

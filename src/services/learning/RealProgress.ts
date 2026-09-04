@@ -36,6 +36,34 @@ import {
   isA2UnitComplete,
   a2UnitIdsInOrder,
 } from '@/services/course/A2Curriculum';
+import {
+  b1CurriculumSeedPhrases,
+  getB1Targets,
+  isB1TargetId,
+  isB1UnitComplete,
+  b1UnitIdsInOrder,
+} from '@/services/course/B1Curriculum';
+import {
+  b2CurriculumSeedPhrases,
+  getB2Targets,
+  isB2TargetId,
+  isB2UnitComplete,
+  b2UnitIdsInOrder,
+} from '@/services/course/B2Curriculum';
+import {
+  c1CurriculumSeedPhrases,
+  getC1Targets,
+  isC1TargetId,
+  isC1UnitComplete,
+  c1UnitIdsInOrder,
+} from '@/services/course/C1Curriculum';
+import {
+  c2CurriculumSeedPhrases,
+  getC2Targets,
+  isC2TargetId,
+  isC2UnitComplete,
+  c2UnitIdsInOrder,
+} from '@/services/course/C2Curriculum';
 import { competenciesForLevel } from '@/services/course/competencies';
 
 const MAP_LEVELS: CourseLevelId[] = ['L0', 'A1', 'A2', 'B1', 'B2', 'C1', 'C2'];
@@ -103,6 +131,10 @@ const phraseGerman = new Map([
   ...zeroLanguageSeedPhrases().map((p) => [p.id, p.german] as const),
   ...a1CurriculumSeedPhrases().map((p) => [p.id, p.german] as const),
   ...a2CurriculumSeedPhrases().map((p) => [p.id, p.german] as const),
+  ...b1CurriculumSeedPhrases().map((p) => [p.id, p.german] as const),
+  ...b2CurriculumSeedPhrases().map((p) => [p.id, p.german] as const),
+  ...c1CurriculumSeedPhrases().map((p) => [p.id, p.german] as const),
+  ...c2CurriculumSeedPhrases().map((p) => [p.id, p.german] as const),
 ]);
 
 export function l0CurriculumTotals(): { baseCount: number; variationCount: number } {
@@ -216,6 +248,38 @@ function buildLevelProgress(learning: UserLearningProfile, currentLevel: CourseL
   const a2UnitsDone = a2UnitIdsInOrder().filter((u) => isA2UnitComplete(u, learning)).length;
   const a2Comps = competenciesForLevel('A2').length;
 
+  const b1Targets = getB1Targets();
+  const b1Ready = b1Targets.filter((t) => {
+    const c = learning.phrases[t.id];
+    return c && ((c.timesCorrect ?? 0) >= 2 || isMastered(c) || stateIndex(c.state) >= stateIndex('answeredAlone'));
+  }).length;
+  const b1UnitsDone = b1UnitIdsInOrder().filter((u) => isB1UnitComplete(u, learning)).length;
+  const b1Comps = competenciesForLevel('B1').length;
+
+  const b2Targets = getB2Targets();
+  const b2Ready = b2Targets.filter((t) => {
+    const c = learning.phrases[t.id];
+    return c && ((c.timesCorrect ?? 0) >= 2 || isMastered(c) || stateIndex(c.state) >= stateIndex('answeredAlone'));
+  }).length;
+  const b2UnitsDone = b2UnitIdsInOrder().filter((u) => isB2UnitComplete(u, learning)).length;
+  const b2Comps = competenciesForLevel('B2').length;
+
+  const c1Targets = getC1Targets();
+  const c1Ready = c1Targets.filter((t) => {
+    const c = learning.phrases[t.id];
+    return c && ((c.timesCorrect ?? 0) >= 2 || isMastered(c) || stateIndex(c.state) >= stateIndex('answeredAlone'));
+  }).length;
+  const c1UnitsDone = c1UnitIdsInOrder().filter((u) => isC1UnitComplete(u, learning)).length;
+  const c1Comps = competenciesForLevel('C1').length;
+
+  const c2Targets = getC2Targets();
+  const c2Ready = c2Targets.filter((t) => {
+    const c = learning.phrases[t.id];
+    return c && ((c.timesCorrect ?? 0) >= 2 || isMastered(c) || stateIndex(c.state) >= stateIndex('answeredAlone'));
+  }).length;
+  const c2UnitsDone = c2UnitIdsInOrder().filter((u) => isC2UnitComplete(u, learning)).length;
+  const c2Comps = competenciesForLevel('C2').length;
+
   return MAP_LEVELS.map((level) => {
     const availability = getLevelAvailability(level, currentLevel);
 
@@ -261,6 +325,70 @@ function buildLevelProgress(learning: UserLearningProfile, currentLevel: CourseL
       };
     }
 
+    if (level === 'B1') {
+      if (availability === 'locked') {
+        return { level, availability, progressPercent: null, detail: 'Bloqueado' };
+      }
+      if (availability === 'completed') {
+        return { level, availability, progressPercent: 100, detail: 'Concluído' };
+      }
+      const pct = b1Targets.length > 0 ? Math.round((b1Ready / b1Targets.length) * 100) : 0;
+      return {
+        level,
+        availability,
+        progressPercent: pct,
+        detail: `${b1Ready}/${b1Targets.length} targets · ${b1UnitsDone}/7 unidades · ${b1Comps} competências`,
+      };
+    }
+
+    if (level === 'B2') {
+      if (availability === 'locked') {
+        return { level, availability, progressPercent: null, detail: 'Bloqueado' };
+      }
+      if (availability === 'completed') {
+        return { level, availability, progressPercent: 100, detail: 'Concluído' };
+      }
+      const pct = b2Targets.length > 0 ? Math.round((b2Ready / b2Targets.length) * 100) : 0;
+      return {
+        level,
+        availability,
+        progressPercent: pct,
+        detail: `${b2Ready}/${b2Targets.length} targets · ${b2UnitsDone}/8 unidades · ${b2Comps} competências`,
+      };
+    }
+
+    if (level === 'C1') {
+      if (availability === 'locked') {
+        return { level, availability, progressPercent: null, detail: 'Bloqueado' };
+      }
+      if (availability === 'completed') {
+        return { level, availability, progressPercent: 100, detail: 'Concluído' };
+      }
+      const pct = c1Targets.length > 0 ? Math.round((c1Ready / c1Targets.length) * 100) : 0;
+      return {
+        level,
+        availability,
+        progressPercent: pct,
+        detail: `${c1Ready}/${c1Targets.length} targets · ${c1UnitsDone}/8 unidades · ${c1Comps} competências`,
+      };
+    }
+
+    if (level === 'C2') {
+      if (availability === 'locked') {
+        return { level, availability, progressPercent: null, detail: 'Bloqueado' };
+      }
+      if (availability === 'completed') {
+        return { level, availability, progressPercent: 100, detail: 'Concluído' };
+      }
+      const pct = c2Targets.length > 0 ? Math.round((c2Ready / c2Targets.length) * 100) : 0;
+      return {
+        level,
+        availability,
+        progressPercent: pct,
+        detail: `${c2Ready}/${c2Targets.length} targets · ${c2UnitsDone}/8 unidades · ${c2Comps} competências`,
+      };
+    }
+
     if (availability === 'locked') {
       return { level, availability, progressPercent: null, detail: 'Bloqueado — currículo ainda não disponível' };
     }
@@ -295,7 +423,11 @@ function buildWeakAreas(learning: UserLearningProfile, limit = 5): WeakArea[] {
         l0ChunkBaseForPhraseId(c.phraseId) !== null;
       const inA1 = isA1TargetId(c.phraseId);
       const inA2 = isA2TargetId(c.phraseId);
-      if (!inL0 && !inA1 && !inA2) return false;
+      const inB1 = isB1TargetId(c.phraseId);
+      const inB2 = isB2TargetId(c.phraseId);
+      const inC1 = isC1TargetId(c.phraseId);
+      const inC2 = isC2TargetId(c.phraseId);
+      if (!inL0 && !inA1 && !inA2 && !inB1 && !inB2 && !inC1 && !inC2) return false;
       return (
         c.needsHelp ||
         c.confidence < 40 ||

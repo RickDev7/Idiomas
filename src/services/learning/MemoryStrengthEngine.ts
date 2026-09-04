@@ -17,7 +17,8 @@ export const REVIEW_INTERVALS_DAYS = [1, 3, 7, 14, 30, 60];
 
 export function memoryStrength(conf: PhraseConfidence, now = Date.now()): MemoryStrength {
   const lastIso = conf.lastProduced || conf.lastReviewed || conf.lastSeen;
-  const lastSeen = lastIso ? new Date(lastIso).getTime() : now;
+  const parsedLast = lastIso ? Date.parse(lastIso) : NaN;
+  const lastSeen = Number.isFinite(parsedLast) ? parsedLast : now;
   const recencyDays = Math.max(0, (now - lastSeen) / 86_400_000);
 
   const successRate =
@@ -61,7 +62,7 @@ export function memoryStrength(conf: PhraseConfidence, now = Date.now()): Memory
     intervalDays = Math.max(intervalDays, 7);
   }
 
-  const base = lastIso ? new Date(lastIso).getTime() : now;
+  const base = Number.isFinite(parsedLast) ? parsedLast : now;
   const nextReviewAt = new Date(base + intervalDays * 86_400_000).toISOString();
 
   return {

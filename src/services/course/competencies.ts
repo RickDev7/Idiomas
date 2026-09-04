@@ -38,25 +38,35 @@ export const COMPETENCIES: Competency[] = [
   { id: 'b1.live_daily', level: 'B1', title: 'Viver o dia a dia em alemão', description: 'Resolver a maior parte da vida cotidiana em alemão.', masteryThreshold: 65, prerequisites: ['b1.story', 'b1.opinion_justify', 'b1.work_social'] },
   { id: 'b1.present', level: 'B1', title: 'Fazer pequenas apresentações', description: 'Apresentar um tema conhecido por alguns minutos.', masteryThreshold: 55, prerequisites: ['b1.opinion_justify'] },
 
-  // ---- B2 (Fluência funcional) ----
-  { id: 'b2.argue', level: 'B2', title: 'Argumentar', description: 'Defender ideias e discordar com fundamentos.', masteryThreshold: 60, prerequisites: ['b1.opinion_justify'] },
-  { id: 'b2.disagree', level: 'B2', title: 'Discordar com tato', description: 'Discordar de forma educada e construtiva.', masteryThreshold: 60, prerequisites: ['b2.argue'] },
-  { id: 'b2.current_affairs', level: 'B2', title: 'Debater atualidades', description: 'Discutir economia, sociedade, cultura e tecnologia.', masteryThreshold: 60, prerequisites: ['b2.argue'] },
-  { id: 'b2.work_pro', level: 'B2', title: 'Alemão profissional', description: 'Participar de reuniões e negociações de trabalho.', masteryThreshold: 60, prerequisites: ['b2.argue', 'b1.work_social'] },
-  { id: 'b2.fluent', level: 'B2', title: 'Fluência funcional', description: 'Manter conversas longas com naturalidade.', masteryThreshold: 65, prerequisites: ['b2.argue', 'b2.disagree'] },
+  // ---- B2 (Fluência funcional executável) ----
+  { id: 'b2.narrative', level: 'B2', title: 'Narrar experiências com detalhe', description: 'Contar experiências com nuance, impacto e reflexão.', masteryThreshold: 60, prerequisites: ['b1.story'] },
+  { id: 'b2.cause_effect', level: 'B2', title: 'Explicar causas e consequências', description: 'Ligar ações a causas, efeitos e hipóteses.', masteryThreshold: 60, prerequisites: ['b2.narrative'] },
+  { id: 'b2.argue', level: 'B2', title: 'Expressar opinião e argumentar', description: 'Defender ideias com fundamentos claros.', masteryThreshold: 60, prerequisites: ['b1.opinion_justify', 'b2.cause_effect'] },
+  { id: 'b2.compare', level: 'B2', title: 'Comparar e avaliar opções', description: 'Comparar alternativas e avaliar prós e contras.', masteryThreshold: 60, prerequisites: ['b2.argue'] },
+  { id: 'b2.problems_solutions', level: 'B2', title: 'Problemas e soluções', description: 'Relatar problemas e propor soluções concretas.', masteryThreshold: 60, prerequisites: ['b2.cause_effect', 'b1.explain_problem'] },
+  { id: 'b2.work_pro', level: 'B2', title: 'Temas profissionais e cotidianos', description: 'Discutir trabalho e vida cotidiana com fluência.', masteryThreshold: 60, prerequisites: ['b2.argue', 'b1.work_social'] },
+  { id: 'b2.defend', level: 'B2', title: 'Justificar decisões e defender posições', description: 'Justificar decisões e defender posições sob pressão.', masteryThreshold: 60, prerequisites: ['b2.argue', 'b2.compare'] },
+  { id: 'b2.fluent', level: 'B2', title: 'Conversação espontânea', description: 'Produção mais independente e conversação espontânea.', masteryThreshold: 65, prerequisites: ['b2.defend', 'b2.work_pro'] },
 
-  // ---- C1 (Alemão avançado) ----
-  { id: 'c1.nuance', level: 'C1', title: 'Expressar nuances', description: 'Usar registro formal/informal e ironia com precisão.', masteryThreshold: 60, prerequisites: ['b2.fluent'] },
-  { id: 'c1.academic', level: 'C1', title: 'Linguagem acadêmica', description: 'Apresentar e debater conceitos complexos.', masteryThreshold: 60, prerequisites: ['c1.nuance'] },
-  { id: 'c1.subtext', level: 'C1', title: 'Captar subtexto', description: 'Entender ironia, humor e o não-dito.', masteryThreshold: 60, prerequisites: ['c1.nuance'] },
-  { id: 'c1.register', level: 'C1', title: 'Adaptar registro', description: 'Alternar formal/informal/profissional com naturalidade.', masteryThreshold: 60, prerequisites: ['c1.nuance'] },
-  { id: 'c1.debates', level: 'C1', title: 'Participar de debates', description: 'Argumentar em debates rápidos e densos.', masteryThreshold: 60, prerequisites: ['c1.academic'] },
+  // ---- C1 (Comunicação avançada independente) ----
+  { id: 'c1.nuance', level: 'C1', title: 'Nuance e reformulação', description: 'Reformular ideias com precisão e matiz.', masteryThreshold: 60, prerequisites: ['b2.fluent'] },
+  { id: 'c1.argue', level: 'C1', title: 'Argumentação complexa', description: 'Construir argumentos com concessão e fundamento.', masteryThreshold: 60, prerequisites: ['c1.nuance', 'b2.argue'] },
+  { id: 'c1.debate', level: 'C1', title: 'Debate e contra-argumentação', description: 'Responder a objeções e reestruturar posições.', masteryThreshold: 60, prerequisites: ['c1.argue'] },
+  { id: 'c1.hypothesis', level: 'C1', title: 'Hipóteses e cenários', description: 'Formular hipóteses e explorar consequências.', masteryThreshold: 60, prerequisites: ['c1.argue', 'b2.cause_effect'] },
+  { id: 'c1.register', level: 'C1', title: 'Registro e comunicação profissional', description: 'Alternar formal, neutro e informal com controle.', masteryThreshold: 60, prerequisites: ['c1.nuance'] },
+  { id: 'c1.abstract', level: 'C1', title: 'Temas abstratos e sociais', description: 'Discutir temas sociais e conceitos abstratos.', masteryThreshold: 60, prerequisites: ['c1.hypothesis', 'c1.debate'] },
+  { id: 'c1.negotiate', level: 'C1', title: 'Negociação e resolução de conflitos', description: 'Negociar interesses e desativar tensão.', masteryThreshold: 60, prerequisites: ['c1.register', 'c1.debate'] },
+  { id: 'c1.spontaneous', level: 'C1', title: 'Conversação avançada espontânea', description: 'Discurso contínuo e produção espontânea.', masteryThreshold: 65, prerequisites: ['c1.negotiate', 'c1.abstract'] },
 
-  // ---- C2 (Domínio avançado) ----
-  { id: 'c2.mastery', level: 'C2', title: 'Domínio avançado', description: 'Naturalidade, estilo e registro plenos.', masteryThreshold: 65, prerequisites: ['c1.academic', 'c1.subtext'] },
-  { id: 'c2.humor', level: 'C2', title: 'Usar humor e ironia', description: 'Empregar humor, ironia e jogo de palavras.', masteryThreshold: 60, prerequisites: ['c2.mastery'] },
-  { id: 'c2.dialect', level: 'C2', title: 'Lidar com sotaques e dialetos', description: 'Compreender fala regional e contextos ruidosos.', masteryThreshold: 60, prerequisites: ['c2.mastery'] },
-  { id: 'c2.style', level: 'C2', title: 'Estilo e escrita sofisticada', description: 'Produzir textos com estilo e nuance controlados.', masteryThreshold: 65, prerequisites: ['c2.mastery'] },
+  // ---- C2 (Domínio pleno — nuance, inferência, persuasão) ----
+  { id: 'c2.nuance', level: 'C2', title: 'Nuance extrema e precisão', description: 'Precisão semântica e matizes finos de significado.', masteryThreshold: 65, prerequisites: ['c1.spontaneous'] },
+  { id: 'c2.argue', level: 'C2', title: 'Argumentação sofisticada', description: 'Argumentos multilayers com concessões e ressalvas.', masteryThreshold: 65, prerequisites: ['c2.nuance', 'c1.argue'] },
+  { id: 'c2.discourse', level: 'C2', title: 'Discurso estruturado', description: 'Sustentar ideias em discurso contínuo e coerente.', masteryThreshold: 65, prerequisites: ['c2.argue'] },
+  { id: 'c2.inference', level: 'C2', title: 'Implicação e interpretação', description: 'Inferir, interpretar e negociar o não-dito.', masteryThreshold: 65, prerequisites: ['c2.nuance', 'c1.debate'] },
+  { id: 'c2.register', level: 'C2', title: 'Registro, estilo e adequação', description: 'Controlar registro e estilo conforme o contexto.', masteryThreshold: 65, prerequisites: ['c2.nuance', 'c1.register'] },
+  { id: 'c2.mediate', level: 'C2', title: 'Negociação, mediação e persuasão', description: 'Mediar interesses e persuadir com nuance.', masteryThreshold: 65, prerequisites: ['c2.argue', 'c1.negotiate'] },
+  { id: 'c2.critical', level: 'C2', title: 'Abstração e pensamento crítico', description: 'Analisar conceitos abstratos com rigor.', masteryThreshold: 65, prerequisites: ['c2.inference', 'c1.abstract'] },
+  { id: 'c2.fluent', level: 'C2', title: 'Fluência avançada espontânea', description: 'Comunicação espontânea com controle total.', masteryThreshold: 70, prerequisites: ['c2.mediate', 'c2.discourse', 'c2.critical'] },
 ];
 
 export const COMPETENCY_BY_ID: Record<string, Competency> = Object.fromEntries(

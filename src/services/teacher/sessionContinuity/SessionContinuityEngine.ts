@@ -193,6 +193,17 @@ export type PrepareSessionOpts = {
     topic?: string;
     reason?: string;
   };
+  /**
+   * Target do planner curricular (a1-/a2-/b1-/b2-) sem startPhraseId.
+   * Passado ao SessionOpeningEngine para vencer first_intro L0.
+   */
+  plannedCurricularTarget?: {
+    id: string;
+    german: string;
+    portuguese: string;
+    topic?: string;
+    reason?: string;
+  };
 };
 
 export function prepareSession(
@@ -229,6 +240,7 @@ export function prepareSession(
         name: profile.name,
         incomplete,
         zeroLanguageMode: isZeroLanguageMode(profile),
+        plannedCurricularTarget: opts?.plannedCurricularTarget ?? null,
       });
 
   recordOpening(state, opening.german);

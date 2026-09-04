@@ -10,6 +10,14 @@ interface Candidate {
   hint?: string;
 }
 
+/**
+ * Currículo executável A1–C2 (não L0).
+ * Usado para impedir que first_intro L0 substitua o target planejado.
+ */
+export function isActiveCurriculumTargetId(id: string | undefined | null): boolean {
+  return typeof id === 'string' && /^(a1|a2|b1|b2|c1|c2)-/i.test(id.trim());
+}
+
 function timeGreeting(): Candidate {
   const h = new Date().getHours();
   if (h < 12) return { german: 'Guten Morgen!', portuguese: 'Bom dia!' };
@@ -55,7 +63,12 @@ export function getSessionOpening(ctx: OpeningContext): SessionOpening {
   const incomplete = ctx.incomplete;
   const weak = ctx.weakPhrases[0];
   const known = ctx.knownPhrases[0];
-  const topic = incomplete?.topic || last?.topic || (ctx.goal === 'work' ? 'work' : 'daily');
+  const planned = ctx.plannedCurricularTarget;
+  const topic =
+    planned?.topic ||
+    incomplete?.topic ||
+    last?.topic ||
+    (ctx.goal === 'work' ? 'work' : 'daily');
   const mistake = last?.mistakes[0] || incomplete?.mistakes[0]?.userSaid;
 
   const make = (
@@ -75,6 +88,22 @@ export function getSessionOpening(ctx: OpeningContext): SessionOpening {
     reason,
     pedagogicalRepeat,
   });
+
+  // 0. Currículo ativo + target planejado (A1–B2) — vence first_intro e continuidade genérica
+  if (planned && isActiveCurriculumTargetId(planned.id) && planned.german.trim()) {
+    const de = planned.german.trim();
+    return make(
+      'NEW_CONTENT_SESSION',
+      'planned_curricular',
+      {
+        german: de,
+        portuguese: (planned.portuguese || de).trim(),
+        expected: de.toLowerCase().split(/\s+/).slice(0, 3).join(' '),
+        hint: de.split(/\s+/)[0] + '...',
+      },
+      planned.reason || `planned_curricular:${planned.id}`,
+    );
+  }
 
   // 1. Primeira sessão de verdade
   if (ctx.sessionCount === 0 && !last) {

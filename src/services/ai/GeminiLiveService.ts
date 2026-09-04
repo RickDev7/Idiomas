@@ -30,10 +30,18 @@ export interface LiveProfile {
   pedagogicalAction?: string;
   targetPhrase?: string;
   targetPhrasePt?: string;
+  targetId?: string;
   scaffoldLevel?: number;
   sessionTopic?: string;
   trainingStage?: string;
   orchestratorKickoff?: string;
+  /** Modos curriculares (diagnóstico / binding kickoff — backend pode ignorar). */
+  a1CurriculumMode?: boolean;
+  a2CurriculumMode?: boolean;
+  b1CurriculumMode?: boolean;
+  b2CurriculumMode?: boolean;
+  c1CurriculumMode?: boolean;
+  c2CurriculumMode?: boolean;
   scaffoldHint?: string;
   actionReason?: string;
   automationScore?: number;
@@ -164,6 +172,18 @@ export class GeminiLiveService {
   private async ensureToken(): Promise<void> {
     const now = Date.now();
     if (this.token && now - this.tokenIssuedAt < TOKEN_TTL_MS) return;
+    liveDebug('token:profile', {
+      openingGerman: this.profile.openingGerman ?? null,
+      targetId: this.profile.targetId ?? null,
+      b1CurriculumMode: this.profile.b1CurriculumMode ?? null,
+      b2CurriculumMode: this.profile.b2CurriculumMode ?? null,
+      c1CurriculumMode: this.profile.c1CurriculumMode ?? null,
+      c2CurriculumMode: this.profile.c2CurriculumMode ?? null,
+      a2CurriculumMode: this.profile.a2CurriculumMode ?? null,
+      a1CurriculumMode: this.profile.a1CurriculumMode ?? null,
+      hasOrchKickoff: !!this.profile.orchestratorKickoff,
+      hasSessionKickoff: !!this.profile.sessionKickoff,
+    });
     const res = await fetch(`${httpBackendBase(this.backendUrl)}/api/gemini/token`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

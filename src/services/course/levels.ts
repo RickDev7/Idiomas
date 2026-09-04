@@ -100,19 +100,19 @@ export const COURSE_LEVELS: CourseLevel[] = [
     realWorldScenario: 'Problema profissional',
     modules: [
       { id: 'b1.m1', level: 'B1', title: 'Histórias e opiniões', description: 'Narrar e justificar.', units: [
-        { id: 'b1.u1', title: 'Contar histórias', phraseIds: [], wordIds: [], competencies: ['b1.story'], prerequisites: [] },
-        { id: 'b1.u2', title: 'Justificar opiniões', phraseIds: [], wordIds: [], competencies: ['b1.opinion_justify'], prerequisites: ['b1.u1'] },
+        { id: 'b1.u1', title: 'Contar histórias', phraseIds: ['b1-story-muenchen', 'b1-story-geklappt', 'b1-story-weil'], wordIds: [], competencies: ['b1.story'], prerequisites: [] },
+        { id: 'b1.u2', title: 'Justificar opiniões', phraseIds: ['b1-opinion-meinung', 'b1-opinion-deshalb', 'b1-opinion-seiten'], wordIds: [], competencies: ['b1.opinion_justify'], prerequisites: ['b1.u1'] },
       ] },
       { id: 'b1.m2', level: 'B1', title: 'Trabalho e sociedade', description: 'Conversas sociais e notícias.', units: [
-        { id: 'b1.u3', title: 'Conversar no trabalho', phraseIds: [], wordIds: [], competencies: ['b1.work_social'], prerequisites: ['b1.u2'] },
-        { id: 'b1.u4', title: 'Entender notícias', phraseIds: [], wordIds: [], competencies: ['b1.news'], prerequisites: ['b1.u1'] },
+        { id: 'b1.u3', title: 'Conversar no trabalho', phraseIds: ['b1-work-wochenende', 'b1-work-besprechen', 'b1-work-schlage'], wordIds: [], competencies: ['b1.work_social'], prerequisites: ['b1.u2'] },
+        { id: 'b1.u4', title: 'Entender notícias', phraseIds: ['b1-news-nachrichten', 'b1-news-gehoert', 'b1-news-interessiert'], wordIds: [], competencies: ['b1.news'], prerequisites: ['b1.u1'] },
       ] },
       { id: 'b1.m3', level: 'B1', title: 'Problemas e apresentações', description: 'Explicar e apresentar.', units: [
-        { id: 'b1.u5', title: 'Explicar problemas', phraseIds: [], wordIds: [], competencies: ['b1.explain_problem'], prerequisites: ['b1.u1'] },
-        { id: 'b1.u6', title: 'Apresentações', phraseIds: [], wordIds: [], competencies: ['b1.present'], prerequisites: ['b1.u2'] },
+        { id: 'b1.u5', title: 'Explicar problemas', phraseIds: ['b1-problem-und-zwar', 'b1-problem-helfen', 'b1-problem-folgendes'], wordIds: [], competencies: ['b1.explain_problem'], prerequisites: ['b1.u1'] },
+        { id: 'b1.u6', title: 'Apresentações', phraseIds: ['b1-present-thema', 'b1-present-punkten', 'b1-present-fragen'], wordIds: [], competencies: ['b1.present'], prerequisites: ['b1.u2'] },
       ] },
       { id: 'b1.m4', level: 'B1', title: 'Vida cotidiana', description: 'Resolver a vida em alemão.', units: [
-        { id: 'b1.u7', title: 'Vida cotidiana', phraseIds: [], wordIds: [], competencies: ['b1.live_daily'], prerequisites: ['b1.u3', 'b1.u5'] },
+        { id: 'b1.u7', title: 'Vida cotidiana', phraseIds: ['b1-daily-erledigt', 'b1-daily-termin', 'b1-daily-passt'], wordIds: [], competencies: ['b1.live_daily'], prerequisites: ['b1.u3', 'b1.u5'] },
       ] },
     ],
   },
@@ -120,61 +120,77 @@ export const COURSE_LEVELS: CourseLevel[] = [
     id: 'B2', label: 'B2', cefr: 'B2', emoji: '🟠',
     objective: 'Fluência funcional.',
     germanPercentage: 95,
-    competencies: ['b2.argue', 'b2.disagree', 'b2.current_affairs', 'b2.work_pro', 'b2.fluent'],
+    competencies: ['b2.narrative', 'b2.cause_effect', 'b2.argue', 'b2.compare', 'b2.problems_solutions', 'b2.work_pro', 'b2.defend', 'b2.fluent'],
     grammar: ['g.b2.konjunktiv', 'g.b2.passiv', 'g.b2.connectors'],
     realWorldScenario: 'Negociação',
     modules: [
-      { id: 'b2.m1', level: 'B2', title: 'Argumentação', description: 'Debater e defender ideias.', units: [
-        { id: 'b2.u1', title: 'Argumentar', phraseIds: [], wordIds: [], competencies: ['b2.argue'], prerequisites: [] },
-        { id: 'b2.u2', title: 'Discordar com tato', phraseIds: [], wordIds: [], competencies: ['b2.disagree'], prerequisites: ['b2.u1'] },
+      { id: 'b2.m1', level: 'B2', title: 'Narrativa e causalidade', description: 'Experiências, causas e consequências.', units: [
+        { id: 'b2.u1', title: 'Narrar experiências', phraseIds: ['b2-narrative-erfahrung', 'b2-narrative-damals', 'b2-narrative-rueckblick'], wordIds: [], competencies: ['b2.narrative'], prerequisites: [] },
+        { id: 'b2.u2', title: 'Causas e consequências', phraseIds: ['b2-cause-dadurch', 'b2-cause-waere', 'b2-cause-folglich'], wordIds: [], competencies: ['b2.cause_effect'], prerequisites: ['b2.u1'] },
       ] },
-      { id: 'b2.m2', level: 'B2', title: 'Atualidades e trabalho', description: 'Debater sociedade e trabalho.', units: [
-        { id: 'b2.u3', title: 'Atualidades', phraseIds: [], wordIds: [], competencies: ['b2.current_affairs'], prerequisites: ['b2.u1'] },
-        { id: 'b2.u4', title: 'Alemão profissional', phraseIds: [], wordIds: [], competencies: ['b2.work_pro'], prerequisites: ['b2.u1'] },
+      { id: 'b2.m2', level: 'B2', title: 'Argumentação e comparação', description: 'Opinião, contraste e avaliação.', units: [
+        { id: 'b2.u3', title: 'Opinião e argumentação', phraseIds: ['b2-argue-auffassung', 'b2-argue-dagegen', 'b2-argue-laesst'], wordIds: [], competencies: ['b2.argue'], prerequisites: ['b2.u2'] },
+        { id: 'b2.u4', title: 'Comparar opções', phraseIds: ['b2-compare-optionen', 'b2-compare-vorteile', 'b2-compare-abwaegen'], wordIds: [], competencies: ['b2.compare'], prerequisites: ['b2.u3'] },
       ] },
-      { id: 'b2.m3', level: 'B2', title: 'Fluência', description: 'Conversas longas com naturalidade.', units: [
-        { id: 'b2.u5', title: 'Fluência funcional', phraseIds: [], wordIds: [], competencies: ['b2.fluent'], prerequisites: ['b2.u2', 'b2.u3'] },
+      { id: 'b2.m3', level: 'B2', title: 'Soluções e trabalho', description: 'Problemas, soluções e temas profissionais.', units: [
+        { id: 'b2.u5', title: 'Problemas e soluções', phraseIds: ['b2-solve-problem', 'b2-solve-vorschlag', 'b2-solve-schritt'], wordIds: [], competencies: ['b2.problems_solutions'], prerequisites: ['b2.u2'] },
+        { id: 'b2.u6', title: 'Profissional e cotidiano', phraseIds: ['b2-work-optionen', 'b2-work-kompromiss', 'b2-work-verhandelbar'], wordIds: [], competencies: ['b2.work_pro'], prerequisites: ['b2.u3'] },
+      ] },
+      { id: 'b2.m4', level: 'B2', title: 'Defesa e espontaneidade', description: 'Justificar posições e conversar com autonomia.', units: [
+        { id: 'b2.u7', title: 'Defender posições', phraseIds: ['b2-defend-entscheidung', 'b2-defend-widersprechen', 'b2-defend-halten'], wordIds: [], competencies: ['b2.defend'], prerequisites: ['b2.u4'] },
+        { id: 'b2.u8', title: 'Conversação espontânea', phraseIds: ['b2-fluent-ehrlich', 'b2-fluent-hoere', 'b2-fluent-sinn'], wordIds: [], competencies: ['b2.fluent'], prerequisites: ['b2.u6', 'b2.u7'] },
       ] },
     ],
   },
   {
     id: 'C1', label: 'C1', cefr: 'C1', emoji: '🔴',
-    objective: 'Alemão avançado.',
+    objective: 'Comunicação avançada e independente.',
     germanPercentage: 100,
-    competencies: ['c1.nuance', 'c1.academic', 'c1.subtext', 'c1.register', 'c1.debates'],
+    competencies: ['c1.nuance', 'c1.argue', 'c1.debate', 'c1.hypothesis', 'c1.register', 'c1.abstract', 'c1.negotiate', 'c1.spontaneous'],
     grammar: ['g.c1.nominal', 'g.c1.partizip'],
-    realWorldScenario: 'Apresentação',
+    realWorldScenario: 'Debate e negociação',
     modules: [
-      { id: 'c1.m1', level: 'C1', title: 'Nuances e registro', description: 'Formal, informal, ironia.', units: [
-        { id: 'c1.u1', title: 'Nuances', phraseIds: [], wordIds: [], competencies: ['c1.nuance'], prerequisites: [] },
-        { id: 'c1.u2', title: 'Adaptar registro', phraseIds: [], wordIds: [], competencies: ['c1.register'], prerequisites: ['c1.u1'] },
+      { id: 'c1.m1', level: 'C1', title: 'Nuance e argumentação', description: 'Reformulação e argumentos complexos.', units: [
+        { id: 'c1.u1', title: 'Nuance e reformulação', phraseIds: ['c1-nuance-perspektive', 'c1-nuance-anders', 'c1-nuance-nuance'], wordIds: [], competencies: ['c1.nuance'], prerequisites: [] },
+        { id: 'c1.u2', title: 'Argumentação complexa', phraseIds: ['c1-argue-zwar', 'c1-argue-grundlage', 'c1-argue-folgerung'], wordIds: [], competencies: ['c1.argue'], prerequisites: ['c1.u1'] },
       ] },
-      { id: 'c1.m2', level: 'C1', title: 'Acadêmico e subtexto', description: 'Conceitos complexos e ironia.', units: [
-        { id: 'c1.u3', title: 'Linguagem acadêmica', phraseIds: [], wordIds: [], competencies: ['c1.academic'], prerequisites: ['c1.u1'] },
-        { id: 'c1.u4', title: 'Captar subtexto', phraseIds: [], wordIds: [], competencies: ['c1.subtext'], prerequisites: ['c1.u1'] },
+      { id: 'c1.m2', level: 'C1', title: 'Debate e hipóteses', description: 'Contra-argumentação e cenários.', units: [
+        { id: 'c1.u3', title: 'Debate e contra-argumentação', phraseIds: ['c1-debate-einwand', 'c1-debate-entkraeftet', 'c1-debate-differenzieren'], wordIds: [], competencies: ['c1.debate'], prerequisites: ['c1.u2'] },
+        { id: 'c1.u4', title: 'Hipóteses e cenários', phraseIds: ['c1-hyp-angenommen', 'c1-hyp-waere', 'c1-hyp-szenario'], wordIds: [], competencies: ['c1.hypothesis'], prerequisites: ['c1.u2'] },
       ] },
-      { id: 'c1.m3', level: 'C1', title: 'Debates', description: 'Debates rápidos e densos.', units: [
-        { id: 'c1.u5', title: 'Participar de debates', phraseIds: [], wordIds: [], competencies: ['c1.debates'], prerequisites: ['c1.u3'] },
+      { id: 'c1.m3', level: 'C1', title: 'Registro e abstração', description: 'Comunicação profissional e temas sociais.', units: [
+        { id: 'c1.u5', title: 'Registro e comunicação profissional', phraseIds: ['c1-reg-formal', 'c1-reg-informal', 'c1-reg-neutral'], wordIds: [], competencies: ['c1.register'], prerequisites: ['c1.u1'] },
+        { id: 'c1.u6', title: 'Temas abstratos e sociais', phraseIds: ['c1-abs-gesellschaft', 'c1-abs-verantwortung', 'c1-abs-spannung'], wordIds: [], competencies: ['c1.abstract'], prerequisites: ['c1.u3', 'c1.u4'] },
+      ] },
+      { id: 'c1.m4', level: 'C1', title: 'Negociação e espontaneidade', description: 'Conflitos e discurso avançado.', units: [
+        { id: 'c1.u7', title: 'Negociação e resolução de conflitos', phraseIds: ['c1-neg-interesse', 'c1-neg-kompromiss', 'c1-neg-entspannen'], wordIds: [], competencies: ['c1.negotiate'], prerequisites: ['c1.u5', 'c1.u3'] },
+        { id: 'c1.u8', title: 'Conversação avançada espontânea', phraseIds: ['c1-spon-ehrlich', 'c1-spon-anschluss', 'c1-spon-fazit'], wordIds: [], competencies: ['c1.spontaneous'], prerequisites: ['c1.u6', 'c1.u7'] },
       ] },
     ],
   },
   {
     id: 'C2', label: 'C2', cefr: 'C2', emoji: '⚫',
-    objective: 'Domínio avançado.',
+    objective: 'Domínio pleno com nuance, inferência e persuasão.',
     germanPercentage: 100,
-    competencies: ['c2.mastery', 'c2.humor', 'c2.dialect', 'c2.style'],
+    competencies: ['c2.nuance', 'c2.argue', 'c2.discourse', 'c2.inference', 'c2.register', 'c2.mediate', 'c2.critical', 'c2.fluent'],
     grammar: ['g.c2.register'],
-    realWorldScenario: 'Debate complexo',
+    realWorldScenario: 'Debate complexo e mediação',
     modules: [
-      { id: 'c2.m1', level: 'C2', title: 'Domínio pleno', description: 'Naturalidade, estilo, registro.', units: [
-        { id: 'c2.u1', title: 'Domínio', phraseIds: [], wordIds: [], competencies: ['c2.mastery'], prerequisites: [] },
+      { id: 'c2.m1', level: 'C2', title: 'Nuance e argumentação', description: 'Precisão semântica e argumentos sofisticados.', units: [
+        { id: 'c2.u1', title: 'Nuance extrema e precisão', phraseIds: ['c2-nuance-ambivalent', 'c2-nuance-nuancenreich', 'c2-nuance-praezise'], wordIds: [], competencies: ['c2.nuance'], prerequisites: [] },
+        { id: 'c2.u2', title: 'Argumentação sofisticada', phraseIds: ['c2-argue-vorbehalt', 'c2-argue-mehrschichtig', 'c2-argue-zugestaendnis'], wordIds: [], competencies: ['c2.argue'], prerequisites: ['c2.u1'] },
       ] },
-      { id: 'c2.m2', level: 'C2', title: 'Humor e sotaques', description: 'Ironia, dialetos, fala regional.', units: [
-        { id: 'c2.u2', title: 'Humor e ironia', phraseIds: [], wordIds: [], competencies: ['c2.humor'], prerequisites: ['c2.u1'] },
-        { id: 'c2.u3', title: 'Sotaques e dialetos', phraseIds: [], wordIds: [], competencies: ['c2.dialect'], prerequisites: ['c2.u1'] },
+      { id: 'c2.m2', level: 'C2', title: 'Discurso e interpretação', description: 'Sustentação de ideias e inferência.', units: [
+        { id: 'c2.u3', title: 'Discurso estruturado', phraseIds: ['c2-disc-aufbau', 'c2-disc-roterfaden', 'c2-disc-schluss'], wordIds: [], competencies: ['c2.discourse'], prerequisites: ['c2.u2'] },
+        { id: 'c2.u4', title: 'Implicação e interpretação', phraseIds: ['c2-inf-implizit', 'c2-inf-deuten', 'c2-inf-ableiten'], wordIds: [], competencies: ['c2.inference'], prerequisites: ['c2.u1'] },
       ] },
-      { id: 'c2.m3', level: 'C2', title: 'Estilo e escrita', description: 'Produção sofisticada.', units: [
-        { id: 'c2.u4', title: 'Estilo e escrita', phraseIds: [], wordIds: [], competencies: ['c2.style'], prerequisites: ['c2.u1'] },
+      { id: 'c2.m3', level: 'C2', title: 'Registro e mediação', description: 'Estilo, adequação e persuasão.', units: [
+        { id: 'c2.u5', title: 'Registro, estilo e adequação', phraseIds: ['c2-reg-formell', 'c2-reg-umgang', 'c2-reg-wechseln'], wordIds: [], competencies: ['c2.register'], prerequisites: ['c2.u1'] },
+        { id: 'c2.u6', title: 'Negociação, mediação e persuasão', phraseIds: ['c2-med-interessen', 'c2-med-bruecke', 'c2-med-persuasion'], wordIds: [], competencies: ['c2.mediate'], prerequisites: ['c2.u2', 'c2.u5'] },
+      ] },
+      { id: 'c2.m4', level: 'C2', title: 'Crítica e fluência', description: 'Pensamento crítico e comunicação espontânea.', units: [
+        { id: 'c2.u7', title: 'Abstração e pensamento crítico', phraseIds: ['c2-crit-begriff', 'c2-crit-widerspruch', 'c2-crit-reflexion'], wordIds: [], competencies: ['c2.critical'], prerequisites: ['c2.u4', 'c2.u3'] },
+        { id: 'c2.u8', title: 'Fluência avançada espontânea', phraseIds: ['c2-flu-spontan', 'c2-flu-anpassen', 'c2-flu-abschluss'], wordIds: [], competencies: ['c2.fluent'], prerequisites: ['c2.u6', 'c2.u7'] },
       ] },
     ],
   },

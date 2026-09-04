@@ -55,7 +55,7 @@ export function vocabByDomain(domain: string): VocabEntry[] {
 }
 
 export function vocabUpToBand(band: CurriculumBand): VocabEntry[] {
-  const order = ['L0', 'A1', 'A1+', 'A2', 'B1', 'B2'];
+  const order = ['L0', 'A1', 'A1+', 'A2', 'B1', 'B2', 'C1', 'C2'];
   const max = order.indexOf(band);
   return VOCABULARY.filter((v) => order.indexOf(v.band) <= max);
 }

@@ -11,7 +11,7 @@ import {
 import type { CourseLevelId, GrammarTopic } from '@/services/course/types';
 import type { CurriculumBand, GrammarRule } from './Types';
 
-const BAND_ORDER: CurriculumBand[] = ['L0', 'A1', 'A1+', 'A2', 'B1', 'B2'];
+const BAND_ORDER: CurriculumBand[] = ['L0', 'A1', 'A1+', 'A2', 'B1', 'B2', 'C1', 'C2'];
 
 /** Enriquecimento pedagógico por id do curso — não é segunda fonte de conteúdo. */
 const PEDAGOGICAL_ENRICHMENT: Record<
@@ -108,7 +108,9 @@ export function courseLevelToBand(level: CourseLevelId): CurriculumBand {
   if (level === 'A1') return 'A1';
   if (level === 'A2') return 'A2';
   if (level === 'B1') return 'B1';
-  if (level === 'B2' || level === 'C1' || level === 'C2') return 'B2';
+  if (level === 'B2') return 'B2';
+  if (level === 'C1') return 'C1';
+  if (level === 'C2') return 'C2';
   return 'L0';
 }
 
@@ -123,7 +125,9 @@ export function courseLevelsUpToBand(band: CurriculumBand): CourseLevelId[] {
   }
   if (max >= bandIndex('A2')) levels.push('A2');
   if (max >= bandIndex('B1')) levels.push('B1');
-  if (max >= bandIndex('B2')) levels.push('B2', 'C1', 'C2');
+  if (max >= bandIndex('B2')) levels.push('B2');
+  if (max >= bandIndex('C1')) levels.push('C1');
+  if (max >= bandIndex('C2')) levels.push('C2');
   return levels;
 }
 

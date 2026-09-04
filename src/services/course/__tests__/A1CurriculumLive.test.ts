@@ -149,8 +149,11 @@ async function main() {
   check('unit phraseIds exist', LEVEL_BY_ID.A1.modules.every((m) =>
     m.units.every((u) => u.phraseIds.every((id) => isA1TargetId(id))),
   ));
-  check('B1+ curriculum blocked', isHigherLevelCurriculumBlocked('B1'));
+  check('B2 unlocked (executable)', !isHigherLevelCurriculumBlocked('B2'));
+  check('B1 curriculum NOT blocked', !isHigherLevelCurriculumBlocked('B1'));
   check('A2 curriculum NOT blocked', !isHigherLevelCurriculumBlocked('A2'));
+  check('C1 unlocked', !isHigherLevelCurriculumBlocked('C1'));
+  check('C2 unlocked', !isHigherLevelCurriculumBlocked('C2'));
 
   console.log('\n=== A1 planner (no L0 regression) ===');
   _store.clear();
@@ -329,7 +332,10 @@ async function main() {
     check('A1→A2 via LevelAssessment gate', grad2.progress?.currentLevel === 'A2');
   }
   check('A2 unlocked (not higher-blocked)', !isHigherLevelCurriculumBlocked('A2'));
-  check('B1 still blocked', isHigherLevelCurriculumBlocked('B1'));
+  check('B1 unlocked (executable)', !isHigherLevelCurriculumBlocked('B1'));
+  check('B2 unlocked (executable)', !isHigherLevelCurriculumBlocked('B2'));
+  check('C1 unlocked', !isHigherLevelCurriculumBlocked('C1'));
+  check('C2 unlocked', !isHigherLevelCurriculumBlocked('C2'));
   const { mergeA2CurriculumPhrases, isA2TargetId: isA2Id } = await import('@/services/course/A2Curriculum');
   const planA2 = buildConversationPlan(
     { ...profileA1(), level: 'basic', diagnosticLevel: 'A2' },

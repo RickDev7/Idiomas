@@ -16,7 +16,9 @@ export type OpeningStrategy =
   | 'advance'
   | 'natural'
   /** Home / Meus Chunks / Estrutura — target explícito do usuário. */
-  | 'selected_target';
+  | 'selected_target'
+  /** Planner curricular A1–B2 sem startPhraseId — vence first_intro. */
+  | 'planned_curricular';
 
 export type SessionStatus = 'CREATED' | 'ACTIVE' | 'PAUSED' | 'COMPLETED' | 'ABANDONED';
 
@@ -122,6 +124,15 @@ export interface SessionContext {
   sessionKind: SessionKind;
 }
 
+/** Target planejado pelo currículo ativo (A1–B2). Não inclui L0. */
+export interface PlannedCurricularOpening {
+  id: string;
+  german: string;
+  portuguese: string;
+  topic?: string;
+  reason?: string;
+}
+
 export interface OpeningContext {
   sessionCount: number;
   lastSession: LastSessionSummary | null;
@@ -135,4 +146,9 @@ export interface OpeningContext {
   incomplete?: LearningSession | null;
   /** Fase 11 — abertura curta / continuidade L0 */
   zeroLanguageMode?: boolean;
+  /**
+   * Target do planner curricular (a1-/a2-/b1-/b2-).
+   * Tem prioridade sobre first_intro e continuidade genérica.
+   */
+  plannedCurricularTarget?: PlannedCurricularOpening | null;
 }
