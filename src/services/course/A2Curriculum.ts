@@ -1,6 +1,6 @@
 /**
- * A1_CURRICULUM — fonte única executável do nível A1.
- * Não duplica frases: deriva de CURATED + units em levels.ts.
+ * A2_CURRICULUM — fonte única executável do nível A2.
+ * Espelha A1Curriculum; não duplica frases (deriva de CURATED + units).
  */
 import type { Phrase } from '@/types';
 import type { PhraseConfidence, UserLearningProfile } from '@/services/learning/ConfidenceService';
@@ -10,9 +10,9 @@ import { CURATED } from './content';
 import { LEVEL_BY_ID } from './levels';
 import { COMPETENCY_BY_ID } from './competencies';
 
-export interface A1Target {
+export interface A2Target {
   id: string;
-  level: 'A1';
+  level: 'A2';
   unitId: string;
   competencyId: string;
   german: string;
@@ -22,17 +22,17 @@ export interface A1Target {
   category: string;
 }
 
-function buildA1Targets(): A1Target[] {
-  const out: A1Target[] = [];
-  for (const block of CURATED.filter((c) => c.level === 'A1')) {
+function buildA2Targets(): A2Target[] {
+  const out: A2Target[] = [];
+  for (const block of CURATED.filter((c) => c.level === 'A2')) {
     const category = block.categories[0] ?? 'daily';
     block.core.forEach((phrase, idx) => {
       if (!phrase.id || !phrase.unitId) {
-        throw new Error(`A1 curated phrase missing id/unitId: ${phrase.german}`);
+        throw new Error(`A2 curated phrase missing id/unitId: ${phrase.german}`);
       }
       out.push({
         id: phrase.id,
-        level: 'A1',
+        level: 'A2',
         unitId: phrase.unitId,
         competencyId: block.competencyId,
         german: phrase.german,
@@ -46,43 +46,41 @@ function buildA1Targets(): A1Target[] {
   return out.sort((a, b) => a.order - b.order);
 }
 
-/** Registry canônico A1 (ordem curricular). */
-export const A1_CURRICULUM: A1Target[] = buildA1Targets();
+export const A2_CURRICULUM: A2Target[] = buildA2Targets();
 
-const BY_ID = new Map(A1_CURRICULUM.map((t) => [t.id, t]));
+const BY_ID = new Map(A2_CURRICULUM.map((t) => [t.id, t]));
 
-export function getA1Targets(): A1Target[] {
-  return A1_CURRICULUM;
+export function getA2Targets(): A2Target[] {
+  return A2_CURRICULUM;
 }
 
-export function getA1TargetById(id: string): A1Target | undefined {
+export function getA2TargetById(id: string): A2Target | undefined {
   return BY_ID.get(id);
 }
 
-export function getA1TargetsByUnit(unitId: string): A1Target[] {
-  return A1_CURRICULUM.filter((t) => t.unitId === unitId);
+export function getA2TargetsByUnit(unitId: string): A2Target[] {
+  return A2_CURRICULUM.filter((t) => t.unitId === unitId);
 }
 
-export function getA1TargetsByCompetency(competencyId: string): A1Target[] {
-  return A1_CURRICULUM.filter((t) => t.competencyId === competencyId);
+export function getA2TargetsByCompetency(competencyId: string): A2Target[] {
+  return A2_CURRICULUM.filter((t) => t.competencyId === competencyId);
 }
 
-export function isA1TargetId(id: string | null | undefined): boolean {
+export function isA2TargetId(id: string | null | undefined): boolean {
   return !!id && BY_ID.has(id);
 }
 
-export function a1UnitIdsInOrder(): string[] {
-  const units = LEVEL_BY_ID.A1.modules.flatMap((m) => m.units);
+export function a2UnitIdsInOrder(): string[] {
+  const units = LEVEL_BY_ID.A2.modules.flatMap((m) => m.units);
   return units.map((u) => u.id);
 }
 
-export function a1FirstTarget(): A1Target {
-  return A1_CURRICULUM[0];
+export function a2FirstTarget(): A2Target {
+  return A2_CURRICULUM[0];
 }
 
-/** Seeds Phrase[] para o pool Live (sem depender do IndexedDB). */
-export function a1CurriculumSeedPhrases(): Phrase[] {
-  return A1_CURRICULUM.map((t) => ({
+export function a2CurriculumSeedPhrases(): Phrase[] {
+  return A2_CURRICULUM.map((t) => ({
     id: t.id,
     german: t.german,
     portuguese: t.portuguese,
@@ -99,14 +97,12 @@ export function a1CurriculumSeedPhrases(): Phrase[] {
   }));
 }
 
-/** Mescla seeds A1 no pool sem duplicar IDs. */
-export function mergeA1CurriculumPhrases(existing: Phrase[]): Phrase[] {
+export function mergeA2CurriculumPhrases(existing: Phrase[]): Phrase[] {
   const byId = new Map(existing.map((p) => [p.id, p]));
-  for (const seed of a1CurriculumSeedPhrases()) {
+  for (const seed of a2CurriculumSeedPhrases()) {
     if (!byId.has(seed.id)) byId.set(seed.id, seed);
   }
-  // Preferir seeds A1 para IDs canônicos (texto/categoria corretos)
-  for (const seed of a1CurriculumSeedPhrases()) {
+  for (const seed of a2CurriculumSeedPhrases()) {
     const cur = byId.get(seed.id);
     if (cur) {
       byId.set(seed.id, {
@@ -121,10 +117,10 @@ export function mergeA1CurriculumPhrases(existing: Phrase[]): Phrase[] {
   return [...byId.values()];
 }
 
-/** Pool exclusivo A1 (nunca l0-*). */
-export function a1PhrasePool(existing: Phrase[] = []): Phrase[] {
-  const merged = mergeA1CurriculumPhrases(existing);
-  const ids = new Set(A1_CURRICULUM.map((t) => t.id));
+/** Pool exclusivo A2 (nunca l0-* / a1-*). */
+export function a2PhrasePool(existing: Phrase[] = []): Phrase[] {
+  const merged = mergeA2CurriculumPhrases(existing);
+  const ids = new Set(A2_CURRICULUM.map((t) => t.id));
   return merged.filter((p) => ids.has(p.id));
 }
 
@@ -141,23 +137,19 @@ function isDeferred(conf: PhraseConfidence | undefined): boolean {
   return !!conf.needsHelp && (conf.timesProduced ?? 0) > (conf.timesCorrect ?? 0) + 1;
 }
 
-/**
- * Próximo target curricular A1.
- * Respeita ordem, unidade, mastery, deferred; nunca devolve l0-*.
- */
-export function getNextA1Target(
+export function getNextA2Target(
   currentTargetId: string | null | undefined,
   learning: UserLearningProfile,
   opts?: { excludePhraseId?: string | null; skipPhraseIds?: string[] | null },
-): A1Target | null {
+): A2Target | null {
   const skip = new Set<string>(opts?.skipPhraseIds ?? []);
   if (opts?.excludePhraseId) skip.add(opts.excludePhraseId);
   if (currentTargetId) skip.add(currentTargetId);
 
-  const ordered = A1_CURRICULUM;
+  const ordered = A2_CURRICULUM;
   const current = currentTargetId ? BY_ID.get(currentTargetId) : undefined;
 
-  const pickFirstOpen = (candidates: A1Target[]): A1Target | null => {
+  const pickFirstOpen = (candidates: A2Target[]): A2Target | null => {
     for (const t of candidates) {
       if (skip.has(t.id)) continue;
       const conf = learning.phrases[t.id];
@@ -168,30 +160,26 @@ export function getNextA1Target(
     return null;
   };
 
-  // 1) Continuar na unidade atual
   if (current) {
-    const sameUnit = getA1TargetsByUnit(current.unitId).filter((t) => t.order > current.order);
+    const sameUnit = getA2TargetsByUnit(current.unitId).filter((t) => t.order > current.order);
     const nextInUnit = pickFirstOpen(sameUnit);
     if (nextInUnit) return nextInUnit;
   }
 
-  // 2) Próxima unidade na ordem do currículo
-  const unitOrder = a1UnitIdsInOrder();
+  const unitOrder = a2UnitIdsInOrder();
   const startUnitIdx = current ? Math.max(0, unitOrder.indexOf(current.unitId)) : 0;
   for (let i = startUnitIdx; i < unitOrder.length; i++) {
-    const unitTargets = getA1TargetsByUnit(unitOrder[i]);
+    const unitTargets = getA2TargetsByUnit(unitOrder[i]);
     const open = pickFirstOpen(unitTargets);
     if (open) return open;
   }
 
-  // 3) Qualquer A1 ainda aberto (incluindo deferred se nada mais restar)
   for (const t of ordered) {
     if (skip.has(t.id)) continue;
     if (!isReadyForAdvance(learning.phrases[t.id])) return t;
   }
 
-  // 4) Currículo completo — reforço do mais fraco (ainda A1)
-  let weakest: A1Target | null = null;
+  let weakest: A2Target | null = null;
   let weakestScore = Infinity;
   for (const t of ordered) {
     if (skip.has(t.id)) continue;
@@ -205,14 +193,14 @@ export function getNextA1Target(
   return weakest;
 }
 
-export function pickA1PlannerTarget(
+export function pickA2PlannerTarget(
   learning: UserLearningProfile,
   phrases: Phrase[],
   opts?: { excludePhraseId?: string | null; skipPhraseIds?: string[] | null; stickPhraseId?: string | null },
 ): { conf: PhraseConfidence | undefined; phrase: Phrase | null; action: 'introduce' | 'practice' | 'recall' | 'converse' } {
-  const pool = a1PhrasePool(phrases);
+  const pool = a2PhrasePool(phrases);
 
-  if (opts?.stickPhraseId && isA1TargetId(opts.stickPhraseId)) {
+  if (opts?.stickPhraseId && isA2TargetId(opts.stickPhraseId)) {
     const stuck = pool.find((p) => p.id === opts.stickPhraseId) ?? null;
     if (stuck) {
       const conf = learning.phrases[stuck.id];
@@ -226,41 +214,39 @@ export function pickA1PlannerTarget(
     }
   }
 
-  const next = getNextA1Target(null, learning, opts);
+  const next = getNextA2Target(null, learning, opts);
   if (!next) {
     return { conf: undefined, phrase: pool[0] ?? null, action: 'converse' };
   }
   const phrase = pool.find((p) => p.id === next.id) ?? {
-    ...a1CurriculumSeedPhrases().find((p) => p.id === next.id)!,
+    ...a2CurriculumSeedPhrases().find((p) => p.id === next.id)!,
   };
   const conf = learning.phrases[next.id];
   let action: 'introduce' | 'practice' | 'recall' | 'converse' = 'introduce';
   if (!conf || (conf.timesCorrect ?? 0) === 0) action = 'introduce';
   else if (conf.needsHelp || conf.confidence < 40) action = 'practice';
   else if (conf.nextReview && Date.parse(conf.nextReview) <= Date.now()) action = 'recall';
-  else if (isReadyForAdvance(conf)) action = 'converse';
+  else if (isReadyForAdvance(conf) && (conf.timesCorrect ?? 0) >= 3) action = 'converse';
   else action = 'practice';
 
   return { conf, phrase, action };
 }
 
-/** Unidade A1 está completa quando todos os targets estão prontos para avanço. */
-export function isA1UnitComplete(unitId: string, learning: UserLearningProfile): boolean {
-  const targets = getA1TargetsByUnit(unitId);
+export function isA2UnitComplete(unitId: string, learning: UserLearningProfile): boolean {
+  const targets = getA2TargetsByUnit(unitId);
   if (targets.length === 0) return false;
   return targets.every((t) => isReadyForAdvance(learning.phrases[t.id]));
 }
 
-/** Currículo A1 completo (evidência de produção, não só exposição). */
-export function isA1CurriculumComplete(learning: UserLearningProfile): boolean {
-  return A1_CURRICULUM.every((t) => isReadyForAdvance(learning.phrases[t.id]));
+export function isA2CurriculumComplete(learning: UserLearningProfile): boolean {
+  return A2_CURRICULUM.every((t) => isReadyForAdvance(learning.phrases[t.id]));
 }
 
-export function a1CompetencyMasteryFromLearning(
+export function a2CompetencyMasteryFromLearning(
   competencyId: string,
   learning: UserLearningProfile,
 ): number {
-  const targets = getA1TargetsByCompetency(competencyId);
+  const targets = getA2TargetsByCompetency(competencyId);
   if (targets.length === 0) return 0;
   let sum = 0;
   for (const t of targets) {
@@ -274,9 +260,9 @@ export function a1CompetencyMasteryFromLearning(
   return Math.round(sum / targets.length);
 }
 
-export function assertA1CurriculumIntegrity(): { ok: boolean; errors: string[] } {
+export function assertA2CurriculumIntegrity(): { ok: boolean; errors: string[] } {
   const errors: string[] = [];
-  const units = LEVEL_BY_ID.A1.modules.flatMap((m) => m.units);
+  const units = LEVEL_BY_ID.A2.modules.flatMap((m) => m.units);
   const unitIds = new Set(units.map((u) => u.id));
   const phraseIdToUnit = new Map<string, string>();
 
@@ -286,23 +272,19 @@ export function assertA1CurriculumIntegrity(): { ok: boolean; errors: string[] }
       const target = BY_ID.get(pid);
       if (!target) errors.push(`unit ${u.id} phraseId missing target: ${pid}`);
       else if (target.unitId !== u.id) errors.push(`phrase ${pid} unit mismatch ${target.unitId} vs ${u.id}`);
-      else if (target.level !== 'A1') errors.push(`phrase ${pid} wrong level ${target.level}`);
+      else if (target.level !== 'A2') errors.push(`phrase ${pid} wrong level ${target.level}`);
       if (!COMPETENCY_BY_ID[u.competencies[0]]) errors.push(`unit ${u.id} bad competency`);
     }
   }
 
-  for (const t of A1_CURRICULUM) {
+  for (const t of A2_CURRICULUM) {
     if (!unitIds.has(t.unitId)) errors.push(`target ${t.id} invalid unit ${t.unitId}`);
     if (!phraseIdToUnit.has(t.id)) errors.push(`target ${t.id} not listed in any unit phraseIds`);
-    if (t.level !== 'A1') errors.push(`target ${t.id} level=${t.level}`);
+    if (t.level !== 'A2') errors.push(`target ${t.id} level=${t.level}`);
+    if (!t.id.startsWith('a2-')) errors.push(`target ${t.id} must start with a2-`);
     if (!COMPETENCY_BY_ID[t.competencyId]) errors.push(`target ${t.id} bad competency ${t.competencyId}`);
   }
 
-  if (A1_CURRICULUM.length === 0) errors.push('no A1 targets');
+  if (A2_CURRICULUM.length === 0) errors.push('no A2 targets');
   return { ok: errors.length === 0, errors };
-}
-
-/** B1+ ainda sem currículo executável (A2 está ativo via A2Curriculum). */
-export function isHigherLevelCurriculumBlocked(level: string): boolean {
-  return level === 'B1' || level === 'B2' || level === 'C1' || level === 'C2';
 }

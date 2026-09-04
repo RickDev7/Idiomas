@@ -108,34 +108,34 @@ export const CURATED: CompetencyContent[] = [
 
   // ---------------- A2 ----------------
   { competencyId: 'a2.past', level: 'A2', categories: ['daily'], core: [
-    { german: 'Ich habe gestern gearbeitet.', portuguese: 'Eu trabalhei ontem.' },
-    { german: 'Wir waren im Kino.', portuguese: 'Fomos ao cinema.' },
-    { german: 'Was hast du gemacht?', portuguese: 'O que você fez?' },
+    { id: 'a2-past-gearbeitet', unitId: 'a2.u1', order: 1, type: 'statement', german: 'Ich habe gestern gearbeitet.', portuguese: 'Eu trabalhei ontem.' },
+    { id: 'a2-past-kino', unitId: 'a2.u1', order: 2, type: 'statement', german: 'Wir waren im Kino.', portuguese: 'Fomos ao cinema.' },
+    { id: 'a2-past-gemacht', unitId: 'a2.u1', order: 3, type: 'question', german: 'Was hast du gemacht?', portuguese: 'O que você fez?' },
   ] },
   { competencyId: 'a2.plans', level: 'A2', categories: ['daily'], core: [
-    { german: 'Morgen werde ich …', portuguese: 'Amanhã eu vou …' },
-    { german: 'Ich plane, …', portuguese: 'Eu planejo …' },
-    { german: 'Nächstes Jahr möchte ich reisen.', portuguese: 'No próximo ano quero viajar.' },
+    { id: 'a2-plans-werde', unitId: 'a2.u2', order: 4, type: 'statement', german: 'Morgen werde ich …', portuguese: 'Amanhã eu vou …' },
+    { id: 'a2-plans-plane', unitId: 'a2.u2', order: 5, type: 'statement', german: 'Ich plane, …', portuguese: 'Eu planejo …' },
+    { id: 'a2-plans-reisen', unitId: 'a2.u2', order: 6, type: 'statement', german: 'Nächstes Jahr möchte ich reisen.', portuguese: 'No próximo ano quero viajar.' },
   ] },
   { competencyId: 'a2.problem', level: 'A2', categories: ['health', 'work'], core: [
-    { german: 'Mir geht es nicht gut.', portuguese: 'Não estou me sentindo bem.' },
-    { german: 'Ich habe ein Problem mit …', portuguese: 'Tenho um problema com …' },
-    { german: 'Die Wohnung ist zu klein.', portuguese: 'O apartamento é pequeno demais.' },
+    { id: 'a2-problem-nicht-gut', unitId: 'a2.u3', order: 7, type: 'statement', german: 'Mir geht es nicht gut.', portuguese: 'Não estou me sentindo bem.' },
+    { id: 'a2-problem-mit', unitId: 'a2.u3', order: 8, type: 'statement', german: 'Ich habe ein Problem mit …', portuguese: 'Tenho um problema com …' },
+    { id: 'a2-problem-wohnung', unitId: 'a2.u3', order: 9, type: 'statement', german: 'Die Wohnung ist zu klein.', portuguese: 'O apartamento é pequeno demais.' },
   ] },
   { competencyId: 'a2.opinion', level: 'A2', categories: ['social'], core: [
-    { german: 'Ich finde das gut.', portuguese: 'Eu acho isso bom.' },
-    { german: 'Meiner Meinung nach …', portuguese: 'Na minha opinião …' },
-    { german: 'Ich mag … lieber.', portuguese: 'Eu prefiro …' },
+    { id: 'a2-opinion-finde', unitId: 'a2.u4', order: 10, type: 'statement', german: 'Ich finde das gut.', portuguese: 'Eu acho isso bom.' },
+    { id: 'a2-opinion-meinung', unitId: 'a2.u4', order: 11, type: 'statement', german: 'Meiner Meinung nach …', portuguese: 'Na minha opinião …' },
+    { id: 'a2-opinion-lieber', unitId: 'a2.u4', order: 12, type: 'statement', german: 'Ich mag … lieber.', portuguese: 'Eu prefiro …' },
   ] },
   { competencyId: 'a2.travel', level: 'A2', categories: ['travel'], core: [
-    { german: 'Ich bin nach Berlin gefahren.', portuguese: 'Eu fui para Berlim.' },
-    { german: 'Die Reise war schön.', portuguese: 'A viagem foi boa.' },
-    { german: 'Wo übernachten wir?', portuguese: 'Onde vamos dormir?' },
+    { id: 'a2-travel-berlin', unitId: 'a2.u5', order: 13, type: 'statement', german: 'Ich bin nach Berlin gefahren.', portuguese: 'Eu fui para Berlim.' },
+    { id: 'a2-travel-reise', unitId: 'a2.u5', order: 14, type: 'statement', german: 'Die Reise war schön.', portuguese: 'A viagem foi boa.' },
+    { id: 'a2-travel-uebernachten', unitId: 'a2.u5', order: 15, type: 'question', german: 'Wo übernachten wir?', portuguese: 'Onde vamos dormir?' },
   ] },
   { competencyId: 'a2.phone', level: 'A2', categories: ['phone'], core: [
-    { german: 'Hallo, hier ist …', portuguese: 'Olá, aqui é …' },
-    { german: 'Kann ich eine Nachricht hinterlassen?', portuguese: 'Posso deixar um recado?' },
-    { german: 'Ich rufe später an.', portuguese: 'Eu ligo mais tarde.' },
+    { id: 'a2-phone-hier-ist', unitId: 'a2.u6', order: 16, type: 'statement', german: 'Hallo, hier ist …', portuguese: 'Olá, aqui é …' },
+    { id: 'a2-phone-nachricht', unitId: 'a2.u6', order: 17, type: 'question', german: 'Kann ich eine Nachricht hinterlassen?', portuguese: 'Posso deixar um recado?' },
+    { id: 'a2-phone-spaeter', unitId: 'a2.u6', order: 18, type: 'statement', german: 'Ich rufe später an.', portuguese: 'Eu ligo mais tarde.' },
   ] },
 
   // ---------------- B1 ----------------

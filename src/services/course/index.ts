@@ -4,6 +4,7 @@ export * from './competencies';
 export * from './grammar';
 export * from './content';
 export * from './A1Curriculum';
+export * from './A2Curriculum';
 export * from './L0ToA1Graduation';
 export * from './CourseProgressEngine';
 export * from './CourseEngine';

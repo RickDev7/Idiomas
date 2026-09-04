@@ -77,16 +77,16 @@ export const COURSE_LEVELS: CourseLevel[] = [
     realWorldScenario: 'Telefonema de trabalho',
     modules: [
       { id: 'a2.m1', level: 'A2', title: 'Passado e planos', description: 'Perfekt, futuro, intenções.', units: [
-        { id: 'a2.u1', title: 'Passado', phraseIds: [], wordIds: [], competencies: ['a2.past'], prerequisites: [] },
-        { id: 'a2.u2', title: 'Planos', phraseIds: [], wordIds: [], competencies: ['a2.plans'], prerequisites: ['a2.u1'] },
+        { id: 'a2.u1', title: 'Passado', phraseIds: ['a2-past-gearbeitet', 'a2-past-kino', 'a2-past-gemacht'], wordIds: [], competencies: ['a2.past'], prerequisites: [] },
+        { id: 'a2.u2', title: 'Planos', phraseIds: ['a2-plans-werde', 'a2-plans-plane', 'a2-plans-reisen'], wordIds: [], competencies: ['a2.plans'], prerequisites: ['a2.u1'] },
       ] },
       { id: 'a2.m2', level: 'A2', title: 'Problemas e opiniões', description: 'Saúde, trabalho, moradia.', units: [
-        { id: 'a2.u3', title: 'Problemas', phraseIds: [], wordIds: [], competencies: ['a2.problem'], prerequisites: ['a2.u1'] },
-        { id: 'a2.u4', title: 'Opiniões', phraseIds: [], wordIds: [], competencies: ['a2.opinion'], prerequisites: ['a2.u2'] },
+        { id: 'a2.u3', title: 'Problemas', phraseIds: ['a2-problem-nicht-gut', 'a2-problem-mit', 'a2-problem-wohnung'], wordIds: [], competencies: ['a2.problem'], prerequisites: ['a2.u1'] },
+        { id: 'a2.u4', title: 'Opiniões', phraseIds: ['a2-opinion-finde', 'a2-opinion-meinung', 'a2-opinion-lieber'], wordIds: [], competencies: ['a2.opinion'], prerequisites: ['a2.u2'] },
       ] },
       { id: 'a2.m3', level: 'A2', title: 'Viagens e telefonemas', description: 'Viagens, serviços, telefone.', units: [
-        { id: 'a2.u5', title: 'Viagens', phraseIds: [], wordIds: [], competencies: ['a2.travel'], prerequisites: ['a2.u1'] },
-        { id: 'a2.u6', title: 'Telefonemas', phraseIds: [], wordIds: [], competencies: ['a2.phone'], prerequisites: ['a2.u3'] },
+        { id: 'a2.u5', title: 'Viagens', phraseIds: ['a2-travel-berlin', 'a2-travel-reise', 'a2-travel-uebernachten'], wordIds: [], competencies: ['a2.travel'], prerequisites: ['a2.u1'] },
+        { id: 'a2.u6', title: 'Telefonemas', phraseIds: ['a2-phone-hier-ist', 'a2-phone-nachricht', 'a2-phone-spaeter'], wordIds: [], competencies: ['a2.phone'], prerequisites: ['a2.u3'] },
       ] },
     ],
   },

@@ -29,6 +29,13 @@ import {
   isA1UnitComplete,
   a1UnitIdsInOrder,
 } from '@/services/course/A1Curriculum';
+import {
+  a2CurriculumSeedPhrases,
+  getA2Targets,
+  isA2TargetId,
+  isA2UnitComplete,
+  a2UnitIdsInOrder,
+} from '@/services/course/A2Curriculum';
 import { competenciesForLevel } from '@/services/course/competencies';
 
 const MAP_LEVELS: CourseLevelId[] = ['L0', 'A1', 'A2', 'B1', 'B2', 'C1', 'C2'];
@@ -95,6 +102,7 @@ export type RealProgressInput = {
 const phraseGerman = new Map([
   ...zeroLanguageSeedPhrases().map((p) => [p.id, p.german] as const),
   ...a1CurriculumSeedPhrases().map((p) => [p.id, p.german] as const),
+  ...a2CurriculumSeedPhrases().map((p) => [p.id, p.german] as const),
 ]);
 
 export function l0CurriculumTotals(): { baseCount: number; variationCount: number } {
@@ -200,6 +208,14 @@ function buildLevelProgress(learning: UserLearningProfile, currentLevel: CourseL
   const a1UnitsDone = a1UnitIdsInOrder().filter((u) => isA1UnitComplete(u, learning)).length;
   const a1Comps = competenciesForLevel('A1').length;
 
+  const a2Targets = getA2Targets();
+  const a2Ready = a2Targets.filter((t) => {
+    const c = learning.phrases[t.id];
+    return c && ((c.timesCorrect ?? 0) >= 2 || isMastered(c) || stateIndex(c.state) >= stateIndex('answeredAlone'));
+  }).length;
+  const a2UnitsDone = a2UnitIdsInOrder().filter((u) => isA2UnitComplete(u, learning)).length;
+  const a2Comps = competenciesForLevel('A2').length;
+
   return MAP_LEVELS.map((level) => {
     const availability = getLevelAvailability(level, currentLevel);
 
@@ -226,6 +242,22 @@ function buildLevelProgress(learning: UserLearningProfile, currentLevel: CourseL
         availability,
         progressPercent: pct,
         detail: `${a1Ready}/${a1Targets.length} targets · ${a1UnitsDone}/7 unidades · ${a1Comps} competências`,
+      };
+    }
+
+    if (level === 'A2') {
+      if (availability === 'locked') {
+        return { level, availability, progressPercent: null, detail: 'Bloqueado' };
+      }
+      if (availability === 'completed') {
+        return { level, availability, progressPercent: 100, detail: 'Concluído' };
+      }
+      const pct = a2Targets.length > 0 ? Math.round((a2Ready / a2Targets.length) * 100) : 0;
+      return {
+        level,
+        availability,
+        progressPercent: pct,
+        detail: `${a2Ready}/${a2Targets.length} targets · ${a2UnitsDone}/6 unidades · ${a2Comps} competências`,
       };
     }
 
@@ -262,7 +294,8 @@ function buildWeakAreas(learning: UserLearningProfile, limit = 5): WeakArea[] {
         L0_CHUNK_GRAPH[c.phraseId] ||
         l0ChunkBaseForPhraseId(c.phraseId) !== null;
       const inA1 = isA1TargetId(c.phraseId);
-      if (!inL0 && !inA1) return false;
+      const inA2 = isA2TargetId(c.phraseId);
+      if (!inL0 && !inA1 && !inA2) return false;
       return (
         c.needsHelp ||
         c.confidence < 40 ||

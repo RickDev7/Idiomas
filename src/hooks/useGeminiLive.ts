@@ -43,8 +43,10 @@ import {
   ConversationOrchestrator,
   SelectedStartTargetError,
   isA1LiveMode,
+  isA2LiveMode,
 } from '@/services/teacher/ConversationOrchestrator';
 import { mergeA1CurriculumPhrases } from '@/services/course/A1Curriculum';
+import { mergeA2CurriculumPhrases } from '@/services/course/A2Curriculum';
 import type { ReviewType } from '@/services/learning/ReviewEngine';
 import { readConversationTopicContext } from '@/services/teacher/ConversationTopicIntent';
 import { readSimulatorContext } from '@/services/teacher/SimulatorIntent';
@@ -553,9 +555,11 @@ export function useGeminiLive(profile: UserProfile | null): GeminiLiveUI {
       await MemoryService.ensureAutomationScores();
       const learning = await MemoryService.loadProfile(profile);
       const rawPhrases = await StorageService.getAllPhrases();
-      const phrases = isA1LiveMode(profile)
-        ? mergeA1CurriculumPhrases(rawPhrases)
-        : rawPhrases;
+      const phrases = isA2LiveMode(profile)
+        ? mergeA2CurriculumPhrases(rawPhrases)
+        : isA1LiveMode(profile)
+          ? mergeA1CurriculumPhrases(rawPhrases)
+          : rawPhrases;
       const reviewIntent = readReviewIntent();
       const reviewSessionSnapshot = readReviewSessionSnapshot();
       const miniProvaIntent = readMiniProvaIntent();

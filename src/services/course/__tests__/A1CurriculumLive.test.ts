@@ -149,7 +149,8 @@ async function main() {
   check('unit phraseIds exist', LEVEL_BY_ID.A1.modules.every((m) =>
     m.units.every((u) => u.phraseIds.every((id) => isA1TargetId(id))),
   ));
-  check('A2 curriculum blocked', isHigherLevelCurriculumBlocked('A2'));
+  check('B1+ curriculum blocked', isHigherLevelCurriculumBlocked('B1'));
+  check('A2 curriculum NOT blocked', !isHigherLevelCurriculumBlocked('A2'));
 
   console.log('\n=== A1 planner (no L0 regression) ===');
   _store.clear();
@@ -297,7 +298,7 @@ async function main() {
   check('progress distinguishes A1', rp.levelProgress.some((l) => l.level === 'A1' && l.progressPercent !== null));
   check('A1 progress not Em construção', !rp.levelProgress.find((l) => l.level === 'A1')?.detail.includes('Em construção'));
 
-  console.log('\n=== A1 → A2 gate (curriculum blocked) ===');
+  console.log('\n=== A1 → A2 gate (A2 curriculum active) ===');
   _store.clear();
   await saveCourseProgress({ ...defaultCourseProgress('little'), currentLevel: 'A1' });
   // Sync A1 competencies to threshold via graduation helper path
@@ -327,14 +328,18 @@ async function main() {
   } else {
     check('A1→A2 via LevelAssessment gate', grad2.progress?.currentLevel === 'A2');
   }
-  check('A2 curriculum still blocked', isHigherLevelCurriculumBlocked('A2'));
+  check('A2 unlocked (not higher-blocked)', !isHigherLevelCurriculumBlocked('A2'));
+  check('B1 still blocked', isHigherLevelCurriculumBlocked('B1'));
+  const { mergeA2CurriculumPhrases, isA2TargetId: isA2Id } = await import('@/services/course/A2Curriculum');
   const planA2 = buildConversationPlan(
     { ...profileA1(), level: 'basic', diagnosticLevel: 'A2' },
-    learnA1,
-    mergeA1CurriculumPhrases([]),
+    emptyLearningProfile(),
+    mergeA2CurriculumPhrases([]),
     0,
   );
-  check('A2 blocked uses A1 targets not inventing A2', !planA2.target || isA1TargetId(planA2.target.id));
+  check('after A1→A2 uses A2 targets', !!planA2.target && isA2Id(planA2.target.id));
+  check('after A1→A2 no L0 curricular', !planA2.target?.id.startsWith('l0-'));
+  check('after A1→A2 no A1 curricular', !planA2.target?.id.startsWith('a1-'));
 
   console.log('\n=== E2E state log ===');
   console.log(JSON.stringify({

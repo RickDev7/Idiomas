@@ -17,6 +17,11 @@ import type { CourseProgress } from './types';
 import { competenciesForLevel, COMPETENCY_BY_ID } from './competencies';
 import { gradeAssessment, nextAssessmentTarget } from './LevelAssessment';
 import { isA1CurriculumComplete, a1CompetencyMasteryFromLearning, getA1TargetsByCompetency } from './A1Curriculum';
+import {
+  isA2CurriculumComplete,
+  a2CompetencyMasteryFromLearning,
+  getA2TargetsByCompetency,
+} from './A2Curriculum';
 
 /** Evidência L0 por competência (IDs reais do ZeroLanguageMode). */
 const L0_COMPETENCY_PHRASE_IDS: Record<string, string[]> = {
@@ -155,7 +160,7 @@ export async function maybeGraduateL0ToA1(
   };
 }
 
-/** Sincroniza mastery A1 a partir do learning e decide graduação A1 → A2 (currículo A2 bloqueado). */
+/** Sincroniza mastery A1 a partir do learning e decide graduação A1 → A2 (currículo A2 executável). */
 export async function maybeGraduateA1ToA2(
   profile: UserProfile,
   learning: UserLearningProfile,
@@ -220,12 +225,12 @@ export async function maybeGraduateA1ToA2(
     };
   }
 
-  p = advanceToNextLevel(p); // A1 → A2 (currículo A2 permanece bloqueado)
+  p = advanceToNextLevel(p); // A1 → A2 (currículo A2 executável)
   await saveCourseProgress(p);
 
   return {
     graduated: true,
-    reason: 'a1_to_a2_gate_passed_curriculum_blocked',
+    reason: 'a1_to_a2_via_readyForNextLevel+gradeAssessment',
     progress: p,
     assessmentScore: grade.score,
   };
@@ -248,6 +253,101 @@ export async function recordA1TargetSuccess(
   }
 }
 
+/** Após acerto A2: bump da competência do target. */
+export async function recordA2TargetSuccess(
+  profile: UserProfile,
+  competencyId: string,
+  delta = 8,
+): Promise<CourseProgress | null> {
+  if (!COMPETENCY_BY_ID[competencyId]) return null;
+  try {
+    let p = getStoredCourseProgress() ?? (await loadCourseProgress(profile.level));
+    p = bumpCompetency(p, competencyId, delta);
+    await saveCourseProgress(p);
+    return p;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Gate A2 → B1 (currículo B1 permanece bloqueado).
+ * Mesma arquitetura: complete → mastery sync → readyForNextLevel → assessment → advance.
+ */
+export async function maybeGraduateA2ToB1(
+  profile: UserProfile,
+  learning: UserLearningProfile,
+): Promise<GraduationResult> {
+  const stored = getStoredCourseProgress();
+  let p = stored ?? (await loadCourseProgress(profile.level));
+
+  if (p.currentLevel !== 'A2') {
+    return { graduated: false, reason: `not_a2_${p.currentLevel}`, progress: p };
+  }
+
+  if (!isA2CurriculumComplete(learning)) {
+    return { graduated: false, reason: 'a2_curriculum_incomplete', progress: p };
+  }
+
+  for (const comp of competenciesForLevel('A2')) {
+    const m = a2CompetencyMasteryFromLearning(comp.id, learning);
+    const cur = p.competencyMastery[comp.id] ?? 0;
+    if (m > cur) p = bumpCompetency(p, comp.id, m - cur);
+  }
+
+  for (const k of ['listening', 'speaking', 'vocabulary', 'grammar'] as const) {
+    if (p.skillLevels[k] === 'L0' || p.skillLevels[k] === 'A1') p.skillLevels[k] = 'A2';
+  }
+
+  if (!readyForNextLevel(p)) {
+    await saveCourseProgress(p);
+    return { graduated: false, reason: 'not_ready_for_b1_assessment', progress: p };
+  }
+
+  const stats = learningAssessmentStats(learning);
+  const a2Ids = new Set(
+    competenciesForLevel('A2').flatMap((c) => getA2TargetsByCompetency(c.id).map((t) => t.id)),
+  );
+  let spoken = 0;
+  let spontaneous = 0;
+  let reinforced = 0;
+  for (const [id, c] of Object.entries(learning.phrases)) {
+    if (!a2Ids.has(id)) continue;
+    spoken += c.timesCorrect ?? 0;
+    if (c.needsHelp) reinforced += 1;
+    if ((c.timesProduced ?? 0) > (c.timesCorrect ?? 0)) {
+      reinforced += (c.timesProduced ?? 0) - (c.timesCorrect ?? 0);
+    }
+    spontaneous += c.spontaneousSessions ?? 0;
+  }
+  if (spoken === 0) {
+    spoken = stats.spoken;
+    spontaneous = stats.spontaneous;
+    reinforced = stats.reinforced;
+  }
+
+  const grade = gradeAssessment('B1', spoken, spontaneous, reinforced);
+  if (!grade.passed) {
+    await saveCourseProgress(p);
+    return {
+      graduated: false,
+      reason: `b1_assessment_failed:${grade.reason}`,
+      progress: p,
+      assessmentScore: grade.score,
+    };
+  }
+
+  p = advanceToNextLevel(p); // A2 → B1 (currículo B1 permanece bloqueado)
+  await saveCourseProgress(p);
+
+  return {
+    graduated: true,
+    reason: 'a2_to_b1_gate_passed_curriculum_blocked',
+    progress: p,
+    assessmentScore: grade.score,
+  };
+}
+
 export async function applyProfileLevelAfterGraduation(
   profile: UserProfile,
   progress: CourseProgress,
@@ -260,9 +360,16 @@ export async function applyProfileLevelAfterGraduation(
   if (progress.currentLevel === 'A2' && (profile.level === 'zero' || profile.level === 'little')) {
     next.level = 'basic';
   }
+  if (progress.currentLevel === 'B1' || progress.currentLevel === 'B2') {
+    next.level = 'basic';
+  }
   if (!next.diagnosticLevel || next.diagnosticLevel === 'L0') {
     next.diagnosticLevel = progress.currentLevel;
-  } else if (progress.currentLevel === 'A1' || progress.currentLevel === 'A2') {
+  } else if (
+    progress.currentLevel === 'A1' ||
+    progress.currentLevel === 'A2' ||
+    progress.currentLevel === 'B1'
+  ) {
     next.diagnosticLevel = progress.currentLevel;
   }
   await saveProfile(next);
