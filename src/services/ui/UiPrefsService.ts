@@ -1,8 +1,12 @@
 /* UiPrefsService — fonte única das preferências de interface.
    Separadas do perfil de aprendizagem (turboMode/germanPercentage ficam no UserProfile). */
+import type { VoiceProvider } from '@/services/voice/voiceTypes';
+import { normalizeVoiceProvider } from '@/services/voice/voiceTypes';
+
 export type TranslationMode = 'always' | 'ondemand' | 'immersion';
 export type HelpLevelPref = 'auto' | 'normal' | 'extra' | 'minimal';
 export type InterfaceLanguage = 'pt-BR' | 'de-DE' | 'en-US';
+export type { VoiceProvider };
 
 export interface UiPrefs {
   sound: boolean;
@@ -13,6 +17,11 @@ export interface UiPrefs {
   helpLevel: HelpLevelPref;
   /** Meta de imersão escolhida pelo usuário (0–100). Sincroniza com profile.germanPercentage. */
   immersionTarget: number;
+  /**
+   * Camada de voz da sessão.
+   * Padrão: gemini-live (sem alterar comportamento atual).
+   */
+  voiceProvider: VoiceProvider;
 }
 
 const KEY = 'dt_uiprefs';
@@ -25,6 +34,7 @@ const defaults: UiPrefs = {
   translationMode: 'always',
   helpLevel: 'auto',
   immersionTarget: 80,
+  voiceProvider: 'gemini-live',
 };
 
 type Listener = (prefs: UiPrefs) => void;
@@ -50,6 +60,7 @@ function load(): UiPrefs {
         ...defaults,
         ...parsed,
         immersionTarget: clampImmersion(parsed.immersionTarget ?? defaults.immersionTarget),
+        voiceProvider: normalizeVoiceProvider(parsed.voiceProvider ?? defaults.voiceProvider),
       };
     }
   } catch {
@@ -83,6 +94,9 @@ export const UiPrefsService = {
       ...partial,
       immersionTarget: clampImmersion(
         partial.immersionTarget !== undefined ? partial.immersionTarget : base.immersionTarget,
+      ),
+      voiceProvider: normalizeVoiceProvider(
+        partial.voiceProvider !== undefined ? partial.voiceProvider : base.voiceProvider,
       ),
     };
     return persist(next);

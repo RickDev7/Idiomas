@@ -105,6 +105,7 @@ export function useLesson(type: string, profile: UserProfile | null): UseLessonR
     if (!text) return;
     stopAllAudio();
     setPhase('speaking');
+    voice.current = getVoiceService();
     const v = voice.current;
     if (slow) v.setSpeed('slow');
     try {
@@ -300,6 +301,7 @@ export function useLesson(type: string, profile: UserProfile | null): UseLessonR
     setPhase('listening');
     listenStart.current = Date.now();
     stopAllAudio();
+    voice.current = getVoiceService();
     voice.current.setLanguage('de-DE');
     try {
       const transcript = await voice.current.listen();
@@ -352,8 +354,19 @@ export function useLesson(type: string, profile: UserProfile | null): UseLessonR
           helpLevel: helpLevel,
         });
       }
-    } catch {
-      setFeedback('Não consegui ouvir. Tente de novo.');
+    } catch (err) {
+      const code = err instanceof Error ? err.message : '';
+      if (code === 'not-allowed' || code === 'permission-denied' || code === 'service-not-allowed') {
+        setFeedback('Para praticar falando, permita o microfone nas configurações do navegador.');
+      } else if (code === 'audio-capture') {
+        setFeedback('Não foi possível capturar áudio. Verifique o microfone.');
+      } else if (code === 'network') {
+        setFeedback('Reconhecimento de voz precisa de rede neste navegador. Tente de novo.');
+      } else if (code === 'no-speech') {
+        setFeedback('Não ouvi. Toque o microfone e tente de novo.');
+      } else {
+        setFeedback('Não consegui ouvir. Tente de novo.');
+      }
       setPhase('idle');
     }
   }, [interaction, recordProduction, helpLevel]);

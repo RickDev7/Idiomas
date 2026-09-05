@@ -1,6 +1,10 @@
 import { stopAllAudio, stopBrowserAudio } from '@/services/voice/AudioPlayback';
+import { adaptVoiceEngineToService } from '@/services/voice/voiceEngineAdapter';
+import { VoiceEngineFactory } from '@/services/voice/VoiceEngineFactory';
+import { normalizeVoiceProvider, type VoiceProvider } from '@/services/voice/voiceTypes';
 
 export type SpeechSpeed = 'slow' | 'normal' | 'natural';
+export type { VoiceProvider };
 
 export interface VoiceServiceInterface {
   listen(): Promise<string>;
@@ -14,6 +18,18 @@ export interface VoiceServiceInterface {
   isListening(): boolean;
   isSpeaking(): boolean;
   isSupported(): boolean;
+}
+
+function readVoiceProvider(): VoiceProvider {
+  try {
+    // Import dinâmico evitado: UiPrefs é sync via localStorage.
+    const raw = localStorage.getItem('dt_uiprefs');
+    if (!raw) return 'gemini-live';
+    const parsed = JSON.parse(raw) as { voiceProvider?: unknown };
+    return normalizeVoiceProvider(parsed.voiceProvider);
+  } catch {
+    return 'gemini-live';
+  }
 }
 
 const SPEED_RATES: Record<SpeechSpeed, number> = {
@@ -167,9 +183,22 @@ export class BrowserVoiceService implements VoiceServiceInterface {
 }
 
 let voiceServiceInstance: VoiceServiceInterface | null = null;
+let cachedProvider: VoiceProvider | null = null;
 
+/**
+ * Serviço de voz para o pipeline pedagógico (useLesson etc.).
+ * free-browser / text → VoiceEngine; gemini-live → BrowserVoiceService legado
+ * (a sessão Live usa GeminiConversation, não este serviço).
+ */
 export function getVoiceService(): VoiceServiceInterface {
-  if (!voiceServiceInstance) {
+  const provider = readVoiceProvider();
+  if (voiceServiceInstance && cachedProvider === provider) {
+    return voiceServiceInstance;
+  }
+  cachedProvider = provider;
+  if (provider === 'free-browser' || provider === 'text') {
+    voiceServiceInstance = adaptVoiceEngineToService(VoiceEngineFactory.create(provider));
+  } else {
     voiceServiceInstance = new BrowserVoiceService();
   }
   return voiceServiceInstance;
@@ -177,8 +206,29 @@ export function getVoiceService(): VoiceServiceInterface {
 
 export function setVoiceService(service: VoiceServiceInterface): void {
   voiceServiceInstance = service;
+  cachedProvider = null;
+}
+
+/** Invalida o singleton após mudar voiceProvider nas Settings. */
+export function resetVoiceService(): void {
+  voiceServiceInstance = null;
+  cachedProvider = null;
 }
 
 export function isGeminiLiveEnabled(): boolean {
   return String(import.meta.env.VITE_USE_GEMINI_LIVE ?? 'false') === 'true';
+}
+
+/** Sessão deve usar Gemini Live (provider + flag/env). */
+export function shouldUseGeminiLiveSession(
+  sessionType: string,
+  voiceProvider: VoiceProvider = readVoiceProvider(),
+): boolean {
+  if (voiceProvider !== 'gemini-live') return false;
+  return (
+    isGeminiLiveEnabled() ||
+    sessionType === 'review' ||
+    sessionType === 'simulator' ||
+    sessionType === 'miniprova'
+  );
 }

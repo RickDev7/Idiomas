@@ -14,10 +14,10 @@ import { useConversation } from '@/hooks/useConversation';
 import type { ConversationContext } from '@/types';
 import { createDefaultProfile } from '@/services/storage/initData';
 import { calculateCommunicationScore, updateStreak } from '@/utils/reviewUtils';
-import { isGeminiLiveEnabled } from '@/services/voice/VoiceService';
 import { GeminiConversation } from '@/pages/GeminiConversation';
 import { haptic } from '@/services/ui/UiPrefsService';
-import { UiPrefsService, type TranslationMode } from '@/services/ui/UiPrefsService';
+import { UiPrefsService, type TranslationMode, type VoiceProvider } from '@/services/ui/UiPrefsService';
+import { shouldUseGeminiLiveSession } from '@/services/voice/VoiceService';
 import { storeSessionComplete } from '@/services/ui/SessionCompleteStore';
 import { TranslationPanel, AnswerSupportPanel, CorrectionPanel } from '@/components/voice/VoicePanels';
 import {
@@ -34,7 +34,15 @@ export function ConversationPage() {
   const [searchParams] = useSearchParams();
   const type = searchParams.get('type') || 'lesson';
 
-  const useGemini = isGeminiLiveEnabled() || type === 'review' || type === 'simulator' || type === 'miniprova';
+  const [voiceProvider, setVoiceProvider] = useState<VoiceProvider>(
+    () => UiPrefsService.get().voiceProvider ?? 'gemini-live',
+  );
+  useEffect(
+    () => UiPrefsService.subscribe((p) => setVoiceProvider(p.voiceProvider ?? 'gemini-live')),
+    [],
+  );
+
+  const useGemini = shouldUseGeminiLiveSession(type, voiceProvider);
   const lesson = useLesson(type, profile);
 
   useStudySession(
@@ -223,7 +231,13 @@ export function ConversationPage() {
     return (
       <SessionStartGate
         title="Treino de hoje"
-        subtitle="Toque em começar para iniciar a sessão com áudio."
+        subtitle={
+          voiceProvider === 'free-browser'
+            ? 'Permita o acesso ao microfone para praticar alemão falando. Toque em começar.'
+            : voiceProvider === 'text'
+              ? 'Modo texto: você digitará as respostas. Toque em começar.'
+              : 'Toque em começar para iniciar a sessão com áudio.'
+        }
         onStart={() => { haptic(); void lesson.start(); }}
         onBack={() => navigate('/')}
       />
@@ -235,11 +249,11 @@ export function ConversationPage() {
 
   const status =
     lesson.phase === 'listening'
-      ? 'Ouvindo…'
+      ? '🔴 Ouvindo...'
       : lesson.phase === 'speaking'
-        ? 'Professor falando…'
+        ? '🔊 Professor...'
         : lesson.phase === 'grading'
-          ? 'Pensando…'
+          ? '⏳ Entendendo...'
           : i.type === 'teach'
             ? 'Ouça e repita'
             : i.type === 'repeat'
@@ -252,7 +266,9 @@ export function ConversationPage() {
                     ? 'Junte tudo e fale'
                     : i.type === 'done'
                       ? 'Concluído'
-                      : 'Fale comigo';
+                      : voiceProvider === 'free-browser'
+                        ? '🎤 Sua vez'
+                        : 'Fale comigo';
 
   const needsSpeech = ['repeat', 'complete', 'guided', 'open', 'conversation'].includes(i.type);
   const canAdvance = ['greet', 'teach', 'listen'].includes(i.type) || lesson.phase === 'feedback';

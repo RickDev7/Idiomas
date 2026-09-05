@@ -109,7 +109,8 @@ function statusLinePt(opts: {
   if (opts.liveState === 'error') return 'Sem conexão';
   // Professor falando tem prioridade sobre "Sua vez" / aguardando.
   if (opts.assistantSpeaking || opts.teacherTurnStatus === 'RECEIVING') return 'Professor falando…';
-  if (opts.awaitingProfessor) return 'Aguardando o professor…';
+  // Aguardando professor só enquanto conectado — erro não deve mascarar como espera.
+  if (opts.awaitingProfessor && opts.liveState === 'connected') return 'Aguardando o professor…';
   // micActive/LISTENING ≠ fala real — só transcript RECEIVING do aluno
   if (opts.userSpeaking) return 'Você está falando…';
   if (opts.responseStatus === 'processing') return 'Pensando…';
@@ -609,11 +610,13 @@ export function GeminiConversation({
 
         {live.error ? (
           <div className="w-full max-w-[320px] rounded-[16px] p-3 text-center" style={{ background: 'var(--surface)' }}>
-            <p className="text-[12px] text-[var(--text-primary)] font-semibold">Não foi possível continuar.</p>
+            <p className="text-[12px] text-[var(--text-primary)] font-semibold">
+              {live.error}
+            </p>
             <button
               type="button"
               onClick={() => {
-                void live.start();
+                void live.startListening();
               }}
               className="mt-2 px-4 py-2 rounded-full text-[12px] font-semibold text-white dt-cta-primary"
             >

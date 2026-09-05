@@ -10,12 +10,12 @@ interface MicButtonProps {
 
 export function MicButton({ isListening, isSpeaking, isProcessing, onPress, disabled }: MicButtonProps) {
   const label = isListening
-    ? 'Ouvindo. Toque para parar'
+    ? 'Ouvindo...'
     : isProcessing
-      ? 'Pensando'
+      ? 'Entendendo...'
       : isSpeaking
-        ? 'Professor falando. Toque para interromper'
-        : 'Toque para falar';
+        ? 'Professor...'
+        : 'Sua vez';
 
   return (
     <div className="relative flex items-center justify-center">

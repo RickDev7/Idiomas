@@ -75,6 +75,11 @@ import { isScriptedGreeting, isActiveCurriculumTargetId } from '@/services/teach
 import { buildSessionKickoffFromProfile } from '@/services/voice/LiveSessionKickoff';
 import { targetFlow } from '@/services/ui/TargetFlowTrace';
 import {
+  FIRST_TEACHER_TURN_TIMEOUT_MS,
+  FirstTeacherTurnWatchdog,
+  liveErrorUserMessage,
+} from '@/services/ai/liveFirstTeacherWatchdog';
+import {
   consumeSelectedModuleContext,
 } from '@/services/course/CurriculumModule';
 import type { CourseLevelId } from '@/services/course/types';
@@ -283,6 +288,8 @@ export function useGeminiLive(profile: UserProfile | null): GeminiLiveUI {
   const deferMicUntilTeacherRef = useRef(false);
   const micOpenTimeoutRef = useRef(0);
   const releaseDeferredMicRef = useRef(() => {});
+  const firstTeacherWatchdogRef = useRef<FirstTeacherTurnWatchdog | null>(null);
+  const heardFirstTeacherRef = useRef(false);
   const ownershipRef = useRef<UserTurnOwnershipState>(createUserTurnOwnershipState());
   const playbackIdleTimerRef = useRef(0);
   const interruptedRef = useRef(false);
@@ -1107,6 +1114,68 @@ export function useGeminiLive(profile: UserProfile | null): GeminiLiveUI {
     }
   };
 
+  const clearFirstTeacherWatchdog = () => {
+    firstTeacherWatchdogRef.current?.clear();
+    firstTeacherWatchdogRef.current = null;
+  };
+
+  const noteFirstTeacherReceived = (via: string) => {
+    if (heardFirstTeacherRef.current) return;
+    heardFirstTeacherRef.current = true;
+    const marked = firstTeacherWatchdogRef.current?.markReceived() ?? false;
+    clearFirstTeacherWatchdog();
+    console.log('[LIVE_DEBUG]', 'firstTeacherTurn:received', {
+      via,
+      cancelledWatchdog: marked,
+      sessionGeneration: sessionGenRef.current,
+      sessionId: flowSessionId(),
+      targetId: orchRef.current?.getPlan()?.target?.id ?? null,
+      currentLevel: profile?.level ?? null,
+    });
+  };
+
+  const armFirstTeacherWatchdog = (sessionGen: number, liveProfile: LiveProfile) => {
+    if (liveProfile.skipKickoff) return;
+    clearFirstTeacherWatchdog();
+    heardFirstTeacherRef.current = false;
+    const meta = {
+      sessionGeneration: sessionGen,
+      sessionId: flowSessionId(),
+      targetId: liveProfile.targetId ?? orchRef.current?.getPlan()?.target?.id ?? null,
+      currentLevel: liveProfile.level ?? profile?.level ?? null,
+    };
+    const watchdog = new FirstTeacherTurnWatchdog(FIRST_TEACHER_TURN_TIMEOUT_MS, () => {
+      if (!isLiveSessionCurrent(sessionGen)) return;
+      if (heardFirstTeacherRef.current) return;
+      console.log('[LIVE_DEBUG]', 'firstTeacherTurn:watchdog:timeout', {
+        ...meta,
+        timeoutMs: FIRST_TEACHER_TURN_TIMEOUT_MS,
+      });
+      console.log('[LIVE_DEBUG]', 'session:error', {
+        code: 'live_first_turn_timeout',
+        ...meta,
+      });
+      // Não abrir mic no fallback — erro real do 1º turno.
+      deferMicUntilTeacherRef.current = false;
+      if (micOpenTimeoutRef.current) {
+        window.clearTimeout(micOpenTimeoutRef.current);
+        micOpenTimeoutRef.current = 0;
+      }
+      try { serviceRef.current?.stopMic(); } catch { /* ignore */ }
+      setMicActive(false);
+      setMicState('ERROR');
+      setState('error');
+      setError(liveErrorUserMessage('live_first_turn_timeout'));
+      void orchRef.current?.handle({ type: 'ERROR', message: 'live_first_turn_timeout' });
+    });
+    firstTeacherWatchdogRef.current = watchdog;
+    watchdog.start(meta);
+    console.log('[LIVE_DEBUG]', 'firstTeacherTurn:watchdog:start', {
+      ...meta,
+      timeoutMs: FIRST_TEACHER_TURN_TIMEOUT_MS,
+    });
+  };
+
   const wireHandlers = useCallback((): GeminiVoiceHandlers => ({
     onStateChange: (s) => setState(s),
     onMicState: (s) => setMicState(s),
@@ -1117,6 +1186,7 @@ export function useGeminiLive(profile: UserProfile | null): GeminiLiveUI {
       }
     },
     onTeacherAudio: () => {
+      noteFirstTeacherReceived('audio');
       const turnId = turnIdsRef.current.assistant || `assistant-audio-${Date.now()}`;
       ownershipRef.current = markTeacherAudioStart(ownershipRef.current);
       syncOwnershipSession();
@@ -1172,6 +1242,7 @@ export function useGeminiLive(profile: UserProfile | null): GeminiLiveUI {
         list.push(turn.text);
       }
       if (role === 'assistant') {
+        noteFirstTeacherReceived('transcript');
         ownershipRef.current = markTeacherReceiving(ownershipRef.current);
         setAssistantText(turn.text);
         setTeacherTurnStatus(turn.status);
@@ -1264,6 +1335,7 @@ export function useGeminiLive(profile: UserProfile | null): GeminiLiveUI {
         });
       }
       if (r === 'assistant') {
+        noteFirstTeacherReceived('turn_complete');
         if (DEV) {
           console.log('[LIVE_TRACE]', 'transcript:turn_complete', {
             turnId: done.id,
@@ -1345,7 +1417,22 @@ export function useGeminiLive(profile: UserProfile | null): GeminiLiveUI {
       }).catch(() => {});
     },
     onError: (m) => {
+      clearFirstTeacherWatchdog();
+      deferMicUntilTeacherRef.current = false;
+      if (micOpenTimeoutRef.current) {
+        window.clearTimeout(micOpenTimeoutRef.current);
+        micOpenTimeoutRef.current = 0;
+      }
+      console.log('[LIVE_DEBUG]', 'session:error', {
+        message: m,
+        sessionGeneration: sessionGenRef.current,
+        sessionId: flowSessionId(),
+        targetId: orchRef.current?.getPlan()?.target?.id ?? null,
+        currentLevel: profile?.level ?? null,
+      });
       setError(m);
+      setState('error');
+      setMicState('ERROR');
       void orchRef.current?.handle({ type: 'ERROR', message: m });
     },
     onMicLevel: (lvl) => setMicLevel(lvl),
@@ -1364,6 +1451,8 @@ export function useGeminiLive(profile: UserProfile | null): GeminiLiveUI {
     naturalTeacherResponseExpectedRef.current = false;
     teacherAudioLoggedForTurnRef.current = '';
     deferMicUntilTeacherRef.current = false;
+    heardFirstTeacherRef.current = false;
+    clearFirstTeacherWatchdog();
     interruptedRef.current = false;
     if (playbackIdleTimerRef.current) {
       window.clearInterval(playbackIdleTimerRef.current);
@@ -1425,7 +1514,7 @@ export function useGeminiLive(profile: UserProfile | null): GeminiLiveUI {
     resetSessionLocals();
     disposeActiveService();
     try {
-      const liveProfile = await buildProfile();
+      const liveProfile: LiveProfile = await buildProfile();
       if (abandonStaleSession(sessionGen)) return;
       const svc = new GeminiVoiceService(liveProfile, wireHandlers(), undefined, sessionGen);
       if (abandonStaleSession(sessionGen)) {
@@ -1453,6 +1542,8 @@ export function useGeminiLive(profile: UserProfile | null): GeminiLiveUI {
         activeVoiceService = null;
         return;
       }
+      deferMicUntilTeacherRef.current = true;
+      armFirstTeacherWatchdog(sessionGen, liveProfile);
       void orchRef.current?.handle({ type: 'SESSION_STARTED' }).then((d) => {
         if (d) void applyDecision(d);
       });
@@ -1513,7 +1604,7 @@ export function useGeminiLive(profile: UserProfile | null): GeminiLiveUI {
     }
 
     try {
-      const liveProfile = await buildProfile();
+      const liveProfile: LiveProfile = await buildProfile();
       if (abandonStaleSession(sessionGen, earlyCtx, earlyStream)) return;
       const svc = new GeminiVoiceService(liveProfile, wireHandlers(), undefined, sessionGen);
       if (abandonStaleSession(sessionGen, earlyCtx, earlyStream)) {
@@ -1535,21 +1626,25 @@ export function useGeminiLive(profile: UserProfile | null): GeminiLiveUI {
       }
       await svc.connect();
       console.log('[LIVE_DEBUG]', 'startListening:connected', { session: sessionGen });
-      console.log('[LIVE_DEBUG]', 'firstTeacherTurn:waiting', { session: sessionGen });
+      console.log('[LIVE_DEBUG]', 'firstTeacherTurn:waiting', {
+        session: sessionGen,
+        sessionId: flowSessionId(),
+        targetId: liveProfile.targetId ?? null,
+        currentLevel: liveProfile.level ?? null,
+      });
       if (abandonStaleSession(sessionGen)) {
         try { svc.disconnect(); } catch { /* ignore */ }
         serviceRef.current = null;
         activeVoiceService = null;
         return;
       }
-      // Kickoff é enviado pelo backend no 'ready'. Não abrir o turno do aluno
+      // Kickoff é enviado pelo backend no 'ready' (próximo tick). Não abrir o turno do aluno
       // até o primeiro turno do professor — senão o Gemini espera o usuário.
+      // Sem fallback de mic que esconda timeout do 1º turno (watchdog cuida do erro).
       deferMicUntilTeacherRef.current = true;
       if (micOpenTimeoutRef.current) window.clearTimeout(micOpenTimeoutRef.current);
-      micOpenTimeoutRef.current = window.setTimeout(() => {
-        console.log('[LIVE_DEBUG]', 'pcm:user:fallback_open', { session: sessionGen });
-        releaseDeferredMicRef.current();
-      }, 8000);
+      micOpenTimeoutRef.current = 0;
+      armFirstTeacherWatchdog(sessionGen, liveProfile);
       void orchRef.current?.handle({ type: 'SESSION_STARTED' }).then((d) => {
         if (d) void applyDecision(d);
       });

@@ -24,6 +24,9 @@ import { SoundService } from '@/services/ui/SoundService';
 import { NotificationService } from '@/services/ui/NotificationService';
 import { LocaleService, t, immersionHintLocalized } from '@/services/ui/LocaleService';
 import { APP_ROUTES, navigateBack } from '@/services/ui/AppRoutes';
+import { resetVoiceService } from '@/services/voice/VoiceService';
+import type { VoiceProvider } from '@/services/voice/voiceTypes';
+import { getVoiceCapabilities } from '@/services/voice/voiceCapabilities';
 
 export function SettingsPage() {
   const navigate = useNavigate();
@@ -212,6 +215,48 @@ export function SettingsPage() {
           </Section>
 
           <Section title={t('settings.section.audio')}>
+            <p className="text-[11px] text-[#64748B] mb-2">Voz da sessão</p>
+            <div className="space-y-2 mb-4">
+              {(
+                [
+                  {
+                    id: 'gemini-live' as VoiceProvider,
+                    label: 'Gemini Live',
+                    hint: 'Padrão — professor com áudio Live (pago).',
+                  },
+                  {
+                    id: 'free-browser' as VoiceProvider,
+                    label: 'Voz gratuita do celular',
+                    hint: 'Web Speech API (TTS/STT no Chrome/Android). Sem API paga.',
+                  },
+                  {
+                    id: 'text' as VoiceProvider,
+                    label: 'Texto',
+                    hint: 'Sem microfone/síntese — digite as respostas.',
+                  },
+                ] as const
+              ).map((opt) => (
+                <ChoiceRow
+                  key={opt.id}
+                  active={prefs.voiceProvider === opt.id}
+                  onClick={() => {
+                    changePref({ voiceProvider: opt.id });
+                    resetVoiceService();
+                    SoundService.play('tap');
+                    if (opt.id === 'free-browser') {
+                      try {
+                        getVoiceCapabilities();
+                      } catch {
+                        /* ignore */
+                      }
+                    }
+                  }}
+                  icon={opt.id === 'gemini-live' ? '🎙️' : opt.id === 'free-browser' ? '📱' : '⌨️'}
+                  label={opt.label}
+                  hint={opt.hint}
+                />
+              ))}
+            </div>
             <p className="text-[11px] text-[#64748B] mb-2">{t('settings.voice')}</p>
             <div className="flex gap-2">
               {speeds.map((s) => (

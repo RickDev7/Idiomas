@@ -1,4 +1,9 @@
 import { resolveBackendUrl, httpBackendBase, wsBackendBase } from '@/utils/backendUrl';
+import {
+  isFatalLiveError,
+  liveErrorUserMessage,
+  normalizeLiveErrorCode,
+} from '@/services/ai/liveFirstTeacherWatchdog';
 
 export type LiveSessionState = 'idle' | 'connecting' | 'connected' | 'error' | 'reconnecting';
 
@@ -91,6 +96,8 @@ export class GeminiLiveService {
   /** True após o 1º turno do professor (transcript/áudio/complete). */
   private heardTeacherTurn = false;
   private userPcmStarted = false;
+  /** Erro fatal (quota / timeout / session_failed) — sem reconnect agressivo. */
+  private fatalStop = false;
 
   constructor(profile: LiveProfile, handlers: LiveHandlers, backendUrl?: string) {
     this.profile = profile;
@@ -147,6 +154,7 @@ export class GeminiLiveService {
 
   async connect(): Promise<void> {
     this.closedByUser = false;
+    this.fatalStop = false;
     liveDebug('connect:start', { skipKickoff: !!this.profile.skipKickoff, heardTeacher: this.heardTeacherTurn });
     if (this.isConnected()) return;
     if (this.state === 'connecting' || this.state === 'reconnecting') {
@@ -215,20 +223,66 @@ export class GeminiLiveService {
     this.ws.onmessage = (ev) => {
       let msg: any;
       try { msg = JSON.parse(ev.data as string); } catch { return; }
+      // Diagnóstico temporário — não altera roteamento
+      const hasAudio = typeof msg?.data === 'string' && msg.data.length > 0 && msg.type === 'audio';
+      const hasText = typeof msg?.text === 'string' && msg.text.length > 0;
+      liveDebug('server:event', {
+        type: msg?.type || 'unknown',
+        hasAudio,
+        hasText,
+        byteLength: typeof ev.data === 'string' ? ev.data.length : 0,
+        role: msg?.role || null,
+      });
+      liveDebug('LIVE_TRACE:SERVER_MESSAGE', {
+        messageType: msg?.type || 'unknown',
+        hasAudio,
+        hasText,
+        byteLength: typeof ev.data === 'string' ? ev.data.length : 0,
+        role: msg?.role || null,
+        openingGerman: this.profile.openingGerman ?? null,
+        targetId: this.profile.targetId ?? null,
+        skipKickoff: !!this.profile.skipKickoff,
+        heardTeacher: this.heardTeacherTurn,
+      });
       switch (msg.type) {
         case 'ready':
           this.setState('connected');
           this.settleReady();
           // Kickoff é disparado pelo backend neste momento (único caminho autoritativo).
+          // Nota: este log NÃO prova envio ao Gemini — só prova que o browser recebeu `ready`.
           liveDebug('websocket:ready');
+          if (!this.profile.skipKickoff) {
+            liveDebug('kickoff:scheduled', {
+              note: 'backend_next_tick_after_setupComplete',
+              skipKickoff: false,
+              targetId: this.profile.targetId ?? null,
+              openingGerman: this.profile.openingGerman ?? null,
+              currentLevel: this.profile.level ?? null,
+              sessionGeneration: this.profile.liveSessionGeneration ?? null,
+            });
+          }
           liveDebug('kickoff:sent', {
-            note: 'backend_on_ready',
+            note: 'backend_on_ready_assumed',
+            skipKickoff: !!this.profile.skipKickoff,
+            targetId: this.profile.targetId ?? null,
+            currentLevel: this.profile.level ?? null,
+            sessionGeneration: this.profile.liveSessionGeneration ?? null,
+          });
+          liveDebug('LIVE_TRACE:WS_READY', {
+            openingGerman: this.profile.openingGerman ?? null,
+            targetId: this.profile.targetId ?? null,
             skipKickoff: !!this.profile.skipKickoff,
           });
           break;
         case 'audio':
           if (!this.heardTeacherTurn) {
             this.heardTeacherTurn = true;
+            liveDebug('firstTeacherTurn:received', {
+              via: 'audio',
+              targetId: this.profile.targetId ?? null,
+              currentLevel: this.profile.level ?? null,
+              sessionGeneration: this.profile.liveSessionGeneration ?? null,
+            });
             liveDebug('teacher:audio');
           }
           this.handlers.onAudio?.(msg.data, msg.mimeType);
@@ -236,7 +290,15 @@ export class GeminiLiveService {
         case 'transcript':
           liveDebug('server:event:transcript', { role: msg.role, len: (msg.text || '').length });
           if (msg.role === 'assistant') {
-            if (!this.heardTeacherTurn) this.heardTeacherTurn = true;
+            if (!this.heardTeacherTurn) {
+              this.heardTeacherTurn = true;
+              liveDebug('firstTeacherTurn:received', {
+                via: 'transcript',
+                targetId: this.profile.targetId ?? null,
+                currentLevel: this.profile.level ?? null,
+                sessionGeneration: this.profile.liveSessionGeneration ?? null,
+              });
+            }
             liveDebug('teacher:transcript', { len: (msg.text || '').length });
           }
           this.handlers.onTranscript?.(msg.role, msg.text || '', { delta: msg.delta, complete: false });
@@ -244,7 +306,15 @@ export class GeminiLiveService {
         case 'turn_complete':
           liveDebug('server:event:turn_complete', { role: msg.role || 'assistant' });
           if ((msg.role || 'assistant') === 'assistant') {
-            this.heardTeacherTurn = true;
+            if (!this.heardTeacherTurn) {
+              this.heardTeacherTurn = true;
+              liveDebug('firstTeacherTurn:received', {
+                via: 'turn_complete',
+                targetId: this.profile.targetId ?? null,
+                currentLevel: this.profile.level ?? null,
+                sessionGeneration: this.profile.liveSessionGeneration ?? null,
+              });
+            }
             liveDebug('teacher:turn_complete');
           }
           if (msg.text && msg.role) {
@@ -256,16 +326,36 @@ export class GeminiLiveService {
           liveDebug('server:event:interrupted');
           this.handlers.onInterrupted?.(msg.text);
           break;
-        case 'error':
-          liveDebug('server:event:error', { message: msg.message });
-          // Qualquer erro do servidor invalida o token atual — força token novo na reconexão
+        case 'error': {
+          const code = normalizeLiveErrorCode(msg.message);
+          liveDebug('server:event:error', { message: msg.message, code });
+          liveDebug('session:error', {
+            code,
+            targetId: this.profile.targetId ?? null,
+            currentLevel: this.profile.level ?? null,
+            sessionGeneration: this.profile.liveSessionGeneration ?? null,
+          });
           this.token = null;
+          if (isFatalLiveError(code)) {
+            this.fatalStop = true;
+            this.setState('error');
+            this.handlers.onError?.(liveErrorUserMessage(code));
+            this.settleReady(new Error(code));
+            try { this.ws?.close(); } catch { /* ignore */ }
+            break;
+          }
+          // Erros transitórios: reconectar sem loop de quota.
           this.setState('reconnecting');
           this.settleReady(new Error('live_error'));
           this.scheduleReconnect();
           break;
+        }
         default:
-          liveDebug('server:event:' + String(msg.type || 'unknown'));
+          liveDebug('server:event:discarded', {
+            type: String(msg?.type || 'unknown'),
+            reason: 'unhandled_message_type',
+            keys: msg && typeof msg === 'object' ? Object.keys(msg).slice(0, 12) : [],
+          });
           break;
       }
     };
@@ -275,8 +365,8 @@ export class GeminiLiveService {
     };
 
     this.ws.onclose = () => {
-      if (this.closedByUser) {
-        this.setState('idle');
+      if (this.closedByUser || this.fatalStop) {
+        if (!this.fatalStop) this.setState('idle');
         this.settleReady(new Error('live_closed'));
         return;
       }
@@ -289,7 +379,7 @@ export class GeminiLiveService {
   private reconnecting = false;
 
   private scheduleReconnect(): void {
-    if (this.closedByUser) return;
+    if (this.closedByUser || this.fatalStop) return;
     if (this.reconnecting) return;
     this.reconnecting = true;
     void this.doReconnect();
@@ -305,7 +395,7 @@ export class GeminiLiveService {
       this.reconnectAttempts += 1;
       const delay = Math.min(8000, 1000 * 2 ** this.reconnectAttempts);
       await new Promise((r) => setTimeout(r, delay));
-      if (this.closedByUser) return;
+      if (this.closedByUser || this.fatalStop) return;
 
       liveDebug('reconnect:start', { attempt: this.reconnectAttempts });
       // Invalidar generation + limpar fila de áudio ANTES do novo WS/token.

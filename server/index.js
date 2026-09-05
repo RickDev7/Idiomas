@@ -30,6 +30,8 @@ const DEFAULT_ALLOWED_ORIGINS = [
   'https://idiomas-kappa.vercel.app',
   'http://localhost:5173',
   'http://127.0.0.1:5173',
+  'http://localhost:5174',
+  'http://127.0.0.1:5174',
   'http://localhost:4173',
   'http://127.0.0.1:4173',
   'http://localhost:4175',
@@ -356,18 +358,84 @@ function logSession(profile) {
   }
 }
 
+/** Agenda kickoff no próximo tick — fora do callback síncrono de setupComplete. */
+function scheduleKickoffAfterSetup(entry) {
+  if (!entry) return;
+  console.log('[BACKEND_LIVE] GEMINI_KICKOFF_SCHEDULED', {
+    token: entry.token?.slice(0, 8) || null,
+    setupComplete: !!entry.setupComplete,
+    kickoffSent: !!entry.kickoffSent,
+    skipKickoff: !!entry.profile?.skipKickoff,
+    openingGerman: entry.profile?.openingGerman || null,
+    targetId: entry.profile?.targetId || null,
+    level: entry.profile?.level || null,
+  });
+  queueMicrotask(() => {
+    maybeSendKickoff(entry);
+  });
+}
+
 function maybeSendKickoff(entry) {
-  if (!entry || entry.kickoffSent || entry.profile?.skipKickoff) return;
-  if (!entry.setupComplete) return;
-  if (!entry.clientWs || entry.clientWs.readyState !== entry.clientWs.OPEN) return;
-  if (!entry.session) return;
+  if (!entry || entry.kickoffSent || entry.profile?.skipKickoff) {
+    console.log('[BACKEND_LIVE] KICKOFF_SKIP', {
+      hasEntry: !!entry,
+      kickoffSent: !!entry?.kickoffSent,
+      skipKickoff: !!entry?.profile?.skipKickoff,
+      token: entry?.token?.slice(0, 8) || null,
+    });
+    return;
+  }
+  if (!entry.setupComplete) {
+    console.log('[BACKEND_LIVE] KICKOFF_WAIT_SETUP', { token: entry.token?.slice(0, 8) });
+    return;
+  }
+  if (!entry.clientWs || entry.clientWs.readyState !== entry.clientWs.OPEN) {
+    console.log('[BACKEND_LIVE] KICKOFF_WAIT_CLIENT_WS', { token: entry.token?.slice(0, 8) });
+    return;
+  }
+  if (!entry.session) {
+    console.log('[BACKEND_LIVE] KICKOFF_WAIT_SESSION', { token: entry.token?.slice(0, 8) });
+    return;
+  }
+  // Trava idempotente: 1 sessão → 1 kickoff (mesmo se scheduleKickoffAfterSetup rodar 2×).
   entry.kickoffSent = true;
   const profile = entry.profile || {};
   const kick = buildSessionKickoff(profile);
   try {
+    console.log('[BACKEND_LIVE] GEMINI_KICKOFF_PREPARE', {
+      token: entry.token?.slice(0, 8),
+      setupComplete: !!entry.setupComplete,
+      openingGerman: profile.openingGerman || null,
+      targetId: profile.targetId || null,
+      level: profile.level || null,
+      curriculumBand: profile.curriculumBand || null,
+      kickoffType: profile.skipKickoff ? 'reconnect_continue' : 'session_open',
+      messageType: 'clientContent',
+      turnType: 'user',
+      responseModality: 'AUDIO',
+      kickLen: kick.length,
+      kickSnippet: kick.split('\n').slice(0, 6).join(' | ').slice(0, 280),
+    });
+    console.log('[BACKEND_LIVE] GEMINI_KICKOFF_SEND', {
+      token: entry.token?.slice(0, 8),
+      api: 'session.sendClientContent',
+      turns: 1,
+      role: 'user',
+      parts: ['text'],
+      turnComplete: true,
+    });
     entry.session.sendClientContent({
       turns: [{ role: 'user', parts: [{ text: kick }] }],
       turnComplete: true,
+    });
+    console.log('[BACKEND_LIVE] GEMINI_KICKOFF_SENT', {
+      token: entry.token?.slice(0, 8),
+      level: profile.level || null,
+      zero: !!profile.zeroLanguageMode,
+      openingGerman: profile.openingGerman || null,
+      targetId: profile.targetId || null,
+      kickLen: kick.length,
+      skipKickoff: !!profile.skipKickoff,
     });
     console.log(
       `[KICKOFF] sent token=${entry.token?.slice(0, 8)} level=${profile.level || '?'} ` +
@@ -411,15 +479,39 @@ async function ensureGeminiSession(entry) {
   const profile = entry.profile || {};
   try {
     const sys = buildSystemInstruction(profile);
+    console.log('[BACKEND_LIVE] GEMINI_CONNECT_START', {
+      token: token.slice(0, 8),
+      model: MODEL,
+      level: profile.level || null,
+      zero: !!profile.zeroLanguageMode,
+      sysLen: sys.length,
+      responseModalities: ['AUDIO'],
+      voice: 'Kore',
+      languageCode: null,
+      tools: false,
+      inputAudioTranscription: true,
+      outputAudioTranscription: true,
+    });
     console.log(
       `[SESSION] create token=${token.slice(0, 8)} level=${profile.level || '?'} ` +
         `zero=${!!profile.zeroLanguageMode} sysLen=${sys.length}`,
     );
+    console.log('[BACKEND_LIVE] GEMINI_SETUP_SEND', {
+      token: token.slice(0, 8),
+      model: MODEL,
+      via: 'ai.live.connect(config)',
+    });
     const session = await ai.live.connect({
       model: MODEL,
       callbacks: {
         onmessage: (e) => handleLiveMessage(entry, e),
         onerror: (err) => {
+          console.error('[BACKEND_LIVE] GEMINI_ERROR', {
+            token: token.slice(0, 8),
+            message: String(err?.message || err).slice(0, 300),
+            code: err?.code || err?.error?.code || null,
+            status: err?.status || err?.error?.status || null,
+          });
           console.error(
             `[gemini] onerror token=${token.slice(0, 8)}:`,
             String(err?.message || err).slice(0, 240),
@@ -430,12 +522,26 @@ async function ensureGeminiSession(entry) {
           }
         },
         onclose: (ev) => {
+          const reason = String(ev?.reason || '');
+          const code = ev?.code ?? null;
+          const quota =
+            code === 1011
+            || /exceeded your current quota|RESOURCE_EXHAUSTED|quota/i.test(reason);
+          const errorMessage = quota ? 'LIVE_QUOTA_EXCEEDED' : 'live_closed';
+          console.log('[BACKEND_LIVE] GEMINI_CLOSE', {
+            token: token.slice(0, 8),
+            code,
+            reason: reason.slice(0, 160),
+            setupComplete: !!entry.setupComplete,
+            kickoffSent: !!entry.kickoffSent,
+            errorMessage,
+          });
           console.log(
-            `[gemini] session closed (token ${token.slice(0, 8)}) code=${ev?.code ?? '?'} reason=${String(ev?.reason || '').slice(0, 120)}`,
+            `[gemini] session closed (token ${token.slice(0, 8)}) code=${code ?? '?'} reason=${reason.slice(0, 120)}`,
           );
           const ws = entry.clientWs;
           if (ws && ws.readyState === ws.OPEN) {
-            ws.send(JSON.stringify({ type: 'error', message: 'live_closed' }));
+            ws.send(JSON.stringify({ type: 'error', message: errorMessage }));
             try { ws.close(); } catch {}
           }
           sessions.delete(token);
@@ -454,8 +560,18 @@ async function ensureGeminiSession(entry) {
       },
     });
     entry.session = session;
+    console.log('[BACKEND_LIVE] GEMINI_CONNECTED', {
+      token: token.slice(0, 8),
+      hasSession: !!session,
+      setupComplete: !!entry.setupComplete,
+    });
     logSession(profile);
   } catch (err) {
+    console.error('[BACKEND_LIVE] GEMINI_ERROR', {
+      token: token.slice(0, 8),
+      phase: 'connect',
+      message: String(err?.message || err).slice(0, 300),
+    });
     console.error(`[gemini] connect fail token=${token.slice(0, 8)}:`, String(err?.message || err).slice(0, 240));
     const ws = entry.clientWs;
     if (ws && ws.readyState === ws.OPEN) {
@@ -544,25 +660,69 @@ function handleLiveMessage(entry, e) {
     if (ws && ws.readyState === ws.OPEN) ws.send(JSON.stringify(obj));
   };
 
+  const sc = e.serverContent;
+  const parts = sc?.modelTurn?.parts ?? [];
+  const topKeys = e && typeof e === 'object' ? Object.keys(e).filter((k) => e[k] != null) : [];
+  const hasAudio = parts.some((p) => !!p.inlineData?.data);
+  const hasText = parts.some((p) => typeof p.text === 'string' && p.text.length > 0)
+    || !!(sc?.outputTranscription?.text)
+    || !!(sc?.inputTranscription?.text);
+  console.log('[BACKEND_LIVE] GEMINI_EVENT', {
+    token: entry.token?.slice(0, 8),
+    eventType: e.setupComplete
+      ? 'setupComplete'
+      : sc
+        ? 'serverContent'
+        : e.goAway
+          ? 'goAway'
+          : e.toolCall
+            ? 'toolCall'
+            : topKeys[0] || 'unknown',
+    topKeys,
+    hasServerContent: !!sc,
+    hasModelTurn: !!sc?.modelTurn,
+    hasAudio,
+    hasText,
+    hasError: !!(e.error || e.message),
+    hasTurnComplete: !!sc?.turnComplete,
+    hasInterrupted: !!sc?.interrupted,
+    partsCount: parts.length,
+    kickoffSent: !!entry.kickoffSent,
+  });
+
   if (e.setupComplete) {
     entry.setupComplete = true;
+    console.log('[BACKEND_LIVE] GEMINI_SETUP_COMPLETE', {
+      token: entry.token?.slice(0, 8),
+      willSendReady: true,
+      willScheduleKickoff: !entry.kickoffSent && !entry.profile?.skipKickoff,
+    });
     console.log(`[gemini] setupComplete token=${entry.token?.slice(0, 8)}`);
     sendReadyOnce(entry);
-    maybeSendKickoff(entry);
+    scheduleKickoffAfterSetup(entry);
     return;
   }
 
-  const sc = e.serverContent;
   if (sc) {
     logGeminiShape(entry, e);
     if (!entry.assistantTx) entry.assistantTx = '';
     if (!entry.userTx) entry.userTx = '';
 
-    const parts = sc.modelTurn?.parts ?? [];
     for (const part of parts) {
       if (part.inlineData && typeof part.inlineData.data === 'string' && part.inlineData.data.length > 0) {
         send({ type: 'audio', data: part.inlineData.data, mimeType: part.inlineData.mimeType });
         console.log(`[gemini] audio out (token ${entry.token?.slice(0,8) || '????????'}, ${part.inlineData.data.length} bytes)`);
+        console.log('[BACKEND_LIVE] GEMINI_AUDIO', {
+          token: entry.token?.slice(0, 8),
+          bytes: part.inlineData.data.length,
+        });
+      }
+      if (typeof part.text === 'string' && part.text.length > 0) {
+        console.log('[BACKEND_LIVE] GEMINI_TEXT', {
+          token: entry.token?.slice(0, 8),
+          source: 'modelTurn.parts.text',
+          len: part.text.length,
+        });
       }
     }
     if (sc.inputTranscription?.text) {
@@ -572,6 +732,13 @@ function handleLiveMessage(entry, e) {
       console.log(`[gemini] user said (token ${entry.token?.slice(0,8) || '????????'}): ${entry.userTx.slice(0, 180)}`);
     }
     const spoken = sc.outputTranscription?.text;
+    if (spoken) {
+      console.log('[BACKEND_LIVE] GEMINI_TEXT', {
+        token: entry.token?.slice(0, 8),
+        source: 'outputTranscription',
+        len: spoken.length,
+      });
+    }
     const textParts = !spoken
       ? parts.map((p) => (typeof p.text === 'string' ? p.text : '')).filter(Boolean).join('')
       : '';
@@ -584,6 +751,12 @@ function handleLiveMessage(entry, e) {
       entry.assistantTx = mergeTranscript(entry.assistantTx, incoming);
       send({ type: 'transcript', role: 'assistant', text: entry.assistantTx, delta: incoming });
       console.log(`[gemini] assistant said (token ${entry.token?.slice(0,8) || '????????'}): ${entry.assistantTx.slice(0, 180)}`);
+    } else if (sc.modelTurn && !hasAudio && !sc.turnComplete && !sc.interrupted) {
+      console.log('[BACKEND_LIVE] GEMINI_EVENT_EMPTY_MODEL_TURN', {
+        token: entry.token?.slice(0, 8),
+        partsCount: parts.length,
+        note: 'serverContent.modelTurn sem audio/text encaminhável',
+      });
     }
     if (sc.interrupted) {
       send({ type: 'interrupted', text: entry.assistantTx || undefined });
@@ -592,9 +765,19 @@ function handleLiveMessage(entry, e) {
       send({ type: 'turn_complete', role: 'assistant', text: entry.assistantTx || undefined });
       entry.assistantTx = '';
     }
+  } else if (!e.goAway && !e.setupComplete) {
+    console.log('[BACKEND_LIVE] GEMINI_EVENT_UNHANDLED', {
+      token: entry.token?.slice(0, 8),
+      topKeys,
+      note: 'evento sem serverContent — não encaminhado ao browser',
+    });
   }
 
   if (e.goAway) {
+    console.log('[BACKEND_LIVE] GEMINI_GOAWAY', {
+      token: entry.token?.slice(0, 8),
+      timeLeft: e.goAway?.timeLeft ?? null,
+    });
     send({ type: 'error', message: 'session_limit' });
   }
 }
@@ -780,11 +963,11 @@ wss.on('connection', (ws, req) => {
   s.clientWs = ws;
   console.log(`[ws] connect OK (token ${token.slice(0, 8)})`);
 
-  // Sessão Gemini sobe aqui — ready + kickoff só após setupComplete.
+  // Sessão Gemini sobe aqui — ready + kickoff só após setupComplete (kickoff no próximo tick).
   void ensureGeminiSession(s).then(() => {
     if (s.setupComplete) {
       sendReadyOnce(s);
-      maybeSendKickoff(s);
+      scheduleKickoffAfterSetup(s);
     }
   });
 
