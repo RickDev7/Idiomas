@@ -25,6 +25,7 @@ import {
   IconWave,
 } from '@/components/ui/Icons';
 import { readMiniProvaResult } from '@/services/teacher/MiniProvaIntent';
+import { goAprender } from '@/services/ui/AppRoutes';
 
 export function MiniProvaResultPage() {
   const navigate = useNavigate();
@@ -161,7 +162,7 @@ export function MiniProvaResultPage() {
           </button>
           <button
             type="button"
-            onClick={() => navigate('/aprender')}
+            onClick={() => goAprender(navigate)}
             className="flex-[1.4] py-3.5 rounded-[16px] text-[14px] font-bold text-[#050816] active:scale-[0.98] transition-transform"
             style={{
               background: 'linear-gradient(135deg, #00F2FE, #8B5CF6)',

@@ -8,7 +8,8 @@ import { isMastered, stateIndex } from '@/services/learning/ConfidenceService';
 import { isAutomated, readAutomationScore } from '@/services/learning/AutomationScoreEngine';
 import { CURATED } from './content';
 import { LEVEL_BY_ID } from './levels';
-import { COMPETENCY_BY_ID } from './competencies';
+import { COMPETENCY_BY_ID, resolveCompetencyId } from './competencies';
+import { scopeCurriculumTargets, scopePhrasePool, isInModuleScope } from './PlannerModuleRestrict';
 
 export interface A1Target {
   id: string;
@@ -64,7 +65,8 @@ export function getA1TargetsByUnit(unitId: string): A1Target[] {
 }
 
 export function getA1TargetsByCompetency(competencyId: string): A1Target[] {
-  return A1_CURRICULUM.filter((t) => t.competencyId === competencyId);
+  const id = resolveCompetencyId(competencyId);
+  return A1_CURRICULUM.filter((t) => t.competencyId === id);
 }
 
 export function isA1TargetId(id: string | null | undefined): boolean {
@@ -148,14 +150,17 @@ function isDeferred(conf: PhraseConfidence | undefined): boolean {
 export function getNextA1Target(
   currentTargetId: string | null | undefined,
   learning: UserLearningProfile,
-  opts?: { excludePhraseId?: string | null; skipPhraseIds?: string[] | null },
+  opts?: { excludePhraseId?: string | null; skipPhraseIds?: string[] | null; restrictToTargetIds?: readonly string[] | null },
 ): A1Target | null {
   const skip = new Set<string>(opts?.skipPhraseIds ?? []);
   if (opts?.excludePhraseId) skip.add(opts.excludePhraseId);
   if (currentTargetId) skip.add(currentTargetId);
 
-  const ordered = A1_CURRICULUM;
-  const current = currentTargetId ? BY_ID.get(currentTargetId) : undefined;
+  const ordered = scopeCurriculumTargets(A1_CURRICULUM, opts?.restrictToTargetIds);
+  if (ordered.length === 0) return null;
+
+  const currentRaw = currentTargetId ? BY_ID.get(currentTargetId) : undefined;
+  const current = currentRaw && isInModuleScope(currentRaw.id, opts?.restrictToTargetIds) ? currentRaw : undefined;
 
   const pickFirstOpen = (candidates: A1Target[]): A1Target | null => {
     for (const t of candidates) {
@@ -170,7 +175,7 @@ export function getNextA1Target(
 
   // 1) Continuar na unidade atual
   if (current) {
-    const sameUnit = getA1TargetsByUnit(current.unitId).filter((t) => t.order > current.order);
+    const sameUnit = scopeCurriculumTargets(getA1TargetsByUnit(current.unitId), opts?.restrictToTargetIds).filter((t) => t.order > current.order);
     const nextInUnit = pickFirstOpen(sameUnit);
     if (nextInUnit) return nextInUnit;
   }
@@ -179,7 +184,7 @@ export function getNextA1Target(
   const unitOrder = a1UnitIdsInOrder();
   const startUnitIdx = current ? Math.max(0, unitOrder.indexOf(current.unitId)) : 0;
   for (let i = startUnitIdx; i < unitOrder.length; i++) {
-    const unitTargets = getA1TargetsByUnit(unitOrder[i]);
+    const unitTargets = scopeCurriculumTargets(getA1TargetsByUnit(unitOrder[i]), opts?.restrictToTargetIds);
     const open = pickFirstOpen(unitTargets);
     if (open) return open;
   }
@@ -208,11 +213,15 @@ export function getNextA1Target(
 export function pickA1PlannerTarget(
   learning: UserLearningProfile,
   phrases: Phrase[],
-  opts?: { excludePhraseId?: string | null; skipPhraseIds?: string[] | null; stickPhraseId?: string | null },
+  opts?: { excludePhraseId?: string | null; skipPhraseIds?: string[] | null; stickPhraseId?: string | null; restrictToTargetIds?: readonly string[] | null },
 ): { conf: PhraseConfidence | undefined; phrase: Phrase | null; action: 'introduce' | 'practice' | 'recall' | 'converse' } {
-  const pool = a1PhrasePool(phrases);
+  const pool = scopePhrasePool(a1PhrasePool(phrases), opts?.restrictToTargetIds);
 
-  if (opts?.stickPhraseId && isA1TargetId(opts.stickPhraseId)) {
+  if (
+    opts?.stickPhraseId &&
+    isA1TargetId(opts.stickPhraseId) &&
+    isInModuleScope(opts.stickPhraseId, opts?.restrictToTargetIds)
+  ) {
     const stuck = pool.find((p) => p.id === opts.stickPhraseId) ?? null;
     if (stuck) {
       const conf = learning.phrases[stuck.id];
@@ -299,7 +308,225 @@ export function assertA1CurriculumIntegrity(): { ok: boolean; errors: string[] }
   }
 
   if (A1_CURRICULUM.length === 0) errors.push('no A1 targets');
+  const comps = new Set(LEVEL_BY_ID.A1.competencies);
+  if (comps.size !== 7) errors.push(`expected 7 A1 competencies, got ${comps.size}`);
+  if (!comps.has('a1.personal')) errors.push('missing a1.personal');
+  if (comps.has('a1.food')) errors.push('a1.food should be merged into a1.shopping');
   return { ok: errors.length === 0, errors };
+}
+
+/**
+ * Inventário exclusivo A1 (cada target exatamente uma vez).
+ * status: REUTILIZADO = id existia antes do A1 escolar; NOVO = id criado no A1 escolar.
+ * previousUnit/previousCompetency: colocação pré-reforma (só REUTILIZADO); reorganizado ≠ status.
+ */
+export type A1TargetAuditStatus = 'REUTILIZADO' | 'NOVO';
+
+export type A1TargetAuditRow = {
+  targetId: string;
+  moduleId: string;
+  competencyId: string;
+  status: A1TargetAuditStatus;
+  previousUnitId: string | null;
+  previousCompetencyId: string | null;
+  reorganized: boolean;
+};
+
+/** Colocação pré-reforma escolar (20 ids legados). */
+const A1_LEGACY_PLACEMENT: Readonly<Record<string, { unitId: string; competencyId: string }>> = {
+  'a1-family-mutter': { unitId: 'a1.u1', competencyId: 'a1.family' },
+  'a1-family-bruder': { unitId: 'a1.u1', competencyId: 'a1.family' },
+  'a1-family-schwester': { unitId: 'a1.u1', competencyId: 'a1.family' },
+  'a1-time-drei-uhr': { unitId: 'a1.u2', competencyId: 'a1.numbers_time' },
+  'a1-time-montag': { unitId: 'a1.u2', competencyId: 'a1.numbers_time' },
+  'a1-time-freitag': { unitId: 'a1.u2', competencyId: 'a1.numbers_time' },
+  'a1-routine-aufstehen': { unitId: 'a1.u3', competencyId: 'a1.routine' },
+  'a1-routine-arbeit': { unitId: 'a1.u3', competencyId: 'a1.routine' },
+  'a1-routine-kochen': { unitId: 'a1.u3', competencyId: 'a1.routine' },
+  'a1-shopping-kostet': { unitId: 'a1.u4', competencyId: 'a1.shopping' },
+  'a1-shopping-nehme': { unitId: 'a1.u4', competencyId: 'a1.shopping' },
+  'a1-shopping-haben': { unitId: 'a1.u4', competencyId: 'a1.shopping' },
+  'a1-food-kaffee': { unitId: 'a1.u5', competencyId: 'a1.food' },
+  'a1-food-rechnung': { unitId: 'a1.u5', competencyId: 'a1.food' },
+  'a1-food-wasser': { unitId: 'a1.u5', competencyId: 'a1.food' },
+  'a1-info-bahnhof': { unitId: 'a1.u6', competencyId: 'a1.ask_info' },
+  'a1-info-hotel': { unitId: 'a1.u6', competencyId: 'a1.ask_info' },
+  'a1-info-bus': { unitId: 'a1.u6', competencyId: 'a1.ask_info' },
+  'a1-help-koennen': { unitId: 'a1.u7', competencyId: 'a1.help' },
+  'a1-help-brauche': { unitId: 'a1.u7', competencyId: 'a1.help' },
+};
+
+export function auditA1Targets(): {
+  rows: A1TargetAuditRow[];
+  total: number;
+  reused: number;
+  novo: number;
+  reorganizedAmongReused: number;
+  duplicateIds: string[];
+} {
+  const seen = new Set<string>();
+  const duplicateIds: string[] = [];
+  const rows: A1TargetAuditRow[] = A1_CURRICULUM.map((t) => {
+    if (seen.has(t.id)) duplicateIds.push(t.id);
+    seen.add(t.id);
+    const legacy = A1_LEGACY_PLACEMENT[t.id];
+    const status: A1TargetAuditStatus = legacy ? 'REUTILIZADO' : 'NOVO';
+    const previousUnitId = legacy?.unitId ?? null;
+    const previousCompetencyId = legacy?.competencyId ?? null;
+    const reorganized = !!(
+      legacy
+      && (legacy.unitId !== t.unitId
+        || resolveCompetencyId(legacy.competencyId) !== t.competencyId
+        || legacy.competencyId !== t.competencyId)
+    );
+    return {
+      targetId: t.id,
+      moduleId: t.unitId,
+      competencyId: t.competencyId,
+      status,
+      previousUnitId,
+      previousCompetencyId,
+      reorganized,
+    };
+  });
+  const reused = rows.filter((r) => r.status === 'REUTILIZADO').length;
+  const novo = rows.filter((r) => r.status === 'NOVO').length;
+  return {
+    rows,
+    total: rows.length,
+    reused,
+    novo,
+    reorganizedAmongReused: rows.filter((r) => r.reorganized).length,
+    duplicateIds,
+  };
+}
+
+/** @deprecated Use auditA1Targets().reused — mantido para testes legados. */
+export const A1_REUSED_TARGET_IDS = Object.keys(A1_LEGACY_PLACEMENT);
+
+/** @deprecated Use auditA1Targets().novo */
+export const A1_NEW_TARGET_IDS = A1_CURRICULUM
+  .map((t) => t.id)
+  .filter((id) => !A1_LEGACY_PLACEMENT[id]);
+
+export type A1ExitScenario = {
+  id: string;
+  titlePt: string;
+  situationPt: string;
+  competencyIds: string[];
+  evidenceTargetIds: string[];
+};
+
+/** Avaliação situacional de saída A1 (escola de idiomas). */
+export const A1_EXIT_SCENARIOS: A1ExitScenario[] = [
+  {
+    id: 'a1-exit-personal',
+    titlePt: 'Apresentação pessoal',
+    situationPt: 'Apresentar-se com nome, origem, cidade e ocupação.',
+    competencyIds: ['a1.personal'],
+    evidenceTargetIds: ['a1-personal-heisse', 'a1-personal-komme', 'a1-personal-wohne', 'a1-personal-beruf'],
+  },
+  {
+    id: 'a1-exit-family',
+    titlePt: 'Família',
+    situationPt: 'Falar da família ou de uma pessoa próxima.',
+    competencyIds: ['a1.family'],
+    evidenceTargetIds: ['a1-family-mutter', 'a1-family-bruder', 'a1-family-eltern'],
+  },
+  {
+    id: 'a1-exit-routine',
+    titlePt: 'Rotina',
+    situationPt: 'Descrever um dia normal com várias frases.',
+    competencyIds: ['a1.routine'],
+    evidenceTargetIds: ['a1-routine-aufstehen', 'a1-routine-arbeit', 'a1-routine-kochen'],
+  },
+  {
+    id: 'a1-exit-work',
+    titlePt: 'Trabalho',
+    situationPt: 'Falar do trabalho ou estudos.',
+    competencyIds: ['a1.personal', 'a1.routine'],
+    evidenceTargetIds: ['a1-personal-beruf', 'a1-routine-arbeit', 'a1-everyday-bei-arbeit'],
+  },
+  {
+    id: 'a1-exit-shopping',
+    titlePt: 'Compra',
+    situationPt: 'Perguntar preço e fazer um pedido.',
+    competencyIds: ['a1.shopping'],
+    evidenceTargetIds: ['a1-shopping-kostet', 'a1-shopping-nehme', 'a1-shopping-moechte'],
+  },
+  {
+    id: 'a1-exit-food',
+    titlePt: 'Comida / bebida',
+    situationPt: 'Pedir comida ou bebida e a conta.',
+    competencyIds: ['a1.shopping'],
+    evidenceTargetIds: ['a1-food-kaffee', 'a1-food-wasser', 'a1-food-rechnung'],
+  },
+  {
+    id: 'a1-exit-city',
+    titlePt: 'Cidade',
+    situationPt: 'Pedir informação e orientação na cidade.',
+    competencyIds: ['a1.ask_info'],
+    evidenceTargetIds: ['a1-info-bahnhof', 'a1-info-hotel', 'a1-info-mit-bus'],
+  },
+  {
+    id: 'a1-exit-appointment',
+    titlePt: 'Compromisso',
+    situationPt: 'Marcar um encontro ou compromisso simples.',
+    competencyIds: ['a1.numbers_time'],
+    evidenceTargetIds: ['a1-time-freitag', 'a1-time-treffen', 'a1-time-wann'],
+  },
+  {
+    id: 'a1-exit-plans',
+    titlePt: 'Planos',
+    situationPt: 'Falar de planos simples para amanhã ou o fim de semana.',
+    competencyIds: ['a1.numbers_time'],
+    evidenceTargetIds: ['a1-time-morgen', 'a1-time-wochenende', 'a1-time-mit-freunden'],
+  },
+  {
+    id: 'a1-exit-problem',
+    titlePt: 'Problema cotidiano',
+    situationPt: 'Pedir ajuda, repetição ou resolver um pequeno problema.',
+    competencyIds: ['a1.help'],
+    evidenceTargetIds: ['a1-help-koennen', 'a1-help-wiederholen', 'a1-everyday-problem'],
+  },
+];
+
+/**
+ * Gate situacional A1: cada cenário exige evidência pronta em ≥50% dos targets
+ * e pelo menos 1 produção no cenário. Aprovação: ≥7 de 10 situações.
+ */
+export function gradeA1ExitAssessment(learning: UserLearningProfile): {
+  passed: boolean;
+  score: number;
+  reason: string;
+  scenariosPassed: number;
+  scenarioResults: Array<{ id: string; passed: boolean; coverage: number }>;
+} {
+  const scenarioResults = A1_EXIT_SCENARIOS.map((sc) => {
+    const ids = sc.evidenceTargetIds;
+    let ready = 0;
+    let produced = 0;
+    for (const id of ids) {
+      const c = learning.phrases[id];
+      if (isReadyForAdvance(c)) ready += 1;
+      if ((c?.timesProduced ?? 0) > 0 || (c?.timesCorrect ?? 0) > 0) produced += 1;
+    }
+    const coverage = ready / Math.max(1, ids.length);
+    const passed = coverage >= 0.5 && produced >= 1;
+    return { id: sc.id, passed, coverage };
+  });
+  const scenariosPassed = scenarioResults.filter((r) => r.passed).length;
+  const score = Math.round((scenariosPassed / A1_EXIT_SCENARIOS.length) * 100);
+  const passed = scenariosPassed >= 7;
+  return {
+    passed,
+    score,
+    reason: passed
+      ? 'Produção situacional A1 suficiente para avançar.'
+      : 'Ainda faltam situações comunicativas A1 do cotidiano.',
+    scenariosPassed,
+    scenarioResults,
+  };
 }
 
 /** Nenhum nível acima de C2 está implementado — todos L0–C2 são executáveis. */

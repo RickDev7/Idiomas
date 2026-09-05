@@ -20,6 +20,7 @@ export class AudioStreamPlayer {
   private sourceCount = 0;
   /** Incrementado em stopAll/setGeneration — onended antigo não pode continuar a cadeia. */
   private playbackEpoch = 0;
+  private lastSourceEndCtxTime: number | null = null;
   private readonly serviceId = 'audioStreamPlayer';
 
   getDebugState(): {
@@ -99,6 +100,19 @@ export class AudioStreamPlayer {
     }
     if (this.queue.length === 0) {
       this.isPlaying = false;
+      const ctx = this.audioCtx;
+      audioTrace('QUEUE_STARVATION', {
+        sessionGen: this.activeGeneration,
+        serviceId: this.serviceId,
+        queueLength: 0,
+        sourceCount: this.sourceCount,
+        isPlaying: false,
+        audioContextState: ctx?.state ?? 'none',
+        audioContextCurrentTime: ctx?.currentTime ?? null,
+        timestamp: Date.now(),
+      });
+      // Fim da cadeia — o próximo source é outro turno, não gap intra-fala.
+      this.lastSourceEndCtxTime = null;
       return;
     }
     if (epoch !== this.playbackEpoch) return;
@@ -138,12 +152,18 @@ export class AudioStreamPlayer {
       if (this.currentSource !== source) return;
       this.currentSource = null;
       this.sourceCount = Math.max(0, this.sourceCount - 1);
+      const endTime = ctx.currentTime;
+      this.lastSourceEndCtxTime = endTime;
       audioTrace('source:stop', {
         sessionGen: generation,
         serviceId: this.serviceId,
         sourceCount: this.sourceCount,
         queueLength: this.queue.length,
         activeGeneration: this.activeGeneration,
+        sourceEndTime: endTime,
+        audioContextCurrentTime: endTime,
+        audioContextState: ctx.state,
+        bufferDuration,
       });
       if (generation === this.activeGeneration) {
         this.playNext();
@@ -163,6 +183,22 @@ export class AudioStreamPlayer {
         activeGeneration: this.activeGeneration,
       });
     }
+    const startWhen = ctx.currentTime;
+    const gapFromPrev =
+      this.lastSourceEndCtxTime != null ? startWhen - this.lastSourceEndCtxTime : null;
+    if (gapFromPrev != null && gapFromPrev > 0.008) {
+      audioTrace('SOURCE_GAP', {
+        sessionGen: generation,
+        serviceId: this.serviceId,
+        gapSeconds: gapFromPrev,
+        sourceStartTime: startWhen,
+        sourceEndTimePrev: this.lastSourceEndCtxTime,
+        audioContextCurrentTime: startWhen,
+        bufferDuration,
+        queueLength: this.queue.length,
+        audioContextState: ctx.state,
+      });
+    }
     audioTrace('source:start', {
       sessionGen: generation,
       serviceId: this.serviceId,
@@ -172,9 +208,13 @@ export class AudioStreamPlayer {
       contextSampleRate: ctx.sampleRate,
       bufferDuration,
       playbackRate: source.playbackRate?.value ?? 1,
+      sourceStartTime: startWhen,
+      audioContextCurrentTime: startWhen,
+      audioContextState: ctx.state,
+      generation,
     });
     // currentTime (não 0): 0 é o início do contexto e já passou; o spec toca imediatamente se when < currentTime.
-    source.start(ctx.currentTime);
+    source.start(startWhen);
   }
 
   /** Cancela instantaneamente qualquer fala ativa e limpa a fila. */
@@ -194,6 +234,7 @@ export class AudioStreamPlayer {
     }
     this.sourceCount = 0;
     this.isPlaying = false;
+    this.lastSourceEndCtxTime = null;
     audioTrace('stopAll', {
       serviceId: this.serviceId,
       activeGeneration: this.activeGeneration,

@@ -9,6 +9,7 @@ import { isAutomated, readAutomationScore } from '@/services/learning/Automation
 import { CURATED } from './content';
 import { LEVEL_BY_ID } from './levels';
 import { COMPETENCY_BY_ID } from './competencies';
+import { scopeCurriculumTargets, scopePhrasePool, isInModuleScope } from './PlannerModuleRestrict';
 
 export interface B2Target {
   id: string;
@@ -140,14 +141,17 @@ function isDeferred(conf: PhraseConfidence | undefined): boolean {
 export function getNextB2Target(
   currentTargetId: string | null | undefined,
   learning: UserLearningProfile,
-  opts?: { excludePhraseId?: string | null; skipPhraseIds?: string[] | null },
+  opts?: { excludePhraseId?: string | null; skipPhraseIds?: string[] | null; restrictToTargetIds?: readonly string[] | null },
 ): B2Target | null {
   const skip = new Set<string>(opts?.skipPhraseIds ?? []);
   if (opts?.excludePhraseId) skip.add(opts.excludePhraseId);
   if (currentTargetId) skip.add(currentTargetId);
 
-  const ordered = B2_CURRICULUM;
-  const current = currentTargetId ? BY_ID.get(currentTargetId) : undefined;
+  const ordered = scopeCurriculumTargets(B2_CURRICULUM, opts?.restrictToTargetIds);
+  if (ordered.length === 0) return null;
+
+  const currentRaw = currentTargetId ? BY_ID.get(currentTargetId) : undefined;
+  const current = currentRaw && isInModuleScope(currentRaw.id, opts?.restrictToTargetIds) ? currentRaw : undefined;
 
   const pickFirstOpen = (candidates: B2Target[]): B2Target | null => {
     for (const t of candidates) {
@@ -161,7 +165,7 @@ export function getNextB2Target(
   };
 
   if (current) {
-    const sameUnit = getB2TargetsByUnit(current.unitId).filter((t) => t.order > current.order);
+    const sameUnit = scopeCurriculumTargets(getB2TargetsByUnit(current.unitId), opts?.restrictToTargetIds).filter((t) => t.order > current.order);
     const nextInUnit = pickFirstOpen(sameUnit);
     if (nextInUnit) return nextInUnit;
   }
@@ -169,7 +173,7 @@ export function getNextB2Target(
   const unitOrder = b2UnitIdsInOrder();
   const startUnitIdx = current ? Math.max(0, unitOrder.indexOf(current.unitId)) : 0;
   for (let i = startUnitIdx; i < unitOrder.length; i++) {
-    const unitTargets = getB2TargetsByUnit(unitOrder[i]);
+    const unitTargets = scopeCurriculumTargets(getB2TargetsByUnit(unitOrder[i]), opts?.restrictToTargetIds);
     const open = pickFirstOpen(unitTargets);
     if (open) return open;
   }
@@ -196,11 +200,15 @@ export function getNextB2Target(
 export function pickB2PlannerTarget(
   learning: UserLearningProfile,
   phrases: Phrase[],
-  opts?: { excludePhraseId?: string | null; skipPhraseIds?: string[] | null; stickPhraseId?: string | null },
+  opts?: { excludePhraseId?: string | null; skipPhraseIds?: string[] | null; stickPhraseId?: string | null; restrictToTargetIds?: readonly string[] | null },
 ): { conf: PhraseConfidence | undefined; phrase: Phrase | null; action: 'introduce' | 'practice' | 'recall' | 'converse' } {
-  const pool = b2PhrasePool(phrases);
+  const pool = scopePhrasePool(b2PhrasePool(phrases), opts?.restrictToTargetIds);
 
-  if (opts?.stickPhraseId && isB2TargetId(opts.stickPhraseId)) {
+  if (
+    opts?.stickPhraseId &&
+    isB2TargetId(opts.stickPhraseId) &&
+    isInModuleScope(opts.stickPhraseId, opts?.restrictToTargetIds)
+  ) {
     const stuck = pool.find((p) => p.id === opts.stickPhraseId) ?? null;
     if (stuck) {
       const conf = learning.phrases[stuck.id];
@@ -287,4 +295,210 @@ export function assertB2CurriculumIntegrity(): { ok: boolean; errors: string[] }
 
   if (B2_CURRICULUM.length === 0) errors.push('no B2 targets');
   return { ok: errors.length === 0, errors };
+}
+
+/** Colocação pré-reforma escolar B2 (24 targets esqueleto). */
+export const B2_LEGACY_PLACEMENT: Record<string, { unitId: string; competencyId: string }> = {
+  'b2-narrative-erfahrung': { unitId: 'b2.u1', competencyId: 'b2.narrative' },
+  'b2-narrative-damals': { unitId: 'b2.u1', competencyId: 'b2.narrative' },
+  'b2-narrative-rueckblick': { unitId: 'b2.u1', competencyId: 'b2.narrative' },
+  'b2-cause-dadurch': { unitId: 'b2.u2', competencyId: 'b2.cause_effect' },
+  'b2-cause-waere': { unitId: 'b2.u2', competencyId: 'b2.cause_effect' },
+  'b2-cause-folglich': { unitId: 'b2.u2', competencyId: 'b2.cause_effect' },
+  'b2-argue-auffassung': { unitId: 'b2.u3', competencyId: 'b2.argue' },
+  'b2-argue-dagegen': { unitId: 'b2.u3', competencyId: 'b2.argue' },
+  'b2-argue-laesst': { unitId: 'b2.u3', competencyId: 'b2.argue' },
+  'b2-compare-optionen': { unitId: 'b2.u4', competencyId: 'b2.compare' },
+  'b2-compare-vorteile': { unitId: 'b2.u4', competencyId: 'b2.compare' },
+  'b2-compare-abwaegen': { unitId: 'b2.u4', competencyId: 'b2.compare' },
+  'b2-solve-problem': { unitId: 'b2.u5', competencyId: 'b2.problems_solutions' },
+  'b2-solve-vorschlag': { unitId: 'b2.u5', competencyId: 'b2.problems_solutions' },
+  'b2-solve-schritt': { unitId: 'b2.u5', competencyId: 'b2.problems_solutions' },
+  'b2-work-optionen': { unitId: 'b2.u6', competencyId: 'b2.work_pro' },
+  'b2-work-kompromiss': { unitId: 'b2.u6', competencyId: 'b2.work_pro' },
+  'b2-work-verhandelbar': { unitId: 'b2.u6', competencyId: 'b2.work_pro' },
+  'b2-defend-entscheidung': { unitId: 'b2.u7', competencyId: 'b2.defend' },
+  'b2-defend-widersprechen': { unitId: 'b2.u7', competencyId: 'b2.defend' },
+  'b2-defend-halten': { unitId: 'b2.u7', competencyId: 'b2.defend' },
+  'b2-fluent-ehrlich': { unitId: 'b2.u8', competencyId: 'b2.fluent' },
+  'b2-fluent-hoere': { unitId: 'b2.u8', competencyId: 'b2.fluent' },
+  'b2-fluent-sinn': { unitId: 'b2.u8', competencyId: 'b2.fluent' },
+};
+
+export type B2TargetAuditStatus = 'REUTILIZADO' | 'NOVO';
+
+export type B2TargetAuditRow = {
+  targetId: string;
+  moduleId: string;
+  competencyId: string;
+  status: B2TargetAuditStatus;
+  previousUnitId: string | null;
+  previousCompetencyId: string | null;
+  reorganized: boolean;
+};
+
+export function auditB2Targets(): {
+  rows: B2TargetAuditRow[];
+  total: number;
+  reused: number;
+  novo: number;
+  reorganizedAmongReused: number;
+  duplicateIds: string[];
+} {
+  const seen = new Set<string>();
+  const duplicateIds: string[] = [];
+  const rows: B2TargetAuditRow[] = B2_CURRICULUM.map((t) => {
+    if (seen.has(t.id)) duplicateIds.push(t.id);
+    seen.add(t.id);
+    const legacy = B2_LEGACY_PLACEMENT[t.id];
+    const status: B2TargetAuditStatus = legacy ? 'REUTILIZADO' : 'NOVO';
+    const previousUnitId = legacy?.unitId ?? null;
+    const previousCompetencyId = legacy?.competencyId ?? null;
+    const reorganized = !!(
+      legacy
+      && (legacy.unitId !== t.unitId || legacy.competencyId !== t.competencyId)
+    );
+    return {
+      targetId: t.id,
+      moduleId: t.unitId,
+      competencyId: t.competencyId,
+      status,
+      previousUnitId,
+      previousCompetencyId,
+      reorganized,
+    };
+  });
+  return {
+    rows,
+    total: rows.length,
+    reused: rows.filter((r) => r.status === 'REUTILIZADO').length,
+    novo: rows.filter((r) => r.status === 'NOVO').length,
+    reorganizedAmongReused: rows.filter((r) => r.reorganized).length,
+    duplicateIds,
+  };
+}
+
+export type B2ExitScenario = {
+  id: string;
+  titlePt: string;
+  situationPt: string;
+  competencyIds: string[];
+  evidenceTargetIds: string[];
+};
+
+/** Avaliação situacional de saída B2 (escola de idiomas). */
+export const B2_EXIT_SCENARIOS: B2ExitScenario[] = [
+  {
+    id: 'b2-exit-argue',
+    titlePt: 'Defender opinião',
+    situationPt: 'Defender uma opinião com argumentos, exemplo e conclusão.',
+    competencyIds: ['b2.argue'],
+    evidenceTargetIds: ['b2-argue-auffassung', 'b2-argue-beispiel', 'b2-argue-schluss'],
+  },
+  {
+    id: 'b2-exit-compare',
+    titlePt: 'Comparar e decidir',
+    situationPt: 'Comparar duas opções e justificar a decisão.',
+    competencyIds: ['b2.compare'],
+    evidenceTargetIds: ['b2-compare-optionen', 'b2-compare-abwaegen', 'b2-compare-begruenden'],
+  },
+  {
+    id: 'b2-exit-objection',
+    titlePt: 'Lidar com objeção',
+    situationPt: 'Reagir a uma objeção e manter ou ajustar a posição.',
+    competencyIds: ['b2.defend', 'b2.argue'],
+    evidenceTargetIds: ['b2-argue-einwand', 'b2-defend-widersprechen', 'b2-conflict-zuhoeren'],
+  },
+  {
+    id: 'b2-exit-presentation',
+    titlePt: 'Apresentação profissional curta',
+    situationPt: 'Fazer apresentação profissional clara com pontos principais.',
+    competencyIds: ['b2.work_pro'],
+    evidenceTargetIds: ['b2-work-praesentation', 'b2-work-prozess', 'b2-work-feedback'],
+  },
+  {
+    id: 'b2-exit-negotiate',
+    titlePt: 'Negociar solução',
+    situationPt: 'Negociar solução para um problema ou conflito.',
+    competencyIds: ['b2.defend', 'b2.work_pro'],
+    evidenceTargetIds: ['b2-work-kompromiss', 'b2-conflict-ausweg', 'b2-solve-vorschlag'],
+  },
+  {
+    id: 'b2-exit-culture',
+    titlePt: 'Experiência cultural ou viagem',
+    situationPt: 'Relatar experiência cultural/viagem e justificar preferência.',
+    competencyIds: ['b2.narrative'],
+    evidenceTargetIds: ['b2-narrative-erfahrung', 'b2-culture-empfehlen', 'b2-culture-anpassung'],
+  },
+  {
+    id: 'b2-exit-society',
+    titlePt: 'Tema social ou tecnológico',
+    situationPt: 'Discutir tema social/tecnológico familiar com nuance.',
+    competencyIds: ['b2.cause_effect'],
+    evidenceTargetIds: ['b2-society-technik', 'b2-society-medien', 'b2-society-datenschutz'],
+  },
+  {
+    id: 'b2-exit-service',
+    titlePt: 'Serviço ou reclamação',
+    situationPt: 'Reclamar ou resolver situação de serviço/contrato.',
+    competencyIds: ['b2.problems_solutions'],
+    evidenceTargetIds: ['b2-service-beschwerde', 'b2-service-vertrag', 'b2-service-bedingungen'],
+  },
+  {
+    id: 'b2-exit-register',
+    titlePt: 'Registro profissional',
+    situationPt: 'Adaptar a fala para contexto profissional.',
+    competencyIds: ['b2.fluent', 'b2.work_pro'],
+    evidenceTargetIds: ['b2-fluent-register', 'b2-work-frist', 'b2-work-verhandelbar'],
+  },
+  {
+    id: 'b2-exit-discussion',
+    titlePt: 'Discussão espontânea 5–7 min',
+    situationPt: 'Sustentar discussão estruturada com reação ao interlocutor.',
+    competencyIds: ['b2.fluent', 'b2.argue', 'b2.defend'],
+    evidenceTargetIds: [
+      'b2-fluent-diskussion',
+      'b2-fluent-zusammen',
+      'b2-fluent-reaktion',
+      'b2-argue-konsens',
+    ],
+  },
+];
+
+/**
+ * Gate situacional B2: cada cenário exige evidência pronta em ≥50% dos targets
+ * e pelo menos 1 produção no cenário. Aprovação: ≥7 de 10 situações.
+ */
+export function gradeB2ExitAssessment(learning: UserLearningProfile): {
+  passed: boolean;
+  score: number;
+  reason: string;
+  scenariosPassed: number;
+  scenarioResults: Array<{ id: string; passed: boolean; coverage: number }>;
+} {
+  const scenarioResults = B2_EXIT_SCENARIOS.map((sc) => {
+    const ids = sc.evidenceTargetIds;
+    let ready = 0;
+    let produced = 0;
+    for (const id of ids) {
+      const c = learning.phrases[id];
+      if (isReadyForAdvance(c)) ready += 1;
+      if ((c?.timesProduced ?? 0) > 0 || (c?.timesCorrect ?? 0) > 0) produced += 1;
+    }
+    const coverage = ready / Math.max(1, ids.length);
+    const passed = coverage >= 0.5 && produced >= 1;
+    return { id: sc.id, passed, coverage };
+  });
+  const scenariosPassed = scenarioResults.filter((r) => r.passed).length;
+  const score = Math.round((scenariosPassed / B2_EXIT_SCENARIOS.length) * 100);
+  const passed = scenariosPassed >= 7;
+  return {
+    passed,
+    score,
+    reason: passed
+      ? 'Produção situacional B2 suficiente para avançar.'
+      : 'Ainda faltam situações comunicativas B2 de fluência funcional.',
+    scenariosPassed,
+    scenarioResults,
+  };
 }

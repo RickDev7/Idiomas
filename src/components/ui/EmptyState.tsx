@@ -33,15 +33,14 @@ export function EmptyState({
         <img
           src={imageSrc}
           alt={imageAlt}
-          className="relative w-[168px] h-[168px] object-contain drop-shadow-[0_12px_40px_rgba(124,58,237,0.45)]"
+          className="relative w-[168px] h-[168px] object-contain"
           style={{
-            maskImage: 'radial-gradient(circle at 50% 48%, black 58%, transparent 78%)',
-            WebkitMaskImage: 'radial-gradient(circle at 50% 48%, black 58%, transparent 78%)',
+            filter: 'drop-shadow(0 12px 40px color-mix(in srgb, var(--learning-violet) 40%, transparent))',
           }}
           draggable={false}
         />
       </div>
-      {title && <p className="text-[18px] font-semibold text-white text-center font-[family-name:var(--font-display)]">{title}</p>}
+      {title && <p className="text-[18px] font-semibold text-[var(--text-primary)] text-center font-[family-name:var(--font-display)]">{title}</p>}
       {subtitle && <p className="dt-body text-center -mt-2">{subtitle}</p>}
       {footer && <div className="w-full mt-2">{footer}</div>}
     </div>

@@ -8,6 +8,11 @@ const pt: Dict = {
   'nav.talk': 'Conversar',
   'nav.review': 'Revisar',
   'nav.progress': 'Progresso',
+  'nav.course': 'Meu Curso',
+  'nav.start': 'Início',
+  'nav.aria': 'Navegação principal',
+  'home.start': 'Começar curso',
+  'home.continue': 'Continuar curso',
   'settings.title': 'Configurações',
   'settings.theme': 'Tema',
   'settings.theme.dark': 'Escuro',
@@ -52,8 +57,11 @@ const pt: Dict = {
   'settings.reset': 'Restaurar configurações',
   'settings.reset.hint': 'Só preferências. Não apaga aprendizado nem memória.',
   'settings.back': 'Voltar',
-  'home.start': 'Começar treino',
-  'home.continue': 'Continuar treino',
+  'settings.section.general': 'GERAL',
+  'settings.section.audio': 'ÁUDIO',
+  'settings.section.learning': 'APRENDIZADO',
+  'settings.section.notifications': 'NOTIFICAÇÕES',
+  'settings.subtitle': 'Preferências',
 };
 
 const en: Dict = {
@@ -62,6 +70,11 @@ const en: Dict = {
   'nav.talk': 'Talk',
   'nav.review': 'Review',
   'nav.progress': 'Progress',
+  'nav.course': 'My Course',
+  'nav.start': 'Home',
+  'nav.aria': 'Main navigation',
+  'home.start': 'Start course',
+  'home.continue': 'Continue course',
   'settings.title': 'Settings',
   'settings.theme': 'Theme',
   'settings.theme.dark': 'Dark',
@@ -106,8 +119,11 @@ const en: Dict = {
   'settings.reset': 'Reset settings',
   'settings.reset.hint': 'Preferences only. Does not erase learning or memory.',
   'settings.back': 'Back',
-  'home.start': 'Start training',
-  'home.continue': 'Continue training',
+  'settings.section.general': 'GENERAL',
+  'settings.section.audio': 'AUDIO',
+  'settings.section.learning': 'LEARNING',
+  'settings.section.notifications': 'NOTIFICATIONS',
+  'settings.subtitle': 'Preferences',
 };
 
 const de: Dict = {
@@ -116,6 +132,11 @@ const de: Dict = {
   'nav.talk': 'Sprechen',
   'nav.review': 'Wiederholen',
   'nav.progress': 'Fortschritt',
+  'nav.course': 'Mein Kurs',
+  'nav.start': 'Start',
+  'nav.aria': 'Hauptnavigation',
+  'home.start': 'Kurs starten',
+  'home.continue': 'Kurs fortsetzen',
   'settings.title': 'Einstellungen',
   'settings.theme': 'Design',
   'settings.theme.dark': 'Dunkel',
@@ -160,8 +181,11 @@ const de: Dict = {
   'settings.reset': 'Einstellungen zurücksetzen',
   'settings.reset.hint': 'Nur Einstellungen. Lernen und Speicher bleiben.',
   'settings.back': 'Zurück',
-  'home.start': 'Training starten',
-  'home.continue': 'Training fortsetzen',
+  'settings.section.general': 'ALLGEMEIN',
+  'settings.section.audio': 'AUDIO',
+  'settings.section.learning': 'LERNEN',
+  'settings.section.notifications': 'BENACHRICHTIGUNGEN',
+  'settings.subtitle': 'Einstellungen',
 };
 
 const TABLES: Record<InterfaceLanguage, Dict> = {
@@ -198,9 +222,10 @@ export function getLocale(): InterfaceLanguage {
   return UiPrefsService.get().interfaceLanguage;
 }
 
-export function t(key: string, _lang?: InterfaceLanguage): string {
-  // UI normal do app é sempre português (conteúdo de aprendizado permanece em alemão).
-  return TABLES['pt-BR'][key] || key;
+export function t(key: string, lang?: InterfaceLanguage): string {
+  const locale = lang || getLocale();
+  const table = TABLES[locale] || TABLES['pt-BR'];
+  return table[key] || TABLES['pt-BR'][key] || key;
 }
 
 export function immersionHintLocalized(pct: number, lang?: InterfaceLanguage): string {

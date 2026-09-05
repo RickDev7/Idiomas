@@ -9,6 +9,7 @@ import { isAutomated, readAutomationScore } from '@/services/learning/Automation
 import { CURATED } from './content';
 import { LEVEL_BY_ID } from './levels';
 import { COMPETENCY_BY_ID } from './competencies';
+import { scopeCurriculumTargets, scopePhrasePool, isInModuleScope } from './PlannerModuleRestrict';
 
 export interface C2Target {
   id: string;
@@ -140,14 +141,17 @@ function isDeferred(conf: PhraseConfidence | undefined): boolean {
 export function getNextC2Target(
   currentTargetId: string | null | undefined,
   learning: UserLearningProfile,
-  opts?: { excludePhraseId?: string | null; skipPhraseIds?: string[] | null },
+  opts?: { excludePhraseId?: string | null; skipPhraseIds?: string[] | null; restrictToTargetIds?: readonly string[] | null },
 ): C2Target | null {
   const skip = new Set<string>(opts?.skipPhraseIds ?? []);
   if (opts?.excludePhraseId) skip.add(opts.excludePhraseId);
   if (currentTargetId) skip.add(currentTargetId);
 
-  const ordered = C2_CURRICULUM;
-  const current = currentTargetId ? BY_ID.get(currentTargetId) : undefined;
+  const ordered = scopeCurriculumTargets(C2_CURRICULUM, opts?.restrictToTargetIds);
+  if (ordered.length === 0) return null;
+
+  const currentRaw = currentTargetId ? BY_ID.get(currentTargetId) : undefined;
+  const current = currentRaw && isInModuleScope(currentRaw.id, opts?.restrictToTargetIds) ? currentRaw : undefined;
 
   const pickFirstOpen = (candidates: C2Target[]): C2Target | null => {
     for (const t of candidates) {
@@ -161,7 +165,7 @@ export function getNextC2Target(
   };
 
   if (current) {
-    const sameUnit = getC2TargetsByUnit(current.unitId).filter((t) => t.order > current.order);
+    const sameUnit = scopeCurriculumTargets(getC2TargetsByUnit(current.unitId), opts?.restrictToTargetIds).filter((t) => t.order > current.order);
     const nextInUnit = pickFirstOpen(sameUnit);
     if (nextInUnit) return nextInUnit;
   }
@@ -169,7 +173,7 @@ export function getNextC2Target(
   const unitOrder = c2UnitIdsInOrder();
   const startUnitIdx = current ? Math.max(0, unitOrder.indexOf(current.unitId)) : 0;
   for (let i = startUnitIdx; i < unitOrder.length; i++) {
-    const unitTargets = getC2TargetsByUnit(unitOrder[i]);
+    const unitTargets = scopeCurriculumTargets(getC2TargetsByUnit(unitOrder[i]), opts?.restrictToTargetIds);
     const open = pickFirstOpen(unitTargets);
     if (open) return open;
   }
@@ -196,11 +200,15 @@ export function getNextC2Target(
 export function pickC2PlannerTarget(
   learning: UserLearningProfile,
   phrases: Phrase[],
-  opts?: { excludePhraseId?: string | null; skipPhraseIds?: string[] | null; stickPhraseId?: string | null },
+  opts?: { excludePhraseId?: string | null; skipPhraseIds?: string[] | null; stickPhraseId?: string | null; restrictToTargetIds?: readonly string[] | null },
 ): { conf: PhraseConfidence | undefined; phrase: Phrase | null; action: 'introduce' | 'practice' | 'recall' | 'converse' } {
-  const pool = c2PhrasePool(phrases);
+  const pool = scopePhrasePool(c2PhrasePool(phrases), opts?.restrictToTargetIds);
 
-  if (opts?.stickPhraseId && isC2TargetId(opts.stickPhraseId)) {
+  if (
+    opts?.stickPhraseId &&
+    isC2TargetId(opts.stickPhraseId) &&
+    isInModuleScope(opts.stickPhraseId, opts?.restrictToTargetIds)
+  ) {
     const stuck = pool.find((p) => p.id === opts.stickPhraseId) ?? null;
     if (stuck) {
       const conf = learning.phrases[stuck.id];
@@ -287,4 +295,212 @@ export function assertC2CurriculumIntegrity(): { ok: boolean; errors: string[] }
 
   if (C2_CURRICULUM.length === 0) errors.push('no C2 targets');
   return { ok: errors.length === 0, errors };
+}
+
+/** Colocação pré-reforma escolar C2 (24 targets esqueleto). */
+export const C2_LEGACY_PLACEMENT: Record<string, { unitId: string; competencyId: string }> = {
+  'c2-nuance-ambivalent': { unitId: 'c2.u1', competencyId: 'c2.nuance' },
+  'c2-nuance-nuancenreich': { unitId: 'c2.u1', competencyId: 'c2.nuance' },
+  'c2-nuance-praezise': { unitId: 'c2.u1', competencyId: 'c2.nuance' },
+  'c2-argue-vorbehalt': { unitId: 'c2.u2', competencyId: 'c2.argue' },
+  'c2-argue-mehrschichtig': { unitId: 'c2.u2', competencyId: 'c2.argue' },
+  'c2-argue-zugestaendnis': { unitId: 'c2.u2', competencyId: 'c2.argue' },
+  'c2-disc-aufbau': { unitId: 'c2.u3', competencyId: 'c2.discourse' },
+  'c2-disc-roterfaden': { unitId: 'c2.u3', competencyId: 'c2.discourse' },
+  'c2-disc-schluss': { unitId: 'c2.u3', competencyId: 'c2.discourse' },
+  'c2-inf-implizit': { unitId: 'c2.u4', competencyId: 'c2.inference' },
+  'c2-inf-deuten': { unitId: 'c2.u4', competencyId: 'c2.inference' },
+  'c2-inf-ableiten': { unitId: 'c2.u4', competencyId: 'c2.inference' },
+  'c2-reg-formell': { unitId: 'c2.u5', competencyId: 'c2.register' },
+  'c2-reg-umgang': { unitId: 'c2.u5', competencyId: 'c2.register' },
+  'c2-reg-wechseln': { unitId: 'c2.u5', competencyId: 'c2.register' },
+  'c2-med-interessen': { unitId: 'c2.u6', competencyId: 'c2.mediate' },
+  'c2-med-bruecke': { unitId: 'c2.u6', competencyId: 'c2.mediate' },
+  'c2-med-persuasion': { unitId: 'c2.u6', competencyId: 'c2.mediate' },
+  'c2-crit-begriff': { unitId: 'c2.u7', competencyId: 'c2.critical' },
+  'c2-crit-widerspruch': { unitId: 'c2.u7', competencyId: 'c2.critical' },
+  'c2-crit-reflexion': { unitId: 'c2.u7', competencyId: 'c2.critical' },
+  'c2-flu-spontan': { unitId: 'c2.u8', competencyId: 'c2.fluent' },
+  'c2-flu-anpassen': { unitId: 'c2.u8', competencyId: 'c2.fluent' },
+  'c2-flu-abschluss': { unitId: 'c2.u8', competencyId: 'c2.fluent' },
+};
+
+export type C2TargetAuditStatus = 'REUTILIZADO' | 'NOVO';
+
+export type C2TargetAuditRow = {
+  targetId: string;
+  moduleId: string;
+  competencyId: string;
+  status: C2TargetAuditStatus;
+  previousUnitId: string | null;
+  previousCompetencyId: string | null;
+  reorganized: boolean;
+};
+
+export function auditC2Targets(): {
+  rows: C2TargetAuditRow[];
+  total: number;
+  reused: number;
+  novo: number;
+  reorganizedAmongReused: number;
+  duplicateIds: string[];
+} {
+  const seen = new Set<string>();
+  const duplicateIds: string[] = [];
+  const rows: C2TargetAuditRow[] = C2_CURRICULUM.map((t) => {
+    if (seen.has(t.id)) duplicateIds.push(t.id);
+    seen.add(t.id);
+    const legacy = C2_LEGACY_PLACEMENT[t.id];
+    const status: C2TargetAuditStatus = legacy ? 'REUTILIZADO' : 'NOVO';
+    const previousUnitId = legacy?.unitId ?? null;
+    const previousCompetencyId = legacy?.competencyId ?? null;
+    const reorganized = !!(
+      legacy
+      && (legacy.unitId !== t.unitId || legacy.competencyId !== t.competencyId)
+    );
+    return {
+      targetId: t.id,
+      moduleId: t.unitId,
+      competencyId: t.competencyId,
+      status,
+      previousUnitId,
+      previousCompetencyId,
+      reorganized,
+    };
+  });
+  return {
+    rows,
+    total: rows.length,
+    reused: rows.filter((r) => r.status === 'REUTILIZADO').length,
+    novo: rows.filter((r) => r.status === 'NOVO').length,
+    reorganizedAmongReused: rows.filter((r) => r.reorganized).length,
+    duplicateIds,
+  };
+}
+
+export type C2ExitScenario = {
+  id: string;
+  titlePt: string;
+  situationPt: string;
+  competencyIds: string[];
+  evidenceTargetIds: string[];
+};
+
+/** Avaliação situacional de saída C2 (nível terminal). */
+export const C2_EXIT_SCENARIOS: C2ExitScenario[] = [
+  {
+    id: 'c2-exit-position',
+    titlePt: 'Defender posição com ressalvas',
+    situationPt: 'Defender posição complexa com evidência, ressalvas e conclusão.',
+    competencyIds: ['c2.argue'],
+    evidenceTargetIds: ['c2-argue-these', 'c2-argue-evidenz', 'c2-argue-vorbehalt', 'c2-argue-schluss'],
+  },
+  {
+    id: 'c2-exit-synthesis',
+    titlePt: 'Sintetizar perspectivas',
+    situationPt: 'Sintetizar duas ou mais perspectivas ou fontes.',
+    competencyIds: ['c2.inference'],
+    evidenceTargetIds: ['c2-acad-quellen', 'c2-acad-synthese', 'c2-inf-ableiten'],
+  },
+  {
+    id: 'c2-exit-counter',
+    titlePt: 'Contraponto difícil',
+    situationPt: 'Responder a contraponto difícil com nuance e reformulação.',
+    competencyIds: ['c2.discourse', 'c2.argue'],
+    evidenceTargetIds: ['c2-argue-zugestaendnis', 'c2-disc-reformulieren', 'c2-disc-grad'],
+  },
+  {
+    id: 'c2-exit-proposal',
+    titlePt: 'Proposta profissional ou acadêmica',
+    situationPt: 'Apresentar proposta com opções, risco e recomendação.',
+    competencyIds: ['c2.fluent', 'c2.register'],
+    evidenceTargetIds: ['c2-int-praesentation', 'c2-reg-fuehrung', 'c2-reg-akademisch'],
+  },
+  {
+    id: 'c2-exit-negotiate',
+    titlePt: 'Negociar conflito complexo',
+    situationPt: 'Negociar solução e alinhar interesses sob pressão.',
+    competencyIds: ['c2.mediate'],
+    evidenceTargetIds: ['c2-med-interessen', 'c2-med-bruecke', 'c2-crisis-naechste'],
+  },
+  {
+    id: 'c2-exit-ethics',
+    titlePt: 'Tema ético, social ou abstrato',
+    situationPt: 'Discutir ética, sustentabilidade ou desigualdade com equilíbrio.',
+    competencyIds: ['c2.critical'],
+    evidenceTargetIds: ['c2-ethik-technik', 'c2-ethik-nachhaltigkeit', 'c2-ethik-ungleichheit'],
+  },
+  {
+    id: 'c2-exit-media',
+    titlePt: 'Análise de mídia, cultura ou informação',
+    situationPt: 'Analisar representação, narrativa ou credibilidade.',
+    competencyIds: ['c2.nuance'],
+    evidenceTargetIds: ['c2-culture-medien', 'c2-culture-narrativ', 'c2-culture-glaubwuerdigkeit'],
+  },
+  {
+    id: 'c2-exit-crisis',
+    titlePt: 'Comunicação de crise',
+    situationPt: 'Comunicar situação crítica com clareza e diplomacia.',
+    competencyIds: ['c2.mediate', 'c2.register'],
+    evidenceTargetIds: ['c2-crisis-entscheidung', 'c2-crisis-risiko', 'c2-crisis-vertrag', 'c2-reg-diplomatie'],
+  },
+  {
+    id: 'c2-exit-register',
+    titlePt: 'Adaptação de registro',
+    situationPt: 'Adaptar o registro a contextos diferentes.',
+    competencyIds: ['c2.register', 'c2.fluent'],
+    evidenceTargetIds: ['c2-reg-formell', 'c2-reg-umgang', 'c2-reg-wechseln', 'c2-flu-anpassen'],
+  },
+  {
+    id: 'c2-exit-discussion',
+    titlePt: 'Discussão 10–12 minutos',
+    situationPt: 'Sustentar apresentação, mediação ou discussão estruturada de 10–12 minutos.',
+    competencyIds: ['c2.fluent', 'c2.discourse'],
+    evidenceTargetIds: [
+      'c2-int-praesentation',
+      'c2-int-mediation',
+      'c2-int-reaktion',
+      'c2-int-diskussion',
+      'c2-flu-abschluss',
+    ],
+  },
+];
+
+/**
+ * Gate situacional C2 (terminal): cada cenário exige evidência pronta em ≥50% dos targets
+ * e pelo menos 1 produção no cenário. Aprovação: ≥7 de 10 situações.
+ * Não desbloqueia nível posterior.
+ */
+export function gradeC2ExitAssessment(learning: UserLearningProfile): {
+  passed: boolean;
+  score: number;
+  reason: string;
+  scenariosPassed: number;
+  scenarioResults: Array<{ id: string; passed: boolean; coverage: number }>;
+} {
+  const scenarioResults = C2_EXIT_SCENARIOS.map((sc) => {
+    const ids = sc.evidenceTargetIds;
+    let ready = 0;
+    let produced = 0;
+    for (const id of ids) {
+      const c = learning.phrases[id];
+      if (isReadyForAdvance(c)) ready += 1;
+      if ((c?.timesProduced ?? 0) > 0 || (c?.timesCorrect ?? 0) > 0) produced += 1;
+    }
+    const coverage = ready / Math.max(1, ids.length);
+    const passed = coverage >= 0.5 && produced >= 1;
+    return { id: sc.id, passed, coverage };
+  });
+  const scenariosPassed = scenarioResults.filter((r) => r.passed).length;
+  const score = Math.round((scenariosPassed / C2_EXIT_SCENARIOS.length) * 100);
+  const passed = scenariosPassed >= 7;
+  return {
+    passed,
+    score,
+    reason: passed
+      ? 'Produção situacional C2 suficiente para conclusão terminal do currículo.'
+      : 'Ainda faltam situações comunicativas C2 de domínio avançado.',
+    scenariosPassed,
+    scenarioResults,
+  };
 }

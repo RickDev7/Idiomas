@@ -63,7 +63,7 @@ export function ProfilePage() {
   const strengths = real?.recentAdvances?.slice(0, 4) ?? [];
 
   const shortcuts = [
-    { label: 'Jornada', to: '/lernweg', icon: <IconChart size={16} />, tint: '#8B5CF6' },
+    { label: 'Meu Curso', to: '/jornada', icon: <IconChart size={16} />, tint: '#8B5CF6' },
     { label: 'Meus chunks', to: '/chunks', icon: <IconPuzzle size={16} />, tint: '#00F2FE' },
     { label: 'Conquistas', to: '/conquistas', icon: <IconTrophy size={16} />, tint: '#F97316' },
     { label: 'Configurações', to: '/configuracoes', icon: <IconGear size={16} />, tint: '#EC4899' },

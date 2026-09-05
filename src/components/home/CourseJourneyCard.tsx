@@ -66,7 +66,7 @@ export function CourseJourneyCard({ profile }: { profile: UserProfile }) {
         }}
       >
         <div className="px-5 pt-5 pb-4">
-          <p className="text-[11px] uppercase tracking-[0.18em] font-semibold text-white/70">Sua jornada</p>
+          <p className="text-[11px] uppercase tracking-[0.18em] font-semibold text-white/70">Meu Curso</p>
           <div className="mt-2 flex items-center gap-2">
             <span className="text-2xl leading-none">{rec.levelEmoji}</span>
             <div className="min-w-0">

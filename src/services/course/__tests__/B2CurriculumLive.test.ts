@@ -136,15 +136,15 @@ async function main() {
   const integrity = assertB2CurriculumIntegrity();
   check('1. integrity ok', integrity.ok);
   if (!integrity.ok) console.error(integrity.errors);
-  check('2. 24 targets', getB2Targets().length === 24);
+  check('2. 56 targets', getB2Targets().length === 56);
   check('3. all ids b2-', getB2Targets().every((t) => t.id.startsWith('b2-')));
   check('4. 8 units', b2UnitIdsInOrder().length === 8);
   check('5. 8 competencies', competenciesForLevel('B2').length === 8);
   check('6. first target id', b2FirstTarget().id === 'b2-narrative-erfahrung');
   check('7. first german', b2FirstTarget().german.includes('Erfahrung'));
   check('8. getById', getB2TargetById('b2-narrative-erfahrung')?.unitId === 'b2.u1');
-  check('9. unit u1 has 3', getB2TargetsByUnit('b2.u1').length === 3);
-  check('10. narrative competency 3', getB2TargetsByCompetency('b2.narrative').length === 3);
+  check('9. unit u1 has 7', getB2TargetsByUnit('b2.u1').length === 7);
+  check('10. narrative competency 7', getB2TargetsByCompetency('b2.narrative').length === 7);
   const curatedB2 = CURATED.filter((c) => c.level === 'B2');
   check('11. curated blocks have ids', curatedB2.every((b) => b.core.every((p) => !!p.id && !!p.unitId)));
   const units = LEVEL_BY_ID.B2.modules.flatMap((m) => m.units);

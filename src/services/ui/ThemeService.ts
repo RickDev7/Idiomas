@@ -29,6 +29,7 @@ function notify(): void {
 
 function applyDom(pref: ThemePreference): EffectiveTheme {
   const effective = resolveEffective(pref);
+  if (typeof document === 'undefined') return effective;
   const root = document.documentElement;
   root.classList.toggle('light', effective === 'light');
   root.dataset.theme = effective;
@@ -36,7 +37,7 @@ function applyDom(pref: ThemePreference): EffectiveTheme {
   root.style.colorScheme = effective;
 
   const meta = document.querySelector('meta[name="theme-color"]:not([media])') as HTMLMetaElement | null;
-  if (meta) meta.content = effective === 'light' ? '#F5F7FC' : '#081220';
+  if (meta) meta.content = effective === 'light' ? '#E8EEF6' : '#0B0F19';
 
   return effective;
 }
@@ -76,6 +77,11 @@ export const ThemeService = {
     localStorage.setItem(STORAGE_KEY, theme);
     applyDom(theme);
     notify();
+  },
+
+  reset(): ThemePreference {
+    this.set('system');
+    return preference;
   },
 
   subscribe(fn: Listener): () => void {

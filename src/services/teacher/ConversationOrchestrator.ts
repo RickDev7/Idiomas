@@ -228,6 +228,12 @@ import {
 } from '@/services/course/L0ToA1Graduation';
 import { getStoredCourseProgress } from '@/services/course/CourseProgressEngine';
 import { getCurrentLevel } from '@/services/course/LevelPresentation';
+import {
+  formatModulePedagogicalContext,
+  validateModuleSessionContext,
+  type ModuleSessionContext,
+} from '@/services/course/CurriculumModule';
+import type { CourseLevelId } from '@/services/course/types';
 import { StorageService } from '@/services/storage/StorageService';
 
 /** A1 curricular ativo (não L0 zero-mode). */
@@ -1199,7 +1205,13 @@ export function buildConversationPlan(
   learning: UserLearningProfile,
   phrases: Phrase[],
   elapsedMs = 0,
-  opts?: { l0BlockReviewPhraseId?: string | null; l0ExcludePhraseId?: string | null; l0SkipPhraseIds?: string[] | null },
+  opts?: {
+    l0BlockReviewPhraseId?: string | null;
+    l0ExcludePhraseId?: string | null;
+    l0SkipPhraseIds?: string[] | null;
+    /** Módulo selecionado (Continuar Curso / Meu Curso) — restringe o pool. */
+    moduleContext?: ModuleSessionContext | null;
+  },
 ): ConversationPlan {
   const zeroMode = isZeroLanguageMode(profile);
   const a1Mode = !zeroMode && isA1LiveMode(profile);
@@ -1209,6 +1221,35 @@ export function buildConversationPlan(
   const c1Mode = !zeroMode && !a1Mode && !a2Mode && !b1Mode && !b2Mode && isC1LiveMode(profile);
   const c2Mode =
     !zeroMode && !a1Mode && !a2Mode && !b1Mode && !b2Mode && !c1Mode && isC2LiveMode(profile);
+
+  const sessionLevel: CourseLevelId = zeroMode
+    ? 'L0'
+    : c2Mode
+      ? 'C2'
+      : c1Mode
+        ? 'C1'
+        : b2Mode
+          ? 'B2'
+          : b1Mode
+            ? 'B1'
+            : a2Mode
+              ? 'A2'
+              : a1Mode
+                ? 'A1'
+                : getCurrentLevel(profile, getStoredCourseProgress());
+
+  const moduleCtx = validateModuleSessionContext(opts?.moduleContext ?? null, sessionLevel);
+  const restrictToTargetIds = moduleCtx?.targetIds ?? null;
+  const moduleRestrictOpts = restrictToTargetIds
+    ? {
+        excludePhraseId: opts?.l0ExcludePhraseId,
+        skipPhraseIds: opts?.l0SkipPhraseIds,
+        restrictToTargetIds,
+      }
+    : {
+        excludePhraseId: opts?.l0ExcludePhraseId,
+        skipPhraseIds: opts?.l0SkipPhraseIds,
+      };
   const course = getStoredCourseProgress();
   const higherBlocked =
     !zeroMode &&
@@ -1278,55 +1319,38 @@ export function buildConversationPlan(
       blockReviewPhraseId: opts?.l0BlockReviewPhraseId,
       excludePhraseId: opts?.l0ExcludePhraseId,
       skipPhraseIds: opts?.l0SkipPhraseIds,
+      restrictToTargetIds,
     })
     : null;
 
   const c2Pick =
     !zeroMode && (c2Mode || reinforceC2)
-      ? pickC2PlannerTarget(learning, phrasePool, {
-        excludePhraseId: opts?.l0ExcludePhraseId,
-        skipPhraseIds: opts?.l0SkipPhraseIds,
-      })
+      ? pickC2PlannerTarget(learning, phrasePool, moduleRestrictOpts)
       : null;
 
   const c1Pick =
     !zeroMode && (c1Mode || reinforceC1)
-      ? pickC1PlannerTarget(learning, phrasePool, {
-        excludePhraseId: opts?.l0ExcludePhraseId,
-        skipPhraseIds: opts?.l0SkipPhraseIds,
-      })
+      ? pickC1PlannerTarget(learning, phrasePool, moduleRestrictOpts)
       : null;
 
   const b2Pick =
     !zeroMode && (b2Mode || reinforceB2)
-      ? pickB2PlannerTarget(learning, phrasePool, {
-        excludePhraseId: opts?.l0ExcludePhraseId,
-        skipPhraseIds: opts?.l0SkipPhraseIds,
-      })
+      ? pickB2PlannerTarget(learning, phrasePool, moduleRestrictOpts)
       : null;
 
   const b1Pick =
     !zeroMode && b1Mode
-      ? pickB1PlannerTarget(learning, phrasePool, {
-        excludePhraseId: opts?.l0ExcludePhraseId,
-        skipPhraseIds: opts?.l0SkipPhraseIds,
-      })
+      ? pickB1PlannerTarget(learning, phrasePool, moduleRestrictOpts)
       : null;
 
   const a2Pick =
     !zeroMode && a2Mode
-      ? pickA2PlannerTarget(learning, phrasePool, {
-        excludePhraseId: opts?.l0ExcludePhraseId,
-        skipPhraseIds: opts?.l0SkipPhraseIds,
-      })
+      ? pickA2PlannerTarget(learning, phrasePool, moduleRestrictOpts)
       : null;
 
   const a1Pick =
     !zeroMode && a1Mode
-      ? pickA1PlannerTarget(learning, phrasePool, {
-        excludePhraseId: opts?.l0ExcludePhraseId,
-        skipPhraseIds: opts?.l0SkipPhraseIds,
-      })
+      ? pickA1PlannerTarget(learning, phrasePool, moduleRestrictOpts)
       : null;
 
   let picked = zeroPick
@@ -1522,6 +1546,7 @@ export function buildConversationPlan(
       b1Mode ? 'B1_CURRICULUM — planner curricular' : '',
       a2Mode ? 'A2_CURRICULUM — planner curricular' : '',
       a1Mode ? 'A1_CURRICULUM — planner curricular' : '',
+      moduleCtx ? `MODULE_CONTEXT — ${moduleCtx.moduleId}` : '',
       reinforceC2 ? 'HIGHER_LEVEL_BLOCKED — reforço C2 (sem currículo superior)' : '',
       reinforceC1 ? 'HIGHER_LEVEL_BLOCKED — reforço C1' : '',
       reinforceB2 ? 'HIGHER_LEVEL_BLOCKED — reforço B2 até currículo C1+' : '',
@@ -1537,17 +1562,24 @@ export function buildConversationPlan(
   };
   return {
     ...partial,
-    teacherDirective: buildDirective(
-      partial,
-      zeroMode,
-      training.totalMinutes,
-      a1Mode,
-      a2Mode,
-      b1Mode,
-      b2Mode || reinforceB2,
-      c1Mode || reinforceC1,
-      c2Mode || reinforceC2,
-    ),
+    teacherDirective: [
+      moduleCtx
+        ? formatModulePedagogicalContext(moduleCtx, target?.id ?? null)
+        : null,
+      buildDirective(
+        partial,
+        zeroMode,
+        training.totalMinutes,
+        a1Mode,
+        a2Mode,
+        b1Mode,
+        b2Mode || reinforceB2,
+        c1Mode || reinforceC1,
+        c2Mode || reinforceC2,
+      ),
+    ]
+      .filter(Boolean)
+      .join('\n\n'),
     actionKickoff: buildActionKickoff(
       partial,
       zeroMode,
@@ -1573,12 +1605,14 @@ export function reevaluatePlan(
     l0StickPhraseId?: string | null;
     l0ExcludePhraseId?: string | null;
     l0SkipPhraseIds?: string[] | null;
+    moduleContext?: ModuleSessionContext | null;
   },
 ): ConversationPlan {
   const fresh = buildConversationPlan(profile, learning, phrases, elapsedMs, {
     l0BlockReviewPhraseId: opts?.l0BlockReviewPhraseId,
     l0ExcludePhraseId: opts?.l0ExcludePhraseId,
     l0SkipPhraseIds: opts?.l0SkipPhraseIds,
+    moduleContext: opts?.moduleContext,
   });
   const zeroMode = isZeroLanguageMode(profile);
 
@@ -1704,6 +1738,11 @@ export interface OrchestratorDeps {
   liveSessionGeneration?: number;
   /** Home / estrutura: frase-alvo só na inicialização desta sessão. */
   startPhraseId?: string;
+  /**
+   * Continuar Curso / Meu Curso: módulo selecionado.
+   * Restringe o planner; não substitui startPhraseId.
+   */
+  moduleContext?: ModuleSessionContext | null;
 }
 
 /** Seleção explícita da Home/Chunks não pôde ser aplicada — sem fallback para currículo. */
@@ -1775,6 +1814,8 @@ export class ConversationOrchestrator {
   private briefCorrectionsLast10 = 0;
   private microStartsLast10 = 0;
   private coachContextText = '';
+  /** Módulo selecionado — mantido na sessão para refreshPlan. */
+  private moduleContext: ModuleSessionContext | null = null;
   private professorContextCache: import('@/services/teacher/ProfessorCore').ProfessorContext | null = null;
   private simulatorMode = false;
   private simulatorContext: SimulatorContext | null = null;
@@ -1899,7 +1940,31 @@ export class ConversationOrchestrator {
                   ? mergeA1CurriculumPhrases(deps.phrases)
                   : deps.phrases;
     const merged = { ...deps, phrases };
-    const plan = buildConversationPlan(merged.profile, merged.learning, phrases, 0);
+
+    const sessionLevel: CourseLevelId = isZeroLanguageMode(merged.profile)
+      ? 'L0'
+      : isC2LiveMode(merged.profile)
+        ? 'C2'
+        : isC1LiveMode(merged.profile)
+          ? 'C1'
+          : isB2LiveMode(merged.profile)
+            ? 'B2'
+            : isB1LiveMode(merged.profile)
+              ? 'B1'
+              : isA2LiveMode(merged.profile)
+                ? 'A2'
+                : isA1LiveMode(merged.profile)
+                  ? 'A1'
+                  : getCurrentLevel(merged.profile, getStoredCourseProgress());
+
+    const moduleContext = validateModuleSessionContext(
+      merged.moduleContext ?? null,
+      sessionLevel,
+    );
+
+    const plan = buildConversationPlan(merged.profile, merged.learning, phrases, 0, {
+      moduleContext,
+    });
     const sessionId = merged.sessionId || `live-${Date.now()}`;
     const weak = Object.values(merged.learning.phrases)
       .filter((c) => c.confidence > 0 && c.confidence < 40)
@@ -1923,6 +1988,7 @@ export class ConversationOrchestrator {
       turnsSinceIntervention: 99,
     };
     const orch = new ConversationOrchestrator(merged, plan, ctx);
+    orch.moduleContext = moduleContext;
     const helpPref = UiPrefsService.get().helpLevel;
     orch.sessionSupport = applyHelpPrefToScaffold(plan.scaffoldLevel, helpPref) as SupportLevel;
     if (orch.sessionSupport !== plan.scaffoldLevel) {
@@ -1998,6 +2064,13 @@ export class ConversationOrchestrator {
       orch.followUpOpening = rel.followUpOpening;
       orch.followUpEventId = rel.followUpEventId;
     } catch { /* coach memory opcional */ }
+
+    if (moduleContext) {
+      const modLine = formatModulePedagogicalContext(moduleContext, orch.plan.target?.id ?? null);
+      if (modLine) {
+        orch.coachContextText = [modLine, orch.coachContextText].filter(Boolean).join('\n\n');
+      }
+    }
 
     try {
       const professorCtx = buildProfessorContext({
@@ -2930,6 +3003,7 @@ export class ConversationOrchestrator {
         l0StickPhraseId: this.pendingCorrectionRetry?.phraseId ?? null,
         l0ExcludePhraseId: excludePhraseId ?? this.l0JustAcceptedId,
         l0SkipPhraseIds: this.l0DeferredPhraseIds,
+        moduleContext: this.moduleContext,
       },
     );
     this.plan = { ...this.plan, previousAction: prevAction };

@@ -4,7 +4,7 @@ import type {
   CourseLevelId, CourseProgress, SkillId, MasteryGate,
 } from './types';
 import { LEVEL_ORDER, levelIndex, nextLevel, LEVEL_BY_ID } from './levels';
-import { COMPETENCY_BY_ID, competenciesForLevel } from './competencies';
+import { COMPETENCY_BY_ID, competenciesForLevel, foldLegacyCompetencyMastery, resolveCompetencyId, COMPETENCY_ID_ALIASES } from './competencies';
 import type { Progress, UserProfile } from '@/types';
 
 const STORAGE_KEY = 'deutsch-turbo:course-progress:v1';
@@ -35,20 +35,35 @@ export function defaultCourseProgress(app: UserProfile['level']): CourseProgress
   };
 }
 
+function normalizeProgress(p: CourseProgress): CourseProgress {
+  for (const k of SKILL_KEYS) if (!p.skillLevels[k]) p.skillLevels[k] = p.currentLevel;
+  p.competencyMastery = foldLegacyCompetencyMastery(p.competencyMastery ?? {});
+  if (p.competencyGates) {
+    const gates = { ...p.competencyGates };
+    for (const [legacy, canonical] of Object.entries(COMPETENCY_ID_ALIASES)) {
+      if (gates[legacy] != null && gates[canonical] == null) {
+        gates[canonical] = gates[legacy];
+      }
+      delete gates[legacy];
+    }
+    p.competencyGates = gates;
+  }
+  return p;
+}
+
 export async function loadCourseProgress(app: UserProfile['level']): Promise<CourseProgress> {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return defaultCourseProgress(app);
     const parsed = JSON.parse(raw) as CourseProgress;
-    // garante todas as skills
-    for (const k of SKILL_KEYS) if (!parsed.skillLevels[k]) parsed.skillLevels[k] = parsed.currentLevel;
-    return parsed;
+    return normalizeProgress(parsed);
   } catch {
     return defaultCourseProgress(app);
   }
 }
 
 export async function saveCourseProgress(p: CourseProgress): Promise<void> {
+  normalizeProgress(p);
   p.updatedAt = new Date().toISOString();
   localStorage.setItem(STORAGE_KEY, JSON.stringify(p));
 }
@@ -60,8 +75,7 @@ export function getStoredCourseProgress(): CourseProgress | null {
     if (!raw) return null;
     const parsed = JSON.parse(raw) as CourseProgress;
     if (!parsed.currentLevel || !parsed.skillLevels) return null;
-    for (const k of SKILL_KEYS) if (!parsed.skillLevels[k]) parsed.skillLevels[k] = parsed.currentLevel;
-    return parsed;
+    return normalizeProgress(parsed);
   } catch {
     return null;
   }
@@ -166,12 +180,14 @@ export function readyForPlacementSkip(p: CourseProgress): boolean {
 
 /** Atualiza o mastery de uma competência a partir de um evento de aprendizagem. */
 export function bumpCompetency(p: CourseProgress, competencyId: string, delta: number): CourseProgress {
-  const comp = COMPETENCY_BY_ID[competencyId];
+  const id = resolveCompetencyId(competencyId);
+  const comp = COMPETENCY_BY_ID[id];
   if (!comp) return p;
-  const cur = p.competencyMastery[competencyId] ?? 0;
+  p.competencyMastery = foldLegacyCompetencyMastery(p.competencyMastery ?? {});
+  const cur = p.competencyMastery[id] ?? 0;
   const next = Math.max(0, Math.min(100, cur + delta));
-  p.competencyMastery[competencyId] = next;
-  p.competencyGates[competencyId] = gateForMastery(next);
+  p.competencyMastery[id] = next;
+  p.competencyGates[id] = gateForMastery(next);
   return p;
 }
 

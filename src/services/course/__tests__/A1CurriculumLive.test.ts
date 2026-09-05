@@ -14,6 +14,9 @@ const _store = new Map<string, string>();
 
 import {
   A1_CURRICULUM,
+  A1_NEW_TARGET_IDS,
+  A1_REUSED_TARGET_IDS,
+  A1_EXIT_SCENARIOS,
   a1FirstTarget,
   assertA1CurriculumIntegrity,
   getA1TargetById,
@@ -21,6 +24,7 @@ import {
   getA1TargetsByCompetency,
   getA1TargetsByUnit,
   getNextA1Target,
+  gradeA1ExitAssessment,
   isA1TargetId,
   isA1UnitComplete,
   isHigherLevelCurriculumBlocked,
@@ -137,18 +141,25 @@ async function main() {
   const integrity = assertA1CurriculumIntegrity();
   check('integrity ok', integrity.ok);
   if (!integrity.ok) console.error(integrity.errors);
-  check('20 A1 targets', getA1Targets().length === 20);
+  check('58 A1 targets', getA1Targets().length === 58);
   check('7 A1 competencies', competenciesForLevel('A1').length === 7);
   check('7 A1 units', LEVEL_BY_ID.A1.modules.flatMap((m) => m.units).length === 7);
-  check('first target a1-family-mutter', a1FirstTarget().id === 'a1-family-mutter');
+  check('first target a1-personal-heisse', a1FirstTarget().id === 'a1-personal-heisse');
   check('CURATED A1 all have ids', CURATED.filter((c) => c.level === 'A1').every((c) => c.core.every((p) => !!p.id && !!p.unitId)));
   check('getById', getA1TargetById('a1-food-kaffee')?.german.includes('Kaffee') === true);
-  check('getByUnit', getA1TargetsByUnit('a1.u1').length === 3);
-  check('getByCompetency', getA1TargetsByCompetency('a1.help').length === 2);
+  check('getByUnit u1', getA1TargetsByUnit('a1.u1').length === 8);
+  check('getByCompetency help/everyday', getA1TargetsByCompetency('a1.help').length === 9);
+  check('no a1.food competency', !competenciesForLevel('A1').some((c) => c.id === 'a1.food'));
+  check('has a1.personal', competenciesForLevel('A1').some((c) => c.id === 'a1.personal'));
   check('no A1 id is l0', A1_CURRICULUM.every((t) => !t.id.startsWith('l0-')));
   check('unit phraseIds exist', LEVEL_BY_ID.A1.modules.every((m) =>
     m.units.every((u) => u.phraseIds.every((id) => isA1TargetId(id))),
   ));
+  check('u1→u7 linear titles', LEVEL_BY_ID.A1.modules.flatMap((m) => m.units).map((u) => u.id).join(',') === 'a1.u1,a1.u2,a1.u3,a1.u4,a1.u5,a1.u6,a1.u7');
+  check('food targets on u4', getA1TargetById('a1-food-kaffee')?.unitId === 'a1.u4');
+  check('family on u2', getA1TargetById('a1-family-mutter')?.unitId === 'a1.u2');
+  check('time on u6', getA1TargetById('a1-time-drei-uhr')?.unitId === 'a1.u6');
+  check('city on u5', getA1TargetById('a1-info-bahnhof')?.unitId === 'a1.u5');
   check('B2 unlocked (executable)', !isHigherLevelCurriculumBlocked('B2'));
   check('B1 curriculum NOT blocked', !isHigherLevelCurriculumBlocked('B1'));
   check('A2 curriculum NOT blocked', !isHigherLevelCurriculumBlocked('A2'));
@@ -172,7 +183,7 @@ async function main() {
   const plan = buildConversationPlan(profileA1(), learningEmpty, pool, 0);
   check('A1 live mode', isA1LiveMode(profileA1()));
   check('zero mode off', !isZeroLanguageMode(profileA1()));
-  check('first curricular target', plan.target?.id === 'a1-family-mutter');
+  check('first curricular target', plan.target?.id === 'a1-personal-heisse');
   check('target not l0', !!plan.target && !plan.target.id.startsWith('l0-'));
   check('directive has TARGET', /TARGET:/.test(plan.teacherDirective));
   check('directive has CURRENT OBJECTIVE', /CURRENT OBJECTIVE:/.test(plan.teacherDirective));
@@ -228,7 +239,7 @@ async function main() {
     mergeA1CurriculumPhrases([]),
     0,
   );
-  check('first A1 after graduation', afterGradPlan.target?.id === 'a1-family-mutter');
+  check('first A1 after graduation', afterGradPlan.target?.id === 'a1-personal-heisse');
 
   console.log('\n=== A1 progression / unit / evaluation ===');
   let learnA1 = emptyLearningProfile();
@@ -273,7 +284,7 @@ async function main() {
   check('live a1CurriculumMode', live.a1CurriculumMode === true);
   check('live target A1', typeof live.targetId === 'string' && isA1TargetId(live.targetId as string));
   check('live pedagogicalTurn', !!live.pedagogicalTurn && typeof live.pedagogicalTurn.target === 'string');
-  check('kickoff A1', /a1-family-mutter|PEDAGOGICAL TURN|TARGET:/.test(live.orchestratorKickoff || live.teacherDirective));
+  check('kickoff A1', /a1-personal-heisse|PEDAGOGICAL TURN|TARGET:/.test(live.orchestratorKickoff || live.teacherDirective));
 
   // Simulate correct production on first target
   const targetId = orch.getPlan().target!.id;
@@ -347,17 +358,29 @@ async function main() {
   check('after A1→A2 no L0 curricular', !planA2.target?.id.startsWith('l0-'));
   check('after A1→A2 no A1 curricular', !planA2.target?.id.startsWith('a1-'));
 
+  console.log('\n=== A1 school exit assessment ===');
+  const exitEmpty = gradeA1ExitAssessment(emptyLearningProfile());
+  check('exit empty fails', !exitEmpty.passed);
+  const exitReady = gradeA1ExitAssessment(learnA1);
+  check('exit with full A1 evidence passes', exitReady.passed);
+  check('exit has 10 scenarios', A1_EXIT_SCENARIOS.length === 10);
+  check('reused targets documented', A1_REUSED_TARGET_IDS.length === 20);
+  check('new targets documented', A1_NEW_TARGET_IDS.length === 38);
+  check('reused+new = curriculum (exclusivo)', A1_REUSED_TARGET_IDS.length + A1_NEW_TARGET_IDS.length === getA1Targets().length);
+
   console.log('\n=== E2E state log ===');
   console.log(JSON.stringify({
     targets: getA1Targets().length,
     units: 7,
     competencies: 7,
     first: a1FirstTarget().id,
+    exitScenarios: A1_EXIT_SCENARIOS.length,
     a1FunctionalEvidence: {
       integrity: integrity.ok,
       plannerNoL0: true,
       graduation: true,
       livePayload: true,
+      schoolExit: exitReady.passed,
     },
   }, null, 2));
 

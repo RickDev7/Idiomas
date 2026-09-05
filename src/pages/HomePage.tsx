@@ -1,310 +1,177 @@
 /**
- * Home — Deutsch Turbo Training Cockpit (Fase 1).
- * Composição única: header compacto → níveis → hero dominante → targets → progresso.
- * Dados reais: profile, RealProgress, Learning State, DailyGoal. Sem métricas fake.
+ * Home — briefing diário.
+ * Composição: header → saudação → hero CTA → 3 cards de apoio → BottomNav.
+ * Sem trilha L0–C2, sem CTAs concorrentes, sem lista “O que estudar agora”.
+ * Dados reais: profile, ContinueCourse, RealProgress, revisão pendente.
  */
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { LoadingScreen } from '@/components/ui/LoadingScreen';
 import { useProfile } from '@/hooks/useProfile';
 import { useUserMetrics } from '@/hooks/useUserMetrics';
-import { getTodaySession } from '@/services/storage/initData';
 import { DailyGoalSheet } from '@/components/home/DailyGoalSheet';
-import {
-  HomeCockpitHeader,
-  HomeLevelRail,
-  HomeTrainingHero,
-  HomeStudyTargets,
-  HomeProgressStrip,
-  type StudyTarget,
-} from '@/components/home/HomeSections';
+import { HomeCockpitHeader } from '@/components/home/HomeSections';
+import { HomeBriefingSupport } from '@/components/home/HomeBriefingSupport';
+import { ContinueCourseCard } from '@/components/home/ContinueCourseCard';
 import { BottomNav } from '@/components/layout/BottomNav';
 import { DTPage, DTMain } from '@/components/dt';
 import {
   getCurrentLevel,
-  getStoredCourseProgress,
+  loadCourseProgress,
+  getContinueCourseState,
+  beginContinueCourseSession,
+  buildModuleSessionContext,
+  storeSelectedModuleContext,
   type CourseProgress,
 } from '@/services/course';
-import { getIncompleteSession } from '@/services/teacher/sessionContinuity';
+import { levelJourneyTitle } from '@/services/course/MeuCursoPresentation';
 import { SoundService } from '@/services/ui/SoundService';
-import {
-  beginSelectedLearningSession,
-  clearSelectedLearningTarget,
-} from '@/services/teacher/LessonStartIntent';
+import { clearSelectedLearningTarget } from '@/services/teacher/LessonStartIntent';
+import { haptic } from '@/services/ui/HapticService';
 import { MemoryService } from '@/services/learning/MemoryService';
 import { getRealProgress, type RealProgress } from '@/services/learning/RealProgress';
-import { readAutomationScore } from '@/services/learning/AutomationScoreEngine';
-import type { PhraseConfidence, UserLearningProfile } from '@/services/learning/ConfidenceService';
-import {
-  L0_CHUNK_GRAPH,
-  l0ChunkBaseForPhraseId,
-  zeroLanguageSeedPhrases,
-} from '@/services/teacher/ZeroLanguageMode';
-import { UNIFIED_SIMULATOR_SCENARIOS } from '@/services/teacher/ProfessorCore/SituationCatalog';
+import type { UserLearningProfile } from '@/services/learning/ConfidenceService';
+import { getDueReviews } from '@/services/learning/ReviewRepository';
 import { useChunkTracker } from '@/hooks/useChunkTracker';
-
-const TOPIC_HINTS: Record<string, string[]> = {
-  work: ['arbeit'],
-  home: ['wohn', 'hause'],
-  needs: ['brauch'],
-  food: ['moecht', 'essen'],
-  places: ['wohn'],
-  identity: ['heiss', 'komm'],
-  routine: ['muss'],
-  requests: ['kannst', 'hilfe'],
-  help: ['hilfe'],
-};
-
-const TARGET_META: Array<{ tint: string; icon: StudyTarget['icon'] }> = [
-  { tint: '#F97316', icon: 'flame' },
-  { tint: '#00F2FE', icon: 'drop' },
-  { tint: '#8B5CF6', icon: 'bolt' },
-];
-
-function pctFromConf(c: PhraseConfidence | undefined): number | null {
-  if (!c) return null;
-  const auto = readAutomationScore(c);
-  if (typeof auto === 'number' && auto > 0) return Math.round(auto);
-  if (typeof c.confidence === 'number' && c.confidence > 0) return Math.round(c.confidence);
-  return null;
-}
-
-function isStudied(c: PhraseConfidence | undefined): boolean {
-  if (!c) return false;
-  return (c.timesCorrect ?? 0) > 0 || (c.timesProduced ?? 0) > 0 || c.confidence > 0;
-}
-
-function countActiveDomains(learning: UserLearningProfile): number {
-  let n = 0;
-  for (const scenario of UNIFIED_SIMULATOR_SCENARIOS) {
-    const hints = TOPIC_HINTS[scenario.topic] || [];
-    const hit = Object.values(learning.phrases).some((c) => {
-      if (!c || (c.timesSeen <= 0 && c.timesCorrect <= 0 && c.confidence <= 0)) return false;
-      const id = c.phraseId.toLowerCase();
-      return hints.some((h) => id.includes(h));
-    });
-    if (hit) n += 1;
-  }
-  return n;
-}
-
-function pickStudyTargets(
-  learning: UserLearningProfile | null,
-  activeBaseId: string | undefined,
-  weakIds: string[],
-): Array<{ id: string; german: string; portuguese: string; pct: number | null }> {
-  const seeds = new Map(zeroLanguageSeedPhrases().map((p) => [p.id, p]));
-  const baseIds = Object.keys(L0_CHUNK_GRAPH);
-  const phrases = learning?.phrases ?? {};
-
-  const row = (id: string) => {
-    const seed = seeds.get(id);
-    const conf = phrases[id];
-    return {
-      id,
-      german: seed?.german || id,
-      portuguese: seed?.portuguese || '',
-      pct: pctFromConf(conf),
-      studied: isStudied(conf),
-      conf: conf?.confidence ?? 0,
-      needsHelp: !!conf?.needsHelp,
-    };
-  };
-
-  const picked: string[] = [];
-  const push = (id: string | undefined) => {
-    if (!id || !baseIds.includes(id) || picked.includes(id)) return;
-    picked.push(id);
-  };
-
-  // Prioridade: chunk ativo → pontos fracos → estudados com menor confiança → currículo
-  push(activeBaseId);
-  for (const id of weakIds) {
-    if (L0_CHUNK_GRAPH[id]) push(id);
-    else {
-      const base = l0ChunkBaseForPhraseId(id);
-      if (base) push(base);
-    }
-  }
-
-  const studiedLow = baseIds
-    .map(row)
-    .filter((r) => r.studied)
-    .sort((a, b) => a.conf - b.conf || (a.needsHelp === b.needsHelp ? 0 : a.needsHelp ? -1 : 1));
-  for (const r of studiedLow) push(r.id);
-
-  for (const id of baseIds) push(id);
-
-  return picked.slice(0, 3).map((id) => {
-    const r = row(id);
-    return { id: r.id, german: r.german, portuguese: r.portuguese, pct: r.pct };
-  });
-}
+import type { CourseLevelId } from '@/services/course/types';
 
 export function HomePage() {
   const { profile, loading } = useProfile();
   const navigate = useNavigate();
-  const [course, setCourse] = useState<CourseProgress | null>(null);
-  const [incomplete, setIncomplete] = useState(() => getIncompleteSession());
-  const [progress, setProgress] = useState<RealProgress | null>(null);
-  const [learning, setLearning] = useState<UserLearningProfile | null>(null);
-  const metrics = useUserMetrics();
+  const { setDailyGoal, dismissMorningPrompt, dailyGoalMinutes, showMorningPrompt } =
+    useUserMetrics();
   const { activeChunk } = useChunkTracker();
-  const { refreshFromLearning, setDailyGoal, dismissMorningPrompt } = metrics;
   const [goalSheetOpen, setGoalSheetOpen] = useState(false);
-  const [goalSheetMode, setGoalSheetMode] = useState<'edit' | 'morning'>('edit');
-
-  useEffect(() => {
-    if (loading) return;
-    if (!profile || !profile.onboardingComplete) {
-      navigate('/onboarding', { replace: true });
-    }
-  }, [loading, profile, navigate]);
-
-  useEffect(() => {
-    const refresh = () => {
-      setCourse(getStoredCourseProgress());
-      setIncomplete(getIncompleteSession());
-      void refreshFromLearning();
-    };
-    refresh();
-    window.addEventListener('focus', refresh);
-    return () => window.removeEventListener('focus', refresh);
-  }, [profile?.diagnosticLevel, profile?.selfReportedLevel, profile?.currentDay, refreshFromLearning]);
+  const [goalSheetMode, setGoalSheetMode] = useState<'morning' | 'edit'>('edit');
+  const [course, setCourse] = useState<CourseProgress | null>(null);
+  const [learning, setLearning] = useState<UserLearningProfile | null>(null);
+  const [progress, setProgress] = useState<RealProgress | null>(null);
+  const [dueReviewCount, setDueReviewCount] = useState<number | null>(null);
 
   useEffect(() => {
     if (!profile) return;
     let cancelled = false;
-    const level = getCurrentLevel(profile, getStoredCourseProgress());
-    void MemoryService.loadProfile(profile)
-      .then(async (lp) => {
-        const p = await getRealProgress(lp, level);
-        if (!cancelled) {
-          setLearning(lp);
-          setProgress(p);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setLearning(null);
-          setProgress(null);
-        }
-      });
+    void (async () => {
+      const cp = await loadCourseProgress(profile.level).catch(() => null);
+      const lp = await MemoryService.loadProfile(profile).catch(() => null);
+      const level = getCurrentLevel(profile, cp);
+      const rp = lp ? await getRealProgress(lp, level).catch(() => null) : null;
+      if (cancelled) return;
+      setCourse(cp);
+      setLearning(lp);
+      setProgress(rp);
+    })();
     return () => {
       cancelled = true;
     };
   }, [profile]);
 
   useEffect(() => {
-    if (metrics.showMorningPrompt) {
+    let cancelled = false;
+    void getDueReviews(12)
+      .then((q) => {
+        if (!cancelled) setDueReviewCount(q.length);
+      })
+      .catch(() => {
+        if (!cancelled) setDueReviewCount(0);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (showMorningPrompt) {
       setGoalSheetMode('morning');
       setGoalSheetOpen(true);
     }
-  }, [metrics.showMorningPrompt]);
+  }, [showMorningPrompt]);
 
-  const studyTargets = useMemo(() => {
-    const weakIds = (progress?.weakAreas ?? []).map((w) => w.phraseId);
-    const rows = pickStudyTargets(learning, activeChunk?.baseId, weakIds);
-    return rows.map((r, i): StudyTarget => {
-      const meta = TARGET_META[i % TARGET_META.length];
-      return {
-        ...r,
-        tint: meta.tint,
-        icon: meta.icon,
-        onClick: () => {
-          SoundService.play('start');
-          beginSelectedLearningSession(navigate, {
-            source: 'home',
-            targetId: r.id,
-            baseId: r.id,
-            targetPhrase: r.german,
-          });
-        },
-      };
+  const currentLevel = profile ? getCurrentLevel(profile, course) : 'L0';
+
+  const continueState = useMemo(() => {
+    if (!learning) {
+      return getContinueCourseState({
+        learning: null,
+        userLevel: currentLevel,
+        course,
+      });
+    }
+    return getContinueCourseState({
+      learning,
+      userLevel: currentLevel,
+      course,
+      explicitTargetId: null,
     });
-  }, [learning, progress?.weakAreas, activeChunk?.baseId, navigate]);
+  }, [learning, currentLevel, course]);
 
   if (loading || !profile || !profile.onboardingComplete) {
     return <LoadingScreen />;
   }
 
-  const currentLevel = getCurrentLevel(profile, course);
-  const levelId = ['L0', 'A1', 'A2', 'B1', 'B2'].includes(currentLevel) ? currentLevel : 'L0';
+  const levelId = (['L0', 'A1', 'A2', 'B1', 'B2', 'C1', 'C2'].includes(currentLevel)
+    ? currentLevel
+    : 'L0') as CourseLevelId;
   const name = profile.name?.trim();
 
-  const openGoalEditor = () => {
-    setGoalSheetMode('edit');
-    setGoalSheetOpen(true);
-  };
-
-  const startTraining = async () => {
-    clearSelectedLearningTarget();
-    await getTodaySession(profile);
-    const type = profile.firstLessonComplete ? 'lesson' : 'first';
+  const onContinueCourse = () => {
+    haptic();
     SoundService.play('start');
-    navigate(`/sessao?type=${type}`);
+    beginContinueCourseSession(navigate, continueState, {
+      storeModuleContext: storeSelectedModuleContext,
+      buildModuleContext: buildModuleSessionContext,
+      clearSelectedLearningTarget,
+      goJornada: () => navigate('/jornada'),
+    });
   };
 
-  const situationsDone = learning ? countActiveDomains(learning) : null;
-  const situationsTotal = UNIFIED_SIMULATOR_SCENARIOS.length;
+  const focusText =
+    continueState.activityLabel?.trim() ||
+    (progress?.autonomousSpeechPercent != null
+      ? `Falar com autonomia · ${progress.autonomousSpeechPercent}%`
+      : levelJourneyTitle(levelId));
 
-  const progressStats = [
-    {
-      label: 'Chunks',
-      value:
-        progress != null
-          ? `${progress.learnedChunks} / ${progress.learnedChunksTotal}`
-          : '—',
-    },
-    {
-      label: 'Estruturas',
-      value:
-        progress != null
-          ? `${progress.variationsPracticed} / ${progress.variationsTotal}`
-          : '—',
-    },
-    {
-      label: 'Situações',
-      value: situationsDone != null ? `${situationsDone} / ${situationsTotal}` : '—',
-    },
-    {
-      label: 'Autonomia',
-      value:
-        progress?.autonomousSpeechPercent != null
-          ? `${progress.autonomousSpeechPercent}%`
-          : '—',
-    },
-  ];
+  const nextSkill =
+    continueState.targetGerman?.trim() ||
+    continueState.moduleTitle?.trim() ||
+    activeChunk?.german?.trim() ||
+    continueState.headline ||
+    'Seu próximo treino';
+
+  const reviewText =
+    dueReviewCount == null
+      ? 'Carregando…'
+      : dueReviewCount === 0
+        ? 'Nada pendente agora'
+        : dueReviewCount === 1
+          ? '1 item'
+          : `${dueReviewCount} itens`;
 
   return (
-    <DTPage className="home-cockpit">
+    <DTPage className="home-briefing">
       <HomeCockpitHeader
         name={name}
         streak={profile.streak || 0}
+        level={levelId}
         onStreak={() => navigate('/progresso')}
         onBell={() => navigate('/configuracoes')}
       />
 
-      <DTMain className="pt-3 !space-y-0 home-cockpit-main">
-        <div className="home-cockpit-stack">
-          <HomeLevelRail current={levelId} />
-
-          <HomeTrainingHero
-            title={incomplete ? 'Continuar treino' : 'Começar treino'}
-            badge={metrics.heroBadgeLabel || `${metrics.dailyGoalMinutes} min`}
-            onBadgeClick={openGoalEditor}
-            actionLabel={incomplete ? 'Continuar treino' : 'Iniciar agora'}
-            onStart={() => void startTraining()}
+      <DTMain className="pt-2 !space-y-0">
+        <div className="flex flex-col gap-3 pb-1">
+          <ContinueCourseCard
+            state={continueState}
+            onContinue={onContinueCourse}
+            onOpenCourse={() => navigate('/jornada')}
           />
 
-          <HomeStudyTargets
-            targets={studyTargets}
-            onSeeAll={() => navigate('/chunks')}
-          />
-
-          <HomeProgressStrip
-            mastery={progress?.masteryPercent ?? null}
-            stats={progressStats}
+          <HomeBriefingSupport
+            focus={focusText}
+            nextSkill={nextSkill}
+            reviewPending={reviewText}
+            onFocus={() => navigate('/progresso')}
+            onNextSkill={onContinueCourse}
+            onReview={() => navigate('/revisar')}
           />
         </div>
       </DTMain>
@@ -313,7 +180,7 @@ export function HomePage() {
       <DailyGoalSheet
         open={goalSheetOpen}
         mode={goalSheetMode}
-        currentGoal={metrics.dailyGoalMinutes}
+        currentGoal={dailyGoalMinutes}
         onSelect={(minutes) => {
           setDailyGoal(minutes);
           dismissMorningPrompt();

@@ -78,6 +78,7 @@ export const NotificationService = {
     }
   },
   async showTest(): Promise<boolean> {
+    if (!UiPrefsService.get().notifications) return false;
     if (browserNotificationPermission() !== 'granted') return false;
     try {
       const n = new Notification('Deutsch Turbo', {

@@ -1,8 +1,3 @@
-/**
- * Deutsch Turbo — Design System components (DT*)
- * Reutiliza GlassCard / ProgressRing / VoiceOrb / Button onde possível.
- * Uma linguagem visual para todo o app (ref: deutsch-turbo-reference.png).
- */
 import type {
   CSSProperties,
   ReactNode,
@@ -13,6 +8,7 @@ import { LiveAudioOrb, VoiceOrb, type OrbState } from '@/components/ui/VoiceOrb'
 import { PrimaryButton, IconButton } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { IconBack, IconPlay, IconLock } from '@/components/ui/Icons';
+import { DT_ASSETS } from '@/assets/deutsch-turbo';
 
 export { glassStyle, glassVioletStyle, glassCyanStyle, GlassCard, ProgressRing, LiveAudioOrb, VoiceOrb };
 export type { OrbState };
@@ -26,8 +22,19 @@ export function DTPage({
   className?: string;
 }) {
   return (
-    <div className={`flex flex-col h-full max-w-md mx-auto dt-page ${className}`}>
-      {children}
+    <div className={`dt-app-column relative flex flex-col h-full mx-auto dt-page ${className}`}>
+      <div className="dt-atmosphere" aria-hidden />
+      <div
+        aria-hidden
+        className="dt-topo-bg pointer-events-none absolute inset-0 z-0"
+        style={{
+          backgroundImage: `url(${DT_ASSETS.topographic})`,
+          backgroundSize: 'cover',
+          backgroundPosition: 'center',
+          mixBlendMode: 'screen',
+        }}
+      />
+      <div className="relative z-[1] flex flex-col h-full min-h-0">{children}</div>
     </div>
   );
 }
@@ -76,11 +83,11 @@ export function DTTopBar({
       ) : (
         <div className="min-w-0 flex-1">
           {title ? (
-            <h1 className="text-[17px] font-bold text-white font-[family-name:var(--font-display)] tracking-wide uppercase">
+            <h1 className="text-[17px] font-bold text-[var(--text-primary)] font-[family-name:var(--font-display)] tracking-wide uppercase">
               {title}
             </h1>
           ) : null}
-          {subtitle ? <p className="text-[12px] text-[#CBD5E1] mt-0.5">{subtitle}</p> : null}
+          {subtitle ? <p className="text-[12px] text-[var(--text-secondary)] mt-0.5">{subtitle}</p> : null}
         </div>
       )}
       {right ? <div className="shrink-0">{right}</div> : null}

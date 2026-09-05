@@ -9,6 +9,7 @@ import { isAutomated, readAutomationScore } from '@/services/learning/Automation
 import { CURATED } from './content';
 import { LEVEL_BY_ID } from './levels';
 import { COMPETENCY_BY_ID } from './competencies';
+import { scopeCurriculumTargets, scopePhrasePool, isInModuleScope } from './PlannerModuleRestrict';
 
 export interface A2Target {
   id: string;
@@ -140,14 +141,17 @@ function isDeferred(conf: PhraseConfidence | undefined): boolean {
 export function getNextA2Target(
   currentTargetId: string | null | undefined,
   learning: UserLearningProfile,
-  opts?: { excludePhraseId?: string | null; skipPhraseIds?: string[] | null },
+  opts?: { excludePhraseId?: string | null; skipPhraseIds?: string[] | null; restrictToTargetIds?: readonly string[] | null },
 ): A2Target | null {
   const skip = new Set<string>(opts?.skipPhraseIds ?? []);
   if (opts?.excludePhraseId) skip.add(opts.excludePhraseId);
   if (currentTargetId) skip.add(currentTargetId);
 
-  const ordered = A2_CURRICULUM;
-  const current = currentTargetId ? BY_ID.get(currentTargetId) : undefined;
+  const ordered = scopeCurriculumTargets(A2_CURRICULUM, opts?.restrictToTargetIds);
+  if (ordered.length === 0) return null;
+
+  const currentRaw = currentTargetId ? BY_ID.get(currentTargetId) : undefined;
+  const current = currentRaw && isInModuleScope(currentRaw.id, opts?.restrictToTargetIds) ? currentRaw : undefined;
 
   const pickFirstOpen = (candidates: A2Target[]): A2Target | null => {
     for (const t of candidates) {
@@ -161,7 +165,7 @@ export function getNextA2Target(
   };
 
   if (current) {
-    const sameUnit = getA2TargetsByUnit(current.unitId).filter((t) => t.order > current.order);
+    const sameUnit = scopeCurriculumTargets(getA2TargetsByUnit(current.unitId), opts?.restrictToTargetIds).filter((t) => t.order > current.order);
     const nextInUnit = pickFirstOpen(sameUnit);
     if (nextInUnit) return nextInUnit;
   }
@@ -169,7 +173,7 @@ export function getNextA2Target(
   const unitOrder = a2UnitIdsInOrder();
   const startUnitIdx = current ? Math.max(0, unitOrder.indexOf(current.unitId)) : 0;
   for (let i = startUnitIdx; i < unitOrder.length; i++) {
-    const unitTargets = getA2TargetsByUnit(unitOrder[i]);
+    const unitTargets = scopeCurriculumTargets(getA2TargetsByUnit(unitOrder[i]), opts?.restrictToTargetIds);
     const open = pickFirstOpen(unitTargets);
     if (open) return open;
   }
@@ -196,11 +200,15 @@ export function getNextA2Target(
 export function pickA2PlannerTarget(
   learning: UserLearningProfile,
   phrases: Phrase[],
-  opts?: { excludePhraseId?: string | null; skipPhraseIds?: string[] | null; stickPhraseId?: string | null },
+  opts?: { excludePhraseId?: string | null; skipPhraseIds?: string[] | null; stickPhraseId?: string | null; restrictToTargetIds?: readonly string[] | null },
 ): { conf: PhraseConfidence | undefined; phrase: Phrase | null; action: 'introduce' | 'practice' | 'recall' | 'converse' } {
-  const pool = a2PhrasePool(phrases);
+  const pool = scopePhrasePool(a2PhrasePool(phrases), opts?.restrictToTargetIds);
 
-  if (opts?.stickPhraseId && isA2TargetId(opts.stickPhraseId)) {
+  if (
+    opts?.stickPhraseId &&
+    isA2TargetId(opts.stickPhraseId) &&
+    isInModuleScope(opts.stickPhraseId, opts?.restrictToTargetIds)
+  ) {
     const stuck = pool.find((p) => p.id === opts.stickPhraseId) ?? null;
     if (stuck) {
       const conf = learning.phrases[stuck.id];
@@ -287,4 +295,199 @@ export function assertA2CurriculumIntegrity(): { ok: boolean; errors: string[] }
 
   if (A2_CURRICULUM.length === 0) errors.push('no A2 targets');
   return { ok: errors.length === 0, errors };
+}
+
+/** Colocação pré-reforma escolar A2 (18 targets esqueleto). */
+export const A2_LEGACY_PLACEMENT: Record<string, { unitId: string; competencyId: string }> = {
+  'a2-past-gearbeitet': { unitId: 'a2.u1', competencyId: 'a2.past' },
+  'a2-past-kino': { unitId: 'a2.u1', competencyId: 'a2.past' },
+  'a2-past-gemacht': { unitId: 'a2.u1', competencyId: 'a2.past' },
+  'a2-plans-werde': { unitId: 'a2.u2', competencyId: 'a2.plans' },
+  'a2-plans-plane': { unitId: 'a2.u2', competencyId: 'a2.plans' },
+  'a2-plans-reisen': { unitId: 'a2.u2', competencyId: 'a2.plans' },
+  'a2-problem-nicht-gut': { unitId: 'a2.u3', competencyId: 'a2.problem' },
+  'a2-problem-mit': { unitId: 'a2.u3', competencyId: 'a2.problem' },
+  'a2-problem-wohnung': { unitId: 'a2.u3', competencyId: 'a2.problem' },
+  'a2-opinion-finde': { unitId: 'a2.u4', competencyId: 'a2.opinion' },
+  'a2-opinion-meinung': { unitId: 'a2.u4', competencyId: 'a2.opinion' },
+  'a2-opinion-lieber': { unitId: 'a2.u4', competencyId: 'a2.opinion' },
+  'a2-travel-berlin': { unitId: 'a2.u5', competencyId: 'a2.travel' },
+  'a2-travel-reise': { unitId: 'a2.u5', competencyId: 'a2.travel' },
+  'a2-travel-uebernachten': { unitId: 'a2.u5', competencyId: 'a2.travel' },
+  'a2-phone-hier-ist': { unitId: 'a2.u6', competencyId: 'a2.phone' },
+  'a2-phone-nachricht': { unitId: 'a2.u6', competencyId: 'a2.phone' },
+  'a2-phone-spaeter': { unitId: 'a2.u6', competencyId: 'a2.phone' },
+};
+
+export type A2TargetAuditStatus = 'REUTILIZADO' | 'NOVO';
+
+export type A2TargetAuditRow = {
+  targetId: string;
+  moduleId: string;
+  competencyId: string;
+  status: A2TargetAuditStatus;
+  previousUnitId: string | null;
+  previousCompetencyId: string | null;
+  reorganized: boolean;
+};
+
+export function auditA2Targets(): {
+  rows: A2TargetAuditRow[];
+  total: number;
+  reused: number;
+  novo: number;
+  reorganizedAmongReused: number;
+  duplicateIds: string[];
+} {
+  const seen = new Set<string>();
+  const duplicateIds: string[] = [];
+  const rows: A2TargetAuditRow[] = A2_CURRICULUM.map((t) => {
+    if (seen.has(t.id)) duplicateIds.push(t.id);
+    seen.add(t.id);
+    const legacy = A2_LEGACY_PLACEMENT[t.id];
+    const status: A2TargetAuditStatus = legacy ? 'REUTILIZADO' : 'NOVO';
+    const previousUnitId = legacy?.unitId ?? null;
+    const previousCompetencyId = legacy?.competencyId ?? null;
+    const reorganized = !!(
+      legacy
+      && (legacy.unitId !== t.unitId || legacy.competencyId !== t.competencyId)
+    );
+    return {
+      targetId: t.id,
+      moduleId: t.unitId,
+      competencyId: t.competencyId,
+      status,
+      previousUnitId,
+      previousCompetencyId,
+      reorganized,
+    };
+  });
+  return {
+    rows,
+    total: rows.length,
+    reused: rows.filter((r) => r.status === 'REUTILIZADO').length,
+    novo: rows.filter((r) => r.status === 'NOVO').length,
+    reorganizedAmongReused: rows.filter((r) => r.reorganized).length,
+    duplicateIds,
+  };
+}
+
+export type A2ExitScenario = {
+  id: string;
+  titlePt: string;
+  situationPt: string;
+  competencyIds: string[];
+  evidenceTargetIds: string[];
+};
+
+/** Avaliação situacional de saída A2 (escola de idiomas). */
+export const A2_EXIT_SCENARIOS: A2ExitScenario[] = [
+  {
+    id: 'a2-exit-experience',
+    titlePt: 'Experiência recente',
+    situationPt: 'Contar uma experiência recente em sequência compreensível.',
+    competencyIds: ['a2.past'],
+    evidenceTargetIds: ['a2-past-wochenende', 'a2-past-gemacht', 'a2-past-gewesen'],
+  },
+  {
+    id: 'a2-exit-housing',
+    titlePt: 'Moradia ou bairro',
+    situationPt: 'Descrever onde mora e uma necessidade concreta.',
+    competencyIds: ['a2.plans'],
+    evidenceTargetIds: ['a2-home-wohne', 'a2-home-zimmer', 'a2-problem-wohnung'],
+  },
+  {
+    id: 'a2-exit-health',
+    titlePt: 'Sintomas simples',
+    situationPt: 'Explicar um problema de saúde e responder perguntas de acompanhamento.',
+    competencyIds: ['a2.problem'],
+    evidenceTargetIds: ['a2-problem-nicht-gut', 'a2-health-kopfschmerzen', 'a2-health-termin'],
+  },
+  {
+    id: 'a2-exit-work',
+    titlePt: 'Situação de trabalho',
+    situationPt: 'Resolver uma situação profissional curta (tarefa, atraso ou esclarecimento).',
+    competencyIds: ['a2.phone'],
+    evidenceTargetIds: ['a2-work-aufgabe', 'a2-work-spaet', 'a2-work-erklaeren'],
+  },
+  {
+    id: 'a2-exit-travel',
+    titlePt: 'Viagem ou transporte',
+    situationPt: 'Lidar com reserva, horário ou deslocamento.',
+    competencyIds: ['a2.travel'],
+    evidenceTargetIds: ['a2-travel-hotel', 'a2-travel-zug', 'a2-travel-weg'],
+  },
+  {
+    id: 'a2-exit-complaint',
+    titlePt: 'Troca ou reclamação',
+    situationPt: 'Explicar um problema com um produto e propor solução.',
+    competencyIds: ['a2.opinion'],
+    evidenceTargetIds: ['a2-shop-defekt', 'a2-shop-umtauschen', 'a2-shop-guenstiger'],
+  },
+  {
+    id: 'a2-exit-invite',
+    titlePt: 'Convite ou encontro',
+    situationPt: 'Fazer convite, aceitar/recusar ou combinar um plano.',
+    competencyIds: ['a2.opinion'],
+    evidenceTargetIds: ['a2-invite-kommen', 'a2-invite-leider', 'a2-plans-werde'],
+  },
+  {
+    id: 'a2-exit-problem',
+    titlePt: 'Problema cotidiano',
+    situationPt: 'Descrever um imprevisto e pedir ajuda.',
+    competencyIds: ['a2.plans', 'a2.opinion'],
+    evidenceTargetIds: ['a2-home-heizung', 'a2-home-hilfe', 'a2-invite-helfen'],
+  },
+  {
+    id: 'a2-exit-opinion',
+    titlePt: 'Opinião e comparação',
+    situationPt: 'Comparar opções e dar uma opinião simples.',
+    competencyIds: ['a2.opinion'],
+    evidenceTargetIds: ['a2-opinion-finde', 'a2-opinion-lieber', 'a2-shop-guenstiger'],
+  },
+  {
+    id: 'a2-exit-conversation',
+    titlePt: 'Conversa funcional 2–3 min',
+    situationPt: 'Sustentar diálogo funcional com apoio reduzido (experiência + planos + opinião).',
+    competencyIds: ['a2.past', 'a2.opinion'],
+    evidenceTargetIds: ['a2-past-erzaehlen', 'a2-plans-plane', 'a2-opinion-meinung', 'a2-invite-kommen'],
+  },
+];
+
+/**
+ * Gate situacional A2: cada cenário exige evidência pronta em ≥50% dos targets
+ * e pelo menos 1 produção no cenário. Aprovação: ≥7 de 10 situações.
+ */
+export function gradeA2ExitAssessment(learning: UserLearningProfile): {
+  passed: boolean;
+  score: number;
+  reason: string;
+  scenariosPassed: number;
+  scenarioResults: Array<{ id: string; passed: boolean; coverage: number }>;
+} {
+  const scenarioResults = A2_EXIT_SCENARIOS.map((sc) => {
+    const ids = sc.evidenceTargetIds;
+    let ready = 0;
+    let produced = 0;
+    for (const id of ids) {
+      const c = learning.phrases[id];
+      if (isReadyForAdvance(c)) ready += 1;
+      if ((c?.timesProduced ?? 0) > 0 || (c?.timesCorrect ?? 0) > 0) produced += 1;
+    }
+    const coverage = ready / Math.max(1, ids.length);
+    const passed = coverage >= 0.5 && produced >= 1;
+    return { id: sc.id, passed, coverage };
+  });
+  const scenariosPassed = scenarioResults.filter((r) => r.passed).length;
+  const score = Math.round((scenariosPassed / A2_EXIT_SCENARIOS.length) * 100);
+  const passed = scenariosPassed >= 7;
+  return {
+    passed,
+    score,
+    reason: passed
+      ? 'Produção situacional A2 suficiente para avançar.'
+      : 'Ainda faltam situações comunicativas A2 do cotidiano.',
+    scenariosPassed,
+    scenarioResults,
+  };
 }

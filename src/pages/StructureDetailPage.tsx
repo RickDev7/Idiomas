@@ -31,6 +31,8 @@ import {
   l0ChunkBaseForPhraseId,
 } from '@/services/teacher/ZeroLanguageMode';
 import { UNIFIED_SIMULATOR_SCENARIOS } from '@/services/teacher/ProfessorCore/SituationCatalog';
+import { beginSelectedLearningSession } from '@/services/teacher/LessonStartIntent';
+import { SoundService } from '@/services/ui/SoundService';
 
 const TOPIC_FOR_BASE: Record<string, string> = {
   'survival-arbeite': 'work',
@@ -313,7 +315,18 @@ export function StructureDetailPage() {
             </DTGlassCard>
           </section>
 
-          <DTNeonButton onClick={() => navigate('/sessao?type=lesson')}>
+          <DTNeonButton
+            onClick={() => {
+              if (!baseId) return;
+              SoundService.play('start');
+              beginSelectedLearningSession(navigate, {
+                source: 'structure',
+                targetId: baseId,
+                baseId,
+                targetPhrase: view.german,
+              });
+            }}
+          >
             <span className="inline-flex items-center gap-2">
               <IconCheck size={16} /> Treinar agora
             </span>

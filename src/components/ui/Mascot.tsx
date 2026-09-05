@@ -1,15 +1,9 @@
 /* ============================================================
    DEUTSCH TURBO — Mascote oficial
-   Componente único que renderiza o robô 3D de referência com
-   consistência em todo o app. A imagem tem fundo preto, por isso
-   é exibida sobre um contêiner preto que blenda sem borda visível.
-   - Tamanhos pequenos (small/medium): avatar circular (rosto).
-   - Tamanhos grandes (large/hero/onboarding): card arredondado
-     mostrando o robô inteiro (cabeça, torso, mãos).
-   Os estados mudam apenas o halo/animação — o robô é sempre o
-   MESMO personagem.
+   PNG RGBA transparente (deutsch-turbo-mascot-alpha.png).
+   Sem caixa preta: o fundo do asset é alpha, não #000.
    ============================================================ */
-import mascotImg from '@/assets/mascot/deutsch-turbo-mascot.png';
+import mascotImg from '@/assets/deutsch-turbo/deutsch-turbo-mascot-alpha.png';
 import { haptic } from '@/services/ui/UiPrefsService';
 
 export type MascotSize = 'small' | 'medium' | 'large' | 'hero' | 'onboarding';
@@ -56,8 +50,8 @@ export function DeutschTurboMascot({
 
   const interactive = onClick ? 'cursor-pointer active:scale-95 transition-transform' : '';
   const radius = isCard ? 'rounded-[28%]' : 'rounded-full';
-  const objFit = isCard ? 'object-cover' : 'object-cover';
-  const objPos = isCard ? 'center 18%' : 'center 8%';
+  const objFit = isCard ? 'object-contain' : 'object-cover';
+  const objPos = isCard ? 'center center' : 'center 8%';
 
   return (
     <div
@@ -69,7 +63,6 @@ export function DeutschTurboMascot({
       className={`relative inline-flex items-center justify-center ${interactive} ${className}`}
       style={{ width: px, height: px }}
     >
-      {/* halo / anel de estado */}
       <span
         aria-hidden
         className={`absolute -inset-1 ${radius} ${stateAnim}`}
@@ -77,15 +70,14 @@ export function DeutschTurboMascot({
           background: `radial-gradient(circle at 50% 42%, ${ringColor}33 0%, ${ringColor}11 50%, transparent 75%)`,
         }}
       />
-      {/* contêiner preto + imagem (blend com o fundo preto do PNG) */}
       <span
         aria-hidden
-        className={`relative overflow-hidden ${radius} shadow-md`}
+        className={`relative overflow-hidden ${radius}`}
         style={{
           width: px,
           height: px,
-          background: '#000000',
-          boxShadow: `0 0 0 1.5px ${ringColor}40, 0 6px 18px rgba(0,0,0,0.25)`,
+          background: 'transparent',
+          boxShadow: `0 0 0 1.5px ${ringColor}40, 0 8px 22px color-mix(in srgb, ${ringColor} 28%, transparent)`,
         }}
       >
         <img

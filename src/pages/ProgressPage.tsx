@@ -1,23 +1,18 @@
 /**
- * Progresso — narrativa de domínio (DT design system).
- * Dados: getRealProgress / Learning State. Sem métricas inventadas.
+ * Progresso — leitura de evolução (não dashboard empresarial).
+ * Dados reais: nível, curso, competências, estruturas, autonomia, revisão.
  */
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { BottomNav } from '@/components/layout/BottomNav';
-import { IconCube, IconPuzzle, IconWave, IconBriefcase } from '@/components/ui/Icons';
 import { LoadingScreen } from '@/components/ui/LoadingScreen';
+import { PrimaryButton } from '@/components/ui/Button';
+import { GlassCard } from '@/components/ui/GlassCard';
+import { DT_ASSETS } from '@/assets/deutsch-turbo';
 import {
   DTPage,
   DTMain,
   DTTopBar,
-  DTSectionLabel,
-  DTGlassCard,
-  DTMetricCard,
-  DTProgressRing,
-  DTNeonButton,
-  DTBadge,
-  glassStyle,
 } from '@/components/dt';
 import { useProfile } from '@/hooks/useProfile';
 import { MemoryService } from '@/services/learning/MemoryService';
@@ -25,95 +20,15 @@ import {
   getCurrentLevel,
   getLevelPresentation,
   getStoredCourseProgress,
+  getCurrentModule,
+  getNextModule,
+  getLevelModulesProgressPercent,
 } from '@/services/course';
 import { getRealProgress, type RealProgress } from '@/services/learning/RealProgress';
-import { UNIFIED_SIMULATOR_SCENARIOS } from '@/services/teacher/ProfessorCore/SituationCatalog';
 import { L0_CHUNK_GRAPH } from '@/services/teacher/ZeroLanguageMode';
 import { readAutomationScore } from '@/services/learning/AutomationScoreEngine';
 import type { UserLearningProfile } from '@/services/learning/ConfidenceService';
-
-const TOPIC_HINTS: Record<string, string[]> = {
-  work: ['arbeit'],
-  home: ['wohn', 'hause'],
-  needs: ['brauch'],
-  food: ['moecht', 'essen'],
-  places: ['wohn'],
-  identity: ['heiss', 'komm'],
-  routine: ['muss'],
-  requests: ['kannst', 'hilfe'],
-  help: ['hilfe'],
-};
-
-function countActiveDomains(learning: UserLearningProfile): number {
-  let n = 0;
-  for (const scenario of UNIFIED_SIMULATOR_SCENARIOS) {
-    const hints = TOPIC_HINTS[scenario.topic] || [];
-    const hit = Object.values(learning.phrases).some((c) => {
-      if (!c || (c.timesSeen <= 0 && c.timesCorrect <= 0 && c.confidence <= 0)) return false;
-      const id = c.phraseId.toLowerCase();
-      return hints.some((h) => id.includes(h));
-    });
-    if (hit) n += 1;
-  }
-  return n;
-}
-
-function ActivityChart({ days }: { days: RealProgress['activityDays'] }) {
-  if (days.length === 0) {
-    return (
-      <DTGlassCard className="p-4 text-center">
-        <p className="text-[13px] text-[#64748B]">Ainda sem dados de atividade.</p>
-      </DTGlassCard>
-    );
-  }
-
-  const values = days.map((d) => d.productions + d.reviews + d.chunksGained);
-  const max = Math.max(1, ...values);
-  const w = 280;
-  const h = 72;
-  const pad = 6;
-  const points = values.map((v, i) => {
-    const x = pad + (i / Math.max(1, values.length - 1)) * (w - pad * 2);
-    const y = h - pad - (v / max) * (h - pad * 2);
-    return `${x},${y}`;
-  });
-
-  return (
-    <DTGlassCard className="p-3 overflow-hidden">
-      <svg viewBox={`0 0 ${w} ${h}`} className="w-full h-16" aria-label="Atividade recente">
-        <defs>
-          <linearGradient id="actStrokeDt" x1="0%" y1="0%" x2="100%" y2="0%">
-            <stop offset="0%" stopColor="#00F2FE" />
-            <stop offset="100%" stopColor="#8B5CF6" />
-          </linearGradient>
-          <linearGradient id="actFillDt" x1="0%" y1="0%" x2="0%" y2="100%">
-            <stop offset="0%" stopColor="rgba(0,242,254,0.3)" />
-            <stop offset="100%" stopColor="rgba(0,242,254,0)" />
-          </linearGradient>
-        </defs>
-        <polygon
-          points={`${pad},${h - pad} ${points.join(' ')} ${w - pad},${h - pad}`}
-          fill="url(#actFillDt)"
-        />
-        <polyline
-          points={points.join(' ')}
-          fill="none"
-          stroke="url(#actStrokeDt)"
-          strokeWidth="2.5"
-          strokeLinejoin="round"
-          strokeLinecap="round"
-        />
-      </svg>
-      <div className="flex justify-between px-1">
-        {days.map((d) => (
-          <span key={d.date} className="text-[9px] text-[#64748B] truncate max-w-[40px]">
-            {d.label}
-          </span>
-        ))}
-      </div>
-    </DTGlassCard>
-  );
-}
+import { APP_ROUTES } from '@/services/ui/AppRoutes';
 
 export function ProgressPage() {
   const navigate = useNavigate();
@@ -143,11 +58,6 @@ export function ProgressPage() {
     };
   }, [profile, currentLevel]);
 
-  const situationsCount = useMemo(
-    () => (learning ? countActiveDomains(learning) : null),
-    [learning],
-  );
-
   const structureCount = useMemo(() => {
     if (!learning) return null;
     return Object.keys(L0_CHUNK_GRAPH).filter((id) => {
@@ -161,147 +71,176 @@ export function ProgressPage() {
   const mastery = progress?.masteryPercent ?? null;
   const contentsDone = progress?.learnedChunks ?? null;
   const contentsTotal = progress?.learnedChunksTotal ?? null;
-  const focus = progress?.weakAreas?.[0] ?? null;
+  const reviewCount = progress?.reviewQueueCount ?? 0;
+  const autonomy = progress?.autonomousSpeechPercent ?? null;
 
-  const domains: { icon: ReactNode; tint: string; label: string; value: string; to?: string }[] = [
-    {
-      icon: <IconCube size={16} />,
-      tint: '#8B5CF6',
-      label: 'Chunks',
-      value: progress ? String(progress.learnedChunks) : '—',
-      to: '/chunks',
-    },
-    {
-      icon: <IconPuzzle size={16} />,
-      tint: '#00F2FE',
-      label: 'Estruturas',
-      value: structureCount != null ? String(structureCount) : '—',
-      to: '/chunks',
-    },
-    {
-      icon: <IconBriefcase size={16} />,
-      tint: '#F97316',
-      label: 'Situações',
-      value: situationsCount != null ? String(situationsCount) : '—',
-      to: '/situacoes',
-    },
-    {
-      icon: <IconWave size={16} />,
-      tint: '#EC4899',
-      label: 'Autonomia',
-      value:
-        progress?.autonomousSpeechPercent != null
-          ? `${progress.autonomousSpeechPercent}%`
-          : '—',
-    },
-  ];
+  const snap = learning
+    ? getCurrentModule(learning, currentLevel, course, currentLevel)
+    : null;
+  const next = learning
+    ? getNextModule(currentLevel, learning, currentLevel, course)
+    : null;
+  const levelPct = learning
+    ? getLevelModulesProgressPercent(currentLevel, learning, currentLevel, course)
+    : null;
+  const mod = snap?.module ?? null;
+  const competencyLine = mod?.competencyIds?.length
+    ? mod.competencyIds.join(' · ')
+    : null;
 
   return (
     <DTPage>
       <DTTopBar
         title="Progresso"
-        subtitle="Seu domínio"
-        right={
-          <button
-            type="button"
-            onClick={() => navigate('/lernweg')}
-            className="px-3 py-2 rounded-full text-[11px] font-bold text-[#00F2FE]"
-            style={{ ...glassStyle, border: '1px solid rgba(0,242,254,0.35)' }}
-          >
-            Jornada
-          </button>
-        }
+        subtitle="Sua evolução"
+        onBack={() => navigate(APP_ROUTES.home)}
       />
 
-      <DTMain withNav className="pt-3 space-y-5">
-        {/* Hero — domínio */}
-        <div
-          className="rounded-[28px] p-5 flex flex-col items-center relative overflow-hidden"
+      <DTMain withNav className="pt-2 space-y-4">
+        {/* Hero de evolução */}
+        <section
+          className="rounded-[28px] p-5 relative overflow-hidden"
           style={{
-            ...glassStyle,
-            border: '1px solid rgba(139,92,246,0.4)',
-            boxShadow: '0 0 28px rgba(139,92,246,0.18)',
+            background: 'var(--surface)',
+            border: '1px solid var(--border-subtle)',
           }}
         >
-          <span
-            className="absolute -top-20 w-52 h-52 rounded-full pointer-events-none"
-            style={{ background: 'radial-gradient(circle, rgba(139,92,246,0.4), transparent 70%)' }}
+          <img
+            src={DT_ASSETS.learningJourney}
+            alt=""
+            className="absolute right-[-8%] top-[-10%] w-[160px] h-[160px] object-contain opacity-40 pointer-events-none"
+            draggable={false}
           />
-          <DTProgressRing
-            value={mastery ?? 0}
-            size={132}
-            stroke={10}
-            color="#8B5CF6"
-            label={mastery != null ? `${mastery}%` : '—'}
-          />
-          <p className="relative mt-3 text-[22px] font-extrabold text-white font-[family-name:var(--font-display)]">
+          <p className="text-[10px] uppercase tracking-[0.16em] font-bold text-[var(--learning-violet)]">
+            Nível atual
+          </p>
+          <p className="mt-1 text-[36px] font-extrabold text-[var(--text-primary)] font-[family-name:var(--font-display)] leading-none">
             {currentLevel}
           </p>
-          <p className="relative text-[13px] text-[#CBD5E1]">{levelView.label}</p>
+          <p className="mt-2 text-[14px] text-[var(--text-secondary)]">{levelView.label}</p>
+          {mastery != null ? (
+            <p className="mt-3 text-[13px] font-semibold text-[var(--text-primary)] tabular-nums">
+              Domínio do nível · {mastery}%
+            </p>
+          ) : null}
           {contentsDone != null && contentsTotal != null ? (
-            <p className="relative mt-2 text-[12px] font-semibold text-[#94A3B8] tabular-nums">
+            <p className="mt-1 text-[12px] text-[var(--text-faint)] tabular-nums">
               {contentsDone} de {contentsTotal} itens estudados
             </p>
           ) : null}
-        </div>
-
-        {/* Domínios horizontais */}
-        <section>
-          <DTSectionLabel className="mb-2">Domínios</DTSectionLabel>
-          <div className="flex gap-2 overflow-x-auto scrollbar-hide">
-            {domains.map((d) => (
-              <div key={d.label} className="shrink-0 w-[108px]">
-                <DTMetricCard
-                  value={d.value}
-                  label={d.label}
-                  color={d.tint}
-                  icon={d.icon}
-                  onClick={d.to ? () => navigate(d.to!) : undefined}
-                />
-              </div>
-            ))}
-          </div>
         </section>
 
-        {/* Atividade */}
+        {/* Curso / módulo */}
         <section>
-          <DTSectionLabel className="mb-2">Atividade</DTSectionLabel>
-          <ActivityChart days={progress?.activityDays ?? []} />
-        </section>
-
-        {/* Próximo foco */}
-        <section>
-          <DTSectionLabel className="mb-2">Ainda precisa treinar</DTSectionLabel>
-          {focus ? (
-            <button
-              type="button"
-              onClick={() => navigate('/revisar')}
-              className="w-full text-left rounded-[20px] p-4 active:scale-[0.98] transition-transform"
-              style={{
-                ...glassStyle,
-                border: '1px solid rgba(236,72,153,0.4)',
-              }}
+          <p className="text-[10px] uppercase tracking-[0.14em] font-bold text-[var(--text-faint)] mb-2 px-1">
+            Curso
+          </p>
+          <GlassCard className="p-4 space-y-2">
+            {mod ? (
+              <>
+                <p className="text-[16px] font-bold text-[var(--text-primary)]">
+                  Módulo {mod.order} — {mod.title}
+                </p>
+                {competencyLine ? (
+                  <p className="text-[12px] text-[var(--text-secondary)]">
+                    Competências: {competencyLine}
+                  </p>
+                ) : null}
+                <p className="text-[13px] text-[var(--text-secondary)]">
+                  Progresso do módulo: {mod.progress}% · Domínio: {mod.masteryLabel}
+                </p>
+                {levelPct != null ? (
+                  <div className="pt-1">
+                    <div className="flex justify-between text-[11px] text-[var(--text-faint)] mb-1">
+                      <span>Nível {currentLevel}</span>
+                      <span className="tabular-nums">{levelPct}%</span>
+                    </div>
+                    <div
+                      className="h-2 rounded-full overflow-hidden"
+                      style={{ background: 'color-mix(in srgb, var(--text-primary) 8%, transparent)' }}
+                    >
+                      <div
+                        className="h-full rounded-full"
+                        style={{
+                          width: `${Math.min(100, levelPct)}%`,
+                          background: 'linear-gradient(90deg, var(--voice-cyan), var(--learning-violet))',
+                        }}
+                      />
+                    </div>
+                  </div>
+                ) : null}
+                {next && !next.locked ? (
+                  <p className="text-[12px] text-[var(--voice-cyan)]">
+                    Próximo: Módulo {next.order} — {next.title}
+                  </p>
+                ) : snap?.journeyComplete ? (
+                  <p className="text-[12px] text-[var(--success)]">
+                    Jornada curricular disponível concluída.
+                  </p>
+                ) : null}
+              </>
+            ) : (
+              <p className="text-[13px] text-[var(--text-faint)]">Sem módulo ativo neste nível.</p>
+            )}
+            <PrimaryButton
+              full
+              variant="accent"
+              className="mt-2"
+              onClick={() => navigate(APP_ROUTES.jornada)}
             >
-              <DTBadge color="#EC4899">Ponto fraco</DTBadge>
-              <p className="mt-2 text-[16px] font-bold text-white">{focus.german}</p>
-              {focus.reason ? (
-                <p className="mt-1 text-[12px] text-[#94A3B8]">{focus.reason}</p>
-              ) : null}
-              <p className="mt-3 text-[12px] font-bold text-[#00F2FE]">Treinar agora →</p>
-            </button>
-          ) : (
-            <DTGlassCard className="p-4">
-              <p className="text-[13px] text-[#64748B]">
-                Ainda não há dados suficientes para um foco.
-              </p>
-            </DTGlassCard>
-          )}
+              Abrir Meu Curso
+            </PrimaryButton>
+          </GlassCard>
         </section>
 
-        {progress && progress.reviewQueueCount > 0 ? (
-          <DTNeonButton onClick={() => navigate('/revisar')}>
-            {progress.reviewQueueCount} itens para revisar
-          </DTNeonButton>
+        {/* Cards de leitura — empilhados, não métricas de dashboard */}
+        <section className="space-y-2">
+          <p className="text-[10px] uppercase tracking-[0.14em] font-bold text-[var(--text-faint)] mb-2 px-1">
+            O que você já domina
+          </p>
+          <GlassCard className="p-4 flex items-center justify-between gap-3">
+            <div>
+              <p className="text-[13px] font-semibold text-[var(--text-primary)]">
+                Targets / estruturas
+              </p>
+              <p className="text-[12px] text-[var(--text-secondary)] mt-0.5">
+                Frases e chunks com evidência de uso
+              </p>
+            </div>
+            <p className="text-[28px] font-extrabold text-[var(--voice-cyan)] tabular-nums">
+              {structureCount != null ? structureCount : '—'}
+            </p>
+          </GlassCard>
+
+          <GlassCard className="p-4 flex items-center justify-between gap-3">
+            <div>
+              <p className="text-[13px] font-semibold text-[var(--text-primary)]">Autonomia</p>
+              <p className="text-[12px] text-[var(--text-secondary)] mt-0.5">
+                Fala espontânea nas sessões
+              </p>
+            </div>
+            <p className="text-[28px] font-extrabold text-[var(--learning-violet)] tabular-nums">
+              {autonomy != null ? `${autonomy}%` : '—'}
+            </p>
+          </GlassCard>
+
+          <GlassCard className="p-4 flex items-center justify-between gap-3">
+            <div>
+              <p className="text-[13px] font-semibold text-[var(--text-primary)]">Revisão pendente</p>
+              <p className="text-[12px] text-[var(--text-secondary)] mt-0.5">
+                Itens prontos para reforço
+              </p>
+            </div>
+            <p className="text-[28px] font-extrabold text-[var(--active-coral,#FF5E62)] tabular-nums">
+              {reviewCount}
+            </p>
+          </GlassCard>
+        </section>
+
+        {reviewCount > 0 ? (
+          <PrimaryButton full onClick={() => navigate(APP_ROUTES.revisar)}>
+            Revisar {reviewCount} {reviewCount === 1 ? 'item' : 'itens'}
+          </PrimaryButton>
         ) : null}
       </DTMain>
 

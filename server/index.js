@@ -34,6 +34,10 @@ const DEFAULT_ALLOWED_ORIGINS = [
   'http://127.0.0.1:4173',
   'http://localhost:4175',
   'http://127.0.0.1:4175',
+  'http://localhost:4196',
+  'http://127.0.0.1:4196',
+  'http://localhost:4200',
+  'http://127.0.0.1:4200',
 ];
 
 const ALLOWED_ORIGINS = new Set([

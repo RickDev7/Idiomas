@@ -168,7 +168,7 @@ async function main() {
   const integrity = assertB1CurriculumIntegrity();
   check('1. integrity ok', integrity.ok);
   if (!integrity.ok) console.error(integrity.errors);
-  check('1. 21 B1 targets', getB1Targets().length === 21);
+  check('1. 57 B1 targets', getB1Targets().length === 57);
   check('1. all ids b1-', B1_CURRICULUM.every((t) => t.id.startsWith('b1-') && t.level === 'B1'));
   check('1. CURATED B1 all have ids', CURATED.filter((c) => c.level === 'B1').every((c) =>
     c.core.every((p) => !!p.id && !!p.unitId && p.id.startsWith('b1-')),
@@ -178,8 +178,8 @@ async function main() {
     m.units.every((u) => u.phraseIds.length > 0 && u.phraseIds.every((id) => isB1TargetId(id))),
   ));
   check('3. 7 B1 competencies', competenciesForLevel('B1').length === 7);
-  check('3. getByCompetency story', getB1TargetsByCompetency('b1.story').length === 3);
-  check('3. getByUnit u1', getB1TargetsByUnit('b1.u1').length === 3);
+  check('3. getByCompetency story', getB1TargetsByCompetency('b1.story').length === 8);
+  check('3. getByUnit u1', getB1TargetsByUnit('b1.u1').length === 8);
   check('3. getById', getB1TargetById('b1-story-muenchen')?.german.includes('München') === true);
   check('4. primeiro target', b1FirstTarget().id === 'b1-story-muenchen');
 

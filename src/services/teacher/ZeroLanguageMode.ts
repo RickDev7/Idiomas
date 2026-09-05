@@ -79,57 +79,211 @@ function levenshtein(a: string, b: string): number {
 
 /** Progressão L0: frases curtas em ordem (uma por vez). Cobertura ampla = orçamento de tempo. */
 export const ZERO_LANGUAGE_SEED_SPECS: Array<{ id: string; german: string; portuguese: string }> = [
-  // Bloco 1 — Cumprimentos
+  // u1 — Primeiros contatos
   { id: 'l0-guten-morgen', german: 'Guten Morgen.', portuguese: 'Bom dia.' },
   { id: 'l0-guten-tag', german: 'Guten Tag.', portuguese: 'Boa tarde.' },
   { id: 'l0-guten-abend', german: 'Guten Abend.', portuguese: 'Boa tarde / boa noite (início da noite).' },
   { id: 'l0-gute-nacht', german: 'Gute Nacht.', portuguese: 'Boa noite (ao dormir).' },
   { id: 'l0-hallo', german: 'Hallo.', portuguese: 'Oi.' },
   { id: 'l0-tschuess', german: 'Tschüss!', portuguese: 'Tchau!' },
-  // Bloco 2 — Como estou
+  { id: 'l0-auf-wiedersehen', german: 'Auf Wiedersehen.', portuguese: 'Até logo / adeus.' },
+  { id: 'l0-bis-morgen', german: 'Bis morgen.', portuguese: 'Até amanhã.' },
+  { id: 'l0-danke', german: 'Danke.', portuguese: 'Obrigado.' },
+  { id: 'l0-vielen-dank', german: 'Vielen Dank.', portuguese: 'Muito obrigado.' },
+  { id: 'l0-bitte', german: 'Bitte.', portuguese: 'Por favor. / De nada.' },
+  { id: 'l0-entschuldigung', german: 'Entschuldigung.', portuguese: 'Com licença / desculpe.' },
+  { id: 'l0-kein-problem', german: 'Kein Problem.', portuguese: 'Sem problema.' },
   { id: 'l0-wie-gehts', german: "Wie geht's?", portuguese: 'Como você está?' },
   { id: 'l0-mir-gehts-gut', german: "Mir geht's gut.", portuguese: 'Estou bem.' },
-  // legado (merge/memória) — não entram na prioridade linear
+  // legado (merge/memória)
   { id: 'survival-gut', german: 'Mir geht es gut.', portuguese: 'Estou bem.' },
-  // Bloco 3 — Apresentação / vida
+  // u2 — Eu sou
   { id: 'l0-ich-heisse', german: 'Ich heiße...', portuguese: 'Eu me chamo...' },
   { id: 'survival-heisse', german: 'Ich heiße...', portuguese: 'Me chamo...' },
   { id: 'l0-ich-bin', german: 'Ich bin...', portuguese: 'Eu sou...' },
   { id: 'l0-ich-wohne', german: 'Ich wohne in...', portuguese: 'Eu moro em...' },
   { id: 'l0-ich-komme', german: 'Ich komme aus...', portuguese: 'Eu venho de...' },
-  { id: 'survival-arbeite', german: 'Ich arbeite.', portuguese: 'Eu trabalho.' },
-  // Bloco 4 — Sobrevivência
+  { id: 'l0-ich-bin-jahre', german: 'Ich bin ... Jahre alt.', portuguese: 'Eu tenho ... anos.' },
+  { id: 'l0-wie-heisst-du', german: 'Wie heißt du?', portuguese: 'Como você se chama?' },
+  { id: 'l0-woher-kommst-du', german: 'Woher kommst du?', portuguese: 'De onde você vem?' },
+  { id: 'l0-wo-wohnst-du', german: 'Wo wohnst du?', portuguese: 'Onde você mora?' },
+  { id: 'l0-wie-alt-bist-du', german: 'Wie alt bist du?', portuguese: 'Quantos anos você tem?' },
+  // u3 — Pessoas
+  { id: 'l0-das-ist', german: 'Das ist...', portuguese: 'Isto / esta é...' },
+  { id: 'l0-ich-habe', german: 'Ich habe...', portuguese: 'Eu tenho...' },
+  { id: 'l0-das-ist-meine-mutter', german: 'Das ist meine Mutter.', portuguese: 'Esta é a minha mãe.' },
+  { id: 'l0-das-ist-mein-vater', german: 'Das ist mein Vater.', portuguese: 'Este é o meu pai.' },
+  { id: 'l0-meine-familie', german: 'Meine Familie.', portuguese: 'Minha família.' },
+  { id: 'l0-mein-freund', german: 'Das ist mein Freund.', portuguese: 'Este é o meu amigo.' },
+  { id: 'l0-meine-freundin', german: 'Das ist meine Freundin.', portuguese: 'Esta é a minha amiga.' },
+  // u4 — Números / tempo
+  { id: 'l0-eins-zwei-drei', german: 'Eins, zwei, drei.', portuguese: 'Um, dois, três.' },
+  { id: 'l0-zahlen-bis-zehn', german: 'Eins bis zehn.', portuguese: 'De um a dez.' },
+  { id: 'l0-heute', german: 'Heute.', portuguese: 'Hoje.' },
+  { id: 'l0-morgen-zeit', german: 'Morgen.', portuguese: 'Amanhã.' },
+  { id: 'l0-gestern', german: 'Gestern.', portuguese: 'Ontem.' },
+  { id: 'l0-jetzt', german: 'Jetzt.', portuguese: 'Agora.' },
+  { id: 'l0-spaeter', german: 'Später.', portuguese: 'Mais tarde.' },
+  { id: 'l0-es-ist-uhr', german: 'Es ist ... Uhr.', portuguese: 'São ... horas.' },
+  { id: 'l0-das-kostet', german: 'Das kostet...', portuguese: 'Isso custa...' },
+  // u5 — Ajuda / compreensão
   { id: 'l0-ja', german: 'Ja.', portuguese: 'Sim.' },
   { id: 'l0-nein', german: 'Nein.', portuguese: 'Não.' },
-  { id: 'l0-danke', german: 'Danke.', portuguese: 'Obrigado.' },
-  { id: 'l0-bitte', german: 'Bitte.', portuguese: 'Por favor. / De nada.' },
-  { id: 'l0-hilfe', german: 'Hilfe, bitte!', portuguese: 'Socorro, por favor!' },
-  { id: 'l0-pause', german: 'Ich brauche eine Pause.', portuguese: 'Preciso de uma pausa.' },
+  { id: 'l0-vielleicht', german: 'Vielleicht.', portuguese: 'Talvez.' },
+  { id: 'l0-ich-weiss-nicht', german: 'Ich weiß nicht.', portuguese: 'Eu não sei.' },
+  { id: 'l0-ich-verstehe', german: 'Ich verstehe.', portuguese: 'Eu entendo.' },
   { id: 'l0-verstehe-nicht', german: 'Ich verstehe nicht.', portuguese: 'Eu não entendo.' },
   { id: 'l0-noch-einmal', german: 'Noch einmal, bitte.', portuguese: 'Mais uma vez, por favor.' },
+  { id: 'l0-langsam-bitte', german: 'Langsam, bitte.', portuguese: 'Devagar, por favor.' },
+  { id: 'l0-was-bedeutet-das', german: 'Was bedeutet das?', portuguese: 'O que isso significa?' },
+  { id: 'l0-wie-sagt-man', german: 'Wie sagt man das auf Deutsch?', portuguese: 'Como se diz isso em alemão?' },
+  { id: 'l0-hilfe', german: 'Hilfe, bitte!', portuguese: 'Socorro, por favor!' },
+  { id: 'l0-koennen-sie-wiederholen', german: 'Können Sie das bitte wiederholen?', portuguese: 'Pode repetir, por favor?' },
+  // u6 — Necessidades
+  { id: 'l0-pause', german: 'Ich brauche eine Pause.', portuguese: 'Preciso de uma pausa.' },
+  { id: 'l0-ich-kann', german: 'Ich kann...', portuguese: 'Eu posso / consigo...' },
+  { id: 'l0-ich-kann-nicht', german: 'Ich kann nicht...', portuguese: 'Eu não posso / não consigo...' },
+  { id: 'l0-wasser-bitte', german: 'Wasser, bitte.', portuguese: 'Água, por favor.' },
+  { id: 'l0-toilette-bitte', german: 'Die Toilette, bitte.', portuguese: 'O banheiro, por favor.' },
+  // u7 — Mundo
+  { id: 'l0-mein-haus', german: 'Das ist mein Haus.', portuguese: 'Esta é a minha casa.' },
+  { id: 'l0-in-der-stadt', german: 'Ich bin in der Stadt.', portuguese: 'Estou na cidade.' },
+  { id: 'l0-zur-arbeit', german: 'Ich gehe zur Arbeit.', portuguese: 'Eu vou ao trabalho.' },
+  { id: 'l0-der-tisch', german: 'Der Tisch.', portuguese: 'A mesa (der).' },
+  { id: 'l0-die-tuer', german: 'Die Tür.', portuguese: 'A porta (die).' },
+  { id: 'l0-das-buch', german: 'Das Buch.', portuguese: 'O livro (das).' },
+  { id: 'l0-ein-apfel', german: 'Ein Apfel.', portuguese: 'Uma maçã (ein).' },
+  { id: 'l0-eine-flasche', german: 'Eine Flasche.', portuguese: 'Uma garrafa (eine).' },
+  // u8 — Frases / trabalho
+  { id: 'survival-arbeite', german: 'Ich arbeite.', portuguese: 'Eu trabalho.' },
+  { id: 'l0-seq-vorstellen', german: 'Ich heiße... Ich komme aus... Ich wohne in...', portuguese: 'Apresentação em sequência.' },
+  { id: 'l0-seq-bedarf', german: 'Ich möchte Wasser. Ich brauche Hilfe.', portuguese: 'Necessidade em sequência.' },
+  { id: 'l0-seq-arbeitstag', german: 'Ich arbeite. Heute. Später.', portuguese: 'Dia de trabalho em sequência.' },
 ];
 
-/** Blocos pedagógicos L0 — prioridade linear = cobertura da sessão (sem duplicatas). */
+/** Blocos pedagógicos L0 — 8 módulos pré-A1 (prioridade linear = cobertura). */
 export const ZERO_LANGUAGE_BLOCKS: Array<{ id: string; namePt: string; phraseIds: string[] }> = [
   {
     id: 'greetings',
-    namePt: 'Cumprimentos',
-    phraseIds: ['l0-guten-morgen', 'l0-guten-tag', 'l0-guten-abend', 'l0-gute-nacht', 'l0-hallo', 'l0-tschuess'],
-  },
-  {
-    id: 'wellbeing',
-    namePt: 'Como estou',
-    phraseIds: ['l0-wie-gehts', 'l0-mir-gehts-gut'],
+    namePt: 'Primeiros contatos',
+    phraseIds: [
+      // Ordem clássica (kickoff / SessionOpening) — depois expansões sociais
+      'l0-guten-morgen',
+      'l0-guten-tag',
+      'l0-guten-abend',
+      'l0-gute-nacht',
+      'l0-hallo',
+      'l0-tschuess',
+      'l0-auf-wiedersehen',
+      'l0-bis-morgen',
+      'l0-danke',
+      'l0-vielen-dank',
+      'l0-bitte',
+      'l0-entschuldigung',
+      'l0-kein-problem',
+      'l0-wie-gehts',
+      'l0-mir-gehts-gut',
+    ],
   },
   {
     id: 'identity',
-    namePt: 'Apresentação',
-    phraseIds: ['l0-ich-heisse', 'l0-ich-bin', 'l0-ich-wohne', 'l0-ich-komme', 'survival-arbeite'],
+    namePt: 'Eu sou',
+    phraseIds: [
+      'l0-ich-heisse',
+      'l0-ich-bin',
+      'l0-ich-komme',
+      'l0-ich-wohne',
+      'l0-ich-bin-jahre',
+      'l0-wie-heisst-du',
+      'l0-woher-kommst-du',
+      'l0-wo-wohnst-du',
+      'l0-wie-alt-bist-du',
+    ],
   },
   {
-    id: 'survival',
-    namePt: 'Sobrevivência',
-    phraseIds: ['l0-ja', 'l0-nein', 'l0-danke', 'l0-bitte', 'l0-hilfe', 'l0-pause', 'l0-verstehe-nicht', 'l0-noch-einmal'],
+    id: 'people',
+    namePt: 'Pessoas importantes',
+    phraseIds: [
+      'l0-das-ist',
+      'l0-ich-habe',
+      'l0-das-ist-meine-mutter',
+      'l0-das-ist-mein-vater',
+      'l0-meine-familie',
+      'l0-mein-freund',
+      'l0-meine-freundin',
+    ],
+  },
+  {
+    id: 'numbers_time',
+    namePt: 'Números, tempo e informações',
+    phraseIds: [
+      'l0-eins-zwei-drei',
+      'l0-zahlen-bis-zehn',
+      'l0-heute',
+      'l0-morgen-zeit',
+      'l0-gestern',
+      'l0-jetzt',
+      'l0-spaeter',
+      'l0-es-ist-uhr',
+      'l0-das-kostet',
+    ],
+  },
+  {
+    id: 'help',
+    namePt: 'Entender e pedir ajuda',
+    phraseIds: [
+      'l0-ja',
+      'l0-nein',
+      'l0-vielleicht',
+      'l0-ich-weiss-nicht',
+      'l0-ich-verstehe',
+      'l0-verstehe-nicht',
+      'l0-noch-einmal',
+      'l0-langsam-bitte',
+      'l0-was-bedeutet-das',
+      'l0-wie-sagt-man',
+      'l0-hilfe',
+      'l0-koennen-sie-wiederholen',
+    ],
+  },
+  {
+    id: 'needs',
+    namePt: 'Necessidades básicas',
+    phraseIds: [
+      'l0-hook-ich-moechte',
+      'l0-hook-ich-brauche',
+      'l0-pause',
+      'l0-ich-kann',
+      'l0-ich-kann-nicht',
+      'l0-wasser-bitte',
+      'l0-toilette-bitte',
+    ],
+  },
+  {
+    id: 'world',
+    namePt: 'O mundo ao meu redor',
+    phraseIds: [
+      'l0-mein-haus',
+      'l0-in-der-stadt',
+      'l0-zur-arbeit',
+      'l0-der-tisch',
+      'l0-die-tuer',
+      'l0-das-buch',
+      'l0-ein-apfel',
+      'l0-eine-flasche',
+    ],
+  },
+  {
+    id: 'phrases',
+    namePt: 'Minhas primeiras frases',
+    phraseIds: [
+      'survival-arbeite',
+      'l0-hook-ich-muss',
+      'l0-hook-kannst-du',
+      'l0-seq-vorstellen',
+      'l0-seq-bedarf',
+      'l0-seq-arbeitstag',
+    ],
   },
 ];
 
@@ -193,21 +347,21 @@ export const L0_CHUNK_GRAPH: Record<string, L0ChunkGraphNode> = {
     ],
     questions: ['l0-bridge-wo-arbeitest', 'l0-bridge-wann-arbeitest'],
   },
+  'l0-ich-heisse': {
+    simpleVars: ['l0-bridge-ich-heisse-name'],
+    questions: ['l0-wie-heisst-du'],
+  },
+  'l0-ich-bin': {
+    simpleVars: ['l0-var-ich-bin-student', 'l0-ich-bin-jahre'],
+    questions: ['l0-wie-alt-bist-du'],
+  },
   'l0-ich-wohne': {
     simpleVars: ['l0-bridge-ich-wohne-in'],
-    questions: [],
+    questions: ['l0-wo-wohnst-du'],
   },
   'l0-ich-komme': {
     simpleVars: ['l0-bridge-ich-komme-aus'],
-    questions: [],
-  },
-  'l0-ich-heisse': {
-    simpleVars: ['l0-bridge-ich-heisse-name'],
-    questions: [],
-  },
-  'l0-ich-bin': {
-    simpleVars: ['l0-var-ich-bin-student'],
-    questions: [],
+    questions: ['l0-woher-kommst-du'],
   },
   'l0-hook-ich-muss': {
     simpleVars: ['l0-var-ich-muss-arbeiten', 'l0-var-ich-muss-gehen'],
@@ -582,11 +736,17 @@ export function pickZeroLanguageTarget(
     excludePhraseId?: string | null;
     /** Frases difíceis postergadas nesta sessão — pular para maximizar cobertura. */
     skipPhraseIds?: string[] | null;
+    /** Continuar Curso / Meu Curso: restringe ao módulo L0 selecionado. */
+    restrictToTargetIds?: readonly string[] | null;
   },
 ): { conf: PhraseConfidence | undefined; phrase: Phrase | null; action: 'introduce' | 'practice' | 'recall' | 'converse' } {
   const pool = mergeZeroLanguagePhrases(phrases);
   const exclude = opts?.excludePhraseId || null;
   const skip = new Set((opts?.skipPhraseIds || []).filter(Boolean));
+  const restrict = opts?.restrictToTargetIds?.length
+    ? new Set(opts.restrictToTargetIds)
+    : null;
+  const inScope = (id: string) => !restrict || restrict.has(id);
 
   const resolveAction = (id: string, conf: PhraseConfidence | undefined) => {
     const phrase = pool.find((p) => p.id === id) || null;
@@ -612,6 +772,7 @@ export function pickZeroLanguageTarget(
     const reviewBlock = findZeroLanguageBlock(opts.blockReviewPhraseId);
     if (reviewBlock) {
       for (const id of reviewBlock.phraseIds) {
+        if (!inScope(id)) continue;
         if (skip.has(id)) continue;
         if (id === exclude) continue;
         const phrase = pool.find((p) => p.id === id) || null;
@@ -625,16 +786,16 @@ export function pickZeroLanguageTarget(
   }
 
   // MODELO → SUBSTITUIÇÃO → PERGUNTA → CONVERSA (grafo tipado + maturidade)
-  if (exclude) {
+  if (exclude && inScope(exclude)) {
     const baseId = l0ChunkBaseForPhraseId(exclude);
-    if (baseId) {
+    if (baseId && inScope(baseId)) {
       const adv = l0NextChunkAdvance(learning, baseId, skip);
-      if (adv && (adv.kind === 'simple_var' || adv.kind === 'question') && adv.phraseId !== exclude) {
+      if (adv && (adv.kind === 'simple_var' || adv.kind === 'question') && adv.phraseId !== exclude && inScope(adv.phraseId)) {
         const hit = resolveAction(adv.phraseId, learning.phrases[adv.phraseId]);
         if (hit) return hit;
       }
       // Converse só quando o core já fechou — senão um chunk de 1 simple_var abortava o currículo
-      if (adv?.kind === 'converse' && isL0CoreCurriculumComplete(learning)) {
+      if (adv?.kind === 'converse' && isL0CoreCurriculumComplete(learning) && !restrict) {
         return resolveConverse(baseId);
       }
     }
@@ -642,6 +803,7 @@ export function pickZeroLanguageTarget(
 
   // Avanço linear core (cumprimentos → sobrevivência)
   for (const id of L0_PRIORITY_IDS) {
+    if (!inScope(id)) continue;
     if (skip.has(id)) continue;
     if (id === exclude) continue;
     const phrase = pool.find((p) => p.id === id) || null;
@@ -654,9 +816,9 @@ export function pickZeroLanguageTarget(
 
   // Core esgotado: avanço tipado de chunks (simple → question; maturo pula simple)
   {
-    const prefer = exclude ? l0ChunkBaseForPhraseId(exclude) : null;
-    const pending = l0PickPendingVariationId(learning, { preferBaseId: prefer || exclude, skip });
-    if (pending && pending !== exclude) {
+    const prefer = exclude && inScope(exclude) ? l0ChunkBaseForPhraseId(exclude) : null;
+    const pending = l0PickPendingVariationId(learning, { preferBaseId: prefer || (exclude && inScope(exclude) ? exclude : null), skip });
+    if (pending && pending !== exclude && inScope(pending)) {
       // Guarda: nunca reabrir simple_var de chunk maturo
       if (!(l0IsSimpleVariationId(pending) && l0IsSimpleVarRecallBlocked(learning, pending))) {
         const hit = resolveAction(pending, learning.phrases[pending]);
@@ -664,7 +826,8 @@ export function pickZeroLanguageTarget(
       }
     }
     // Algum chunk maturo sem pergunta pendente → converse (não recycle vocab) — só pós-core
-    if (isL0CoreCurriculumComplete(learning)) {
+    // Com módulo restrito: não escapar para converse global.
+    if (isL0CoreCurriculumComplete(learning) && !restrict) {
       const matureBases = Object.keys(L0_CHUNK_GRAPH).filter((id) => isL0ChunkMature(learning, id));
       for (const baseId of matureBases) {
         const adv = l0NextChunkAdvance(learning, baseId, skip);
@@ -677,6 +840,7 @@ export function pickZeroLanguageTarget(
 
   // Ganchos estruturantes (Ich muss / möchte / Kannst du / brauche)
   for (const id of L0_CHUNK_HOOK_IDS) {
+    if (!inScope(id)) continue;
     if (skip.has(id)) continue;
     if (id === exclude) continue;
     const conf = learning.phrases[id];
@@ -688,6 +852,7 @@ export function pickZeroLanguageTarget(
 
   // Restante da ponte (ainda não coberta por variações de bases aceitos)
   for (const id of L0_BRIDGE_PRIORITY_IDS) {
+    if (!inScope(id)) continue;
     if (skip.has(id)) continue;
     if (id === exclude) continue;
     if ((L0_CHUNK_HOOK_IDS as readonly string[]).includes(id)) continue;
@@ -699,6 +864,29 @@ export function pickZeroLanguageTarget(
     if (conf && isAutomated(conf)) continue;
     if (isZeroLanguagePhraseAccepted(conf)) continue;
     return resolveAction(id, conf)!;
+  }
+
+  // Com módulo restrito e sem pendências: reforçar dentro do módulo (não contaminar outros).
+  if (restrict) {
+    for (const id of opts!.restrictToTargetIds!) {
+      if (skip.has(id)) continue;
+      if (id === exclude) continue;
+      const phrase = pool.find((p) => p.id === id) || null;
+      if (!phrase) continue;
+      const conf = learning.phrases[id];
+      if (!isZeroLanguagePhraseAccepted(conf)) {
+        return resolveAction(id, conf)!;
+      }
+    }
+    const first = [...restrict].find((id) => pool.some((p) => p.id === id));
+    if (first) {
+      return {
+        conf: learning.phrases[first],
+        phrase: pool.find((p) => p.id === first) || null,
+        action: 'practice',
+      };
+    }
+    return { conf: undefined, phrase: null, action: 'converse' };
   }
 
   // Core + ponte aceitos.

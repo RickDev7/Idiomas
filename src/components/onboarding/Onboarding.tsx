@@ -51,7 +51,17 @@ export function LevelGlyph({ id, size = 18 }: { id: LevelIconId; size?: number }
 /* ---------- Shell ---------- */
 export function OnboardingShell({ children }: { children: ReactNode }) {
   return (
-    <div className="flex flex-col h-full max-w-md mx-auto dt-page text-white">{children}</div>
+    <div className="flex flex-col h-full max-w-md mx-auto dt-page text-[var(--text-primary)] relative overflow-hidden">
+      <div
+        className="pointer-events-none absolute inset-x-0 top-0 h-40"
+        style={{
+          background:
+            'radial-gradient(ellipse at 50% 0%, color-mix(in srgb, var(--learning-violet) 28%, transparent), transparent 70%)',
+        }}
+        aria-hidden
+      />
+      <div className="relative flex flex-col h-full">{children}</div>
+    </div>
   );
 }
 
@@ -97,58 +107,35 @@ export function OnboardingProgress({
 }) {
   return (
     <nav
-      className="flex items-center justify-center px-8 py-3 shrink-0"
+      className="flex items-center justify-center gap-1.5 px-8 py-2 shrink-0"
       aria-label="Progresso do onboarding"
     >
       {Array.from({ length: total }).map((_, i) => {
         const active = i === current;
         const done = i < current;
         return (
-          <span key={i} className="flex items-center">
-            <button
-              type="button"
-              disabled={!onJump || i > current}
-              onClick={() => {
-                if (onJump && i < current) {
-                  haptic(6);
-                  onJump(i);
-                }
-              }}
-              aria-current={active ? 'step' : undefined}
-              aria-label={`Passo ${i + 1}${active ? ', atual' : done ? ', concluído' : ''}`}
-              className="w-8 h-8 rounded-full text-[13px] font-bold flex items-center justify-center transition-all duration-300"
-              style={
-                active
-                  ? {
-                      background: 'linear-gradient(145deg, #A855F7, #8B5CF6)',
-                      color: '#fff',
-                      boxShadow: '0 0 0 3px rgba(139,92,246,0.35), 0 0 18px rgba(139,92,246,0.5)',
-                      transform: 'scale(1.05)',
-                    }
-                  : done
-                    ? {
-                        background: 'rgba(139,92,246,0.18)',
-                        color: '#A855F7',
-                        border: '1px solid rgba(168,85,247,0.4)',
-                      }
-                    : {
-                        ...glassStyle,
-                        color: '#64748B',
-                      }
+          <button
+            key={i}
+            type="button"
+            disabled={!onJump || i > current}
+            onClick={() => {
+              if (onJump && i < current) {
+                haptic(6);
+                onJump(i);
               }
-            >
-              {i + 1}
-            </button>
-            {i < total - 1 && (
-              <span
-                className="w-6 sm:w-8 h-[2px] mx-0.5 rounded-full transition-colors"
-                style={{
-                  background: i < current ? 'rgba(139,92,246,0.55)' : 'rgba(255,255,255,0.08)',
-                }}
-                aria-hidden
-              />
-            )}
-          </span>
+            }}
+            aria-current={active ? 'step' : undefined}
+            aria-label={`Passo ${i + 1}${active ? ', atual' : done ? ', concluído' : ''}`}
+            className="h-1.5 rounded-full transition-all duration-300"
+            style={{
+              width: active ? 28 : 10,
+              background: active
+                ? 'linear-gradient(90deg, var(--active-coral, #FF5E62), var(--learning-violet))'
+                : done
+                  ? 'var(--learning-violet)'
+                  : 'color-mix(in srgb, var(--text-primary) 12%, transparent)',
+            }}
+          />
         );
       })}
     </nav>
@@ -173,11 +160,13 @@ export function OnboardingSlide({
 /* ---------- Question header ---------- */
 export function OnboardingQuestion({ title, subtitle }: { title: ReactNode; subtitle: string }) {
   return (
-    <div className="mb-5">
-      <h1 className="text-[26px] leading-[1.18] font-bold tracking-tight text-white font-[family-name:var(--font-display)]">
+    <div className="mb-6 text-center px-1">
+      <h1 className="text-[28px] leading-[1.15] font-extrabold tracking-tight text-[var(--text-primary)] font-[family-name:var(--font-display)]">
         {title}
       </h1>
-      <p className="text-[15px] text-[#94A3B8] mt-2 leading-relaxed">{subtitle}</p>
+      <p className="text-[15px] text-[var(--text-secondary)] mt-3 leading-relaxed max-w-[32ch] mx-auto">
+        {subtitle}
+      </p>
     </div>
   );
 }
@@ -206,12 +195,11 @@ export function OnboardingButton({
         haptic();
         onClick();
       }}
-      className="w-full min-h-14 rounded-full text-white text-[16px] font-semibold active:scale-[0.98] transition-all inline-flex items-center justify-center gap-2 disabled:opacity-40 disabled:active:scale-100"
+      className="w-full min-h-14 rounded-[22px] text-white text-[16px] font-bold active:scale-[0.98] transition-all inline-flex items-center justify-center gap-2 disabled:opacity-40 disabled:active:scale-100 dt-cta-primary"
       style={{
-        background: 'linear-gradient(135deg, #8B5CF6 0%, #A855F7 55%, #00F2FE 140%)',
         boxShadow: disabled
           ? undefined
-          : '0 0 28px rgba(139,92,246,0.4), 0 8px 24px rgba(0,242,254,0.15)',
+          : '0 10px 28px color-mix(in srgb, var(--active-coral, #FF5E62) 35%, transparent)',
       }}
     >
       {icon}

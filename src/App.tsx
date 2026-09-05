@@ -10,6 +10,7 @@ import { MyGermanPage } from '@/pages/MyGermanPage';
 import { ReviewPage } from '@/pages/ReviewPage';
 import { ProgressPage } from '@/pages/ProgressPage';
 import { CoursePage } from '@/pages/CoursePage';
+import { ModuleDetailPage } from '@/pages/ModuleDetailPage';
 import { SettingsPage } from '@/pages/SettingsPage';
 import { SimulatorPage } from '@/pages/SimulatorPage';
 import { SimulatorResultPage } from '@/pages/SimulatorResultPage';
@@ -49,6 +50,7 @@ export default function App() {
           <Route path="/revisar" element={<ReviewPage />} />
           <Route path="/progresso" element={<ProgressPage />} />
           <Route path="/jornada" element={<CoursePage />} />
+          <Route path="/curso/:level/:moduleId" element={<ModuleDetailPage />} />
           <Route path="/conquistas" element={<AchievementsPage />} />
           <Route path="/perfil" element={<ProfilePage />} />
           <Route path="/configuracoes" element={<SettingsPage />} />

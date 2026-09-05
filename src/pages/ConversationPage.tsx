@@ -128,21 +128,46 @@ export function ConversationPage() {
       const { getLastSession } = await import('@/services/teacher/sessionContinuity');
       const last = getLastSession();
       const lessonSummary = !useGemini && !isFree && !isAssessment ? lesson.summary : null;
+      let reviewTotal: number | null = null;
+      let reviewMastered: number | null = null;
+      let reviewImproved: string[] = [];
+      let reviewNext: string | null = null;
+      if (type === 'review') {
+        const { readReviewSessionSnapshot, summarizeReviewSession } = await import(
+          '@/services/learning/ReviewSession'
+        );
+        const snap = readReviewSessionSnapshot();
+        if (snap) {
+          const sum = summarizeReviewSession(snap);
+          reviewTotal = sum.total;
+          reviewMastered = sum.mastered;
+          reviewImproved = snap.results
+            .filter((r) => r.result === 'SUCCESS' && r.german)
+            .map((r) => r.german as string)
+            .slice(0, 8);
+          if (sum.needsLater > 0) {
+            reviewNext = `${sum.needsLater} itens adiados para revisão posterior`;
+          }
+        }
+      }
       storeSessionComplete({
         name: profile?.name,
         headline: type === 'review' ? 'REVISION BEENDET' : 'TRAINING ABGESCHLOSSEN',
         minutes: last?.durationMinutes ?? null,
-        structures: lessonSummary?.newLearned ?? (last?.phrasesLearned?.length || null),
+        structures: reviewTotal ?? lessonSummary?.newLearned ?? (last?.phrasesLearned?.length || null),
         variations: lessonSummary?.realUse?.transferredItems ?? null,
-        autonomyPct: lessonSummary?.realUse
-          ? Math.round(
-              (lessonSummary.realUse.independentResponses /
-                Math.max(1, lessonSummary.spoken || lessonSummary.realUse.independentResponses || 1)) *
-                100,
-            )
-          : null,
-        improved: last?.phrasesLearned?.filter(Boolean).slice(0, 8) ?? [],
-        nextStep: last?.nextSuggestedStep ?? null,
+        autonomyPct:
+          reviewTotal != null && reviewMastered != null && reviewTotal > 0
+            ? Math.round((reviewMastered / reviewTotal) * 100)
+            : lessonSummary?.realUse
+              ? Math.round(
+                  (lessonSummary.realUse.independentResponses /
+                    Math.max(1, lessonSummary.spoken || lessonSummary.realUse.independentResponses || 1)) *
+                    100,
+                )
+              : null,
+        improved: reviewImproved.length > 0 ? reviewImproved : last?.phrasesLearned?.filter(Boolean).slice(0, 8) ?? [],
+        nextStep: reviewNext ?? last?.nextSuggestedStep ?? null,
         streak: profile ? updateStreak(profile.lastStudyDate, profile.streak).streak : null,
         spoken: lessonSummary?.spoken ?? null,
       });
@@ -156,7 +181,7 @@ export function ConversationPage() {
   if (loading || !profile) return <LoadingScreen />;
 
   if (useGemini) {
-    return <GeminiConversation profile={profile} onFinish={finish} />;
+    return <GeminiConversation profile={profile} onFinish={finish} sessionType={type} />;
   }
 
   if (!isFree && !isAssessment && lesson.finished) {

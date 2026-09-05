@@ -74,6 +74,11 @@ import { clearSelectedLearningTarget, readSelectedLearningTarget } from '@/servi
 import { isScriptedGreeting, isActiveCurriculumTargetId } from '@/services/teacher/sessionContinuity/SessionOpeningEngine';
 import { buildSessionKickoffFromProfile } from '@/services/voice/LiveSessionKickoff';
 import { targetFlow } from '@/services/ui/TargetFlowTrace';
+import {
+  consumeSelectedModuleContext,
+} from '@/services/course/CurriculumModule';
+import type { CourseLevelId } from '@/services/course/types';
+import { isZeroLanguageMode } from '@/services/teacher/ZeroLanguageMode';
 
 const DEV = typeof import.meta !== 'undefined' && !!(import.meta as { env?: { DEV?: boolean } }).env?.DEV;
 
@@ -587,6 +592,27 @@ export function useGeminiLive(profile: UserProfile | null): GeminiLiveUI {
       if (!startPhraseId && !reviewIntent && !miniProvaIntent && !simulatorIntent) {
         clearSelectedLearningTarget();
       }
+
+      // Uma leitura oficial do module context no início da sessão (depois limpa o storage).
+      const sessionLevel: CourseLevelId = isZeroLanguageMode(profile)
+        ? 'L0'
+        : isC2LiveMode(profile)
+          ? 'C2'
+          : isC1LiveMode(profile)
+            ? 'C1'
+            : isB2LiveMode(profile)
+              ? 'B2'
+              : isB1LiveMode(profile)
+                ? 'B1'
+                : isA2LiveMode(profile)
+                  ? 'A2'
+                  : isA1LiveMode(profile)
+                    ? 'A1'
+                    : 'L0';
+      const moduleContext =
+        reviewIntent || miniProvaIntent || simulatorIntent
+          ? null
+          : consumeSelectedModuleContext(sessionLevel);
       const fid = flowSessionId();
       targetFlow('SESSION_ROUTE', {
         sessionId: fid,
@@ -636,6 +662,7 @@ export function useGeminiLive(profile: UserProfile | null): GeminiLiveUI {
           simulatorIntent,
           miniProvaSnapshot,
           liveSessionGeneration: sessionGenRef.current,
+          moduleContext,
         });
       } catch (err) {
         if (err instanceof SelectedStartTargetError) {

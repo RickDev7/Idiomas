@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Gemini Live — composição visual: Professor → Orb → Mic.
  * Lógica de áudio/sessão intacta (useGeminiLive). Sem input de texto.
  */
@@ -6,15 +6,12 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { UserProfile } from '@/types';
 import { useGeminiLive } from '@/hooks/useGeminiLive';
-import { IconButton } from '@/components/ui/Button';
 import {
   IconBack,
-  IconHangup,
   IconRefresh,
   IconLightbulb,
   IconTurtle,
   IconStop,
-  IconMic,
 } from '@/components/ui/Icons';
 import { toast } from '@/components/ui/Toast';
 import { haptic } from '@/services/ui/UiPrefsService';
@@ -22,7 +19,6 @@ import { SoundService } from '@/services/ui/SoundService';
 import { getVoiceService } from '@/services/voice/VoiceService';
 import { stopAllAudio } from '@/services/voice/AudioPlayback';
 import {
-  SessionProgress,
   ConversationProgressBar,
 } from '@/components/voice/VoicePanels';
 import { MicroPracticePanel } from '@/components/voice/MicroPracticePanel';
@@ -31,7 +27,17 @@ import {
   cachedTranslation,
   separateTeacherSpeech,
 } from '@/services/ai/TranslationService';
-import { DTAudioOrb, type OrbState } from '@/components/dt';
+import { type OrbState } from '@/components/dt';
+import { UiPrefsService, type TranslationMode } from '@/services/ui/UiPrefsService';
+import { APP_ROUTES, sessionChromeTitle } from '@/services/ui/AppRoutes';
+import {
+  AppColumn,
+  DiscreteActions,
+  MicCTA,
+  PremiumOrb,
+  SpeechSurface,
+  pickStageSpeech,
+} from '@/components/premium';
 
 /** Feedback em alemão para modos de imersão (Simulador / Mini Prova). */
 function deriveImmersionFeedback(opts: {
@@ -116,15 +122,37 @@ function statusLinePt(opts: {
 /** Exposto para testes de UI de turno. */
 export { statusLinePt as liveStatusLinePt };
 
-export function GeminiConversation({ profile, onFinish }: { profile: UserProfile; onFinish: () => void }) {
+export function GeminiConversation({
+  profile,
+  onFinish,
+  sessionType = 'lesson',
+}: {
+  profile: UserProfile;
+  onFinish: () => void;
+  /** Query `type` da sessão — define o título do chrome (Treino / Revisar / Conversar). */
+  sessionType?: string;
+}) {
   const navigate = useNavigate();
   const live = useGeminiLive(profile);
   const [started, setStarted] = useState(false);
   const [showMicSettings, setShowMicSettings] = useState(false);
+  const [hintOpen, setHintOpen] = useState(false);
   const startLockRef = useRef(false);
 
   const [ptTranslation, setPtTranslation] = useState('');
   const translatedForRef = useRef('');
+  const [translationMode, setTranslationMode] = useState<TranslationMode>(
+    () => UiPrefsService.get().translationMode,
+  );
+  const [ptRevealed, setPtRevealed] = useState(
+    () => UiPrefsService.get().translationMode === 'always',
+  );
+
+  useEffect(() => UiPrefsService.subscribe((p) => {
+    setTranslationMode(p.translationMode);
+    if (p.translationMode === 'always') setPtRevealed(true);
+    if (p.translationMode === 'ondemand' || p.translationMode === 'immersion') setPtRevealed(false);
+  }), []);
 
   const [responseStatus, setResponseStatus] = useState<'processing' | 'received' | 'none'>('none');
   const prevUserText = useRef('');
@@ -149,7 +177,14 @@ export function GeminiConversation({ profile, onFinish }: { profile: UserProfile
   }, [live.miniProvaMode, live.miniProvaComplete, live, onFinish]);
 
   useEffect(() => {
-    if (live.immersionMode) {
+    if (!live.reviewComplete) return;
+    SoundService.play('end');
+    live.end('COMPLETED');
+    onFinish();
+  }, [live.reviewComplete, live, onFinish]);
+
+  useEffect(() => {
+    if (live.immersionMode || translationMode === 'immersion') {
       setPtTranslation('');
       translatedForRef.current = '';
       return;
@@ -181,7 +216,11 @@ export function GeminiConversation({ profile, onFinish }: { profile: UserProfile
     return () => {
       cancelled = true;
     };
-  }, [live.assistantText, live.teacherTurnStatus, live.immersionMode]);
+  }, [live.assistantText, live.teacherTurnStatus, live.immersionMode, translationMode]);
+
+  useEffect(() => {
+    if (translationMode !== 'always') setPtRevealed(false);
+  }, [live.assistantText, translationMode]);
 
   const immersion = live.immersionMode;
 
@@ -237,16 +276,6 @@ export function GeminiConversation({ profile, onFinish }: { profile: UserProfile
                 ? 'processing'
                 : 'idle';
 
-  const statusBadge = statusLinePt({
-    liveState: live.state,
-    userSpeaking,
-    assistantSpeaking: live.assistantSpeaking,
-    teacherTurnStatus: live.teacherTurnStatus,
-    awaitingProfessor,
-    responseStatus,
-    started,
-  });
-
   const micLabel =
     live.micState === 'REQUESTING_PERMISSION'
       ? 'Pedindo microfone…'
@@ -292,9 +321,11 @@ export function GeminiConversation({ profile, onFinish }: { profile: UserProfile
     return '';
   })();
 
-  const secondaryPt = immersion
+  const secondaryPt = immersion || translationMode === 'immersion'
     ? ''
     : (teacherSpeech.embeddedPortuguese || ptTranslation || '').trim();
+  const showSecondaryPt =
+    !!secondaryPt && (translationMode === 'always' || ptRevealed);
 
   const replayTeacher = () => {
     const text = (shownGerman || live.targetPhrase || '').trim();
@@ -341,170 +372,214 @@ export function GeminiConversation({ profile, onFinish }: { profile: UserProfile
     Math.max(started ? 1 : 0, live.userTurns + (live.assistantText ? 1 : 0)),
   );
 
+  const [confirmAbandon, setConfirmAbandon] = useState(false);
+  const allowLeaveRef = useRef(false);
+
+  const sessionHasProgress =
+    started
+    || live.userTurns > 0
+    || !!live.assistantText
+    || live.micActive
+    || live.assistantSpeaking
+    || live.state === 'connected'
+    || live.state === 'connecting'
+    || live.state === 'reconnecting';
+
   const abandon = () => {
+    allowLeaveRef.current = true;
     SoundService.play('end');
     live.end('ABANDONED');
-    navigate('/');
+    setConfirmAbandon(false);
+    navigate(APP_ROUTES.home);
   };
 
+  const requestAbandon = () => {
+    if (sessionHasProgress) {
+      setConfirmAbandon(true);
+      return;
+    }
+    abandon();
+  };
+
+  const stayInSession = () => {
+    setConfirmAbandon(false);
+  };
+
+  /** Browser Back: só confirma quando há progresso; não trava a sessão ociosa. */
+  useEffect(() => {
+    if (!sessionHasProgress || allowLeaveRef.current) return;
+    const guard = { dtSessionGuard: true };
+    window.history.pushState(guard, '');
+    const onPopState = () => {
+      if (allowLeaveRef.current) return;
+      window.history.pushState(guard, '');
+      setConfirmAbandon(true);
+    };
+    window.addEventListener('popstate', onPopState);
+    return () => {
+      window.removeEventListener('popstate', onPopState);
+    };
+  }, [sessionHasProgress]);
+
   const finish = () => {
+    allowLeaveRef.current = true;
     SoundService.play('end');
     live.end('COMPLETED');
     onFinish();
   };
 
   const connecting = live.state === 'connecting' || live.state === 'reconnecting';
-  const professorLine =
-    shownGerman ||
-    (connecting
-      ? ''
-      : started
-        ? ''
-        : '');
+  const stage = pickStageSpeech({
+    shownGerman,
+    targetPhrase: live.targetPhrase,
+  });
+  const professorLine = stage.primary;
+  const pedagogicalOverflow = stage.overflow;
 
   const emptyHint = connecting
-    ? 'Conectando com seu professor…'
+    ? 'Conectando…'
     : awaitingProfessor
       ? 'Aguardando o professor…'
       : started
         ? 'Sua vez'
         : live.returning
-          ? 'Continuando sua prática.'
-          : 'Seu professor de IA está pronto.';
+          ? 'Pronto para continuar'
+          : 'Toque no microfone para começar';
+
+  const orbLabel =
+    orbState === 'speaking'
+      ? 'Professor'
+      : orbState === 'listening'
+        ? 'Ouvindo'
+        : orbState === 'processing'
+          ? 'Pensando'
+          : undefined;
+
+  const chromeTitle = (() => {
+    const chrome = sessionChromeTitle(sessionType);
+    return chrome === 'Treino' ? 'Deutsch Coach' : chrome;
+  })();
 
   return (
-    <div className="flex flex-col h-full max-w-md mx-auto overflow-hidden dt-page talk-live">
+    <AppColumn immersive className="talk-live session-stage session-compose">
       <header
-        className="flex items-center justify-between gap-2 px-3 pb-2 shrink-0"
-        style={{ paddingTop: 'calc(0.75rem + env(safe-area-inset-top, 0px))' }}
+        className="session-compose__header shrink-0 px-5"
+        style={{ paddingTop: 'calc(0.45rem + env(safe-area-inset-top, 0px))' }}
       >
-        <IconButton label="Voltar" className="min-h-11 min-w-11 text-white/80" onClick={abandon}>
-          <IconBack size={20} />
-        </IconButton>
-        {live.simulatorMode ? (
-          <div className="flex flex-col items-center min-w-0 flex-1 px-1">
-            <span className="text-[10px] uppercase tracking-[0.14em] font-semibold text-[#00F2FE]">
-              SIMULADOR
-            </span>
-            <span className="text-[12px] text-white font-semibold truncate max-w-full">
-              {live.simulatorScenarioLabel}
-            </span>
-            <span className="text-[11px] text-[#64748b] tabular-nums">{live.simulatorElapsed}</span>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            aria-label="Voltar"
+            onClick={requestAbandon}
+            className="w-9 h-9 rounded-full flex items-center justify-center text-[var(--text-secondary)]"
+          >
+            <IconBack size={18} />
+          </button>
+          <div className="min-w-0 flex-1 text-center px-1">
+            {live.simulatorMode ? (
+              <>
+                <span className="text-[10px] uppercase tracking-[0.14em] font-semibold text-[var(--voice-cyan)]">
+                  Simulador
+                </span>
+                <p className="text-[12px] text-[var(--text-primary)] font-semibold truncate">
+                  {live.simulatorScenarioLabel}
+                </p>
+              </>
+            ) : live.miniProvaMode ? (
+              <>
+                <span className="text-[10px] uppercase tracking-[0.14em] font-semibold text-[var(--learning-violet)]">
+                  Mini Prova
+                </span>
+                <p className="text-[13px] text-[var(--text-primary)] font-bold tabular-nums">
+                  {live.miniProvaProgress.current} / {live.miniProvaProgress.total}
+                </p>
+              </>
+            ) : (
+              <h1 className="text-[15px] font-bold text-[var(--text-primary)] font-[family-name:var(--font-display)] tracking-tight">
+                {chromeTitle}
+              </h1>
+            )}
           </div>
-        ) : live.miniProvaMode ? (
-          <div className="flex flex-col items-center min-w-0 flex-1 px-1">
-            <span className="text-[10px] uppercase tracking-[0.14em] font-semibold text-[#A855F7]">
-              MINI PROVA
-            </span>
-            <span className="text-[12px] text-white font-semibold tabular-nums">
-              {live.miniProvaProgress.current} / {live.miniProvaProgress.total}
-            </span>
+          <button
+            type="button"
+            onClick={finish}
+            className="min-h-9 px-1.5 text-[11px] font-semibold text-[var(--text-faint)]"
+            aria-label="Encerrar"
+          >
+            Encerrar
+          </button>
+        </div>
+        {!live.simulatorMode && !live.miniProvaMode ? (
+          <div className="mt-2 flex justify-center">
+            <ConversationProgressBar current={progressCurrent} total={live.targetTurns} />
           </div>
-        ) : (
-          <div className="flex flex-col items-center min-w-0 flex-1">
-            <span className="text-[11px] font-bold uppercase tracking-wide text-white">Conversar</span>
-            <SessionProgress current={progressCurrent} total={live.targetTurns} />
-          </div>
-        )}
-        <button
-          type="button"
-          onClick={finish}
-          className="inline-flex items-center gap-1.5 min-h-10 px-3 rounded-full text-[13px] font-semibold text-white"
-          style={{
-            background: 'linear-gradient(135deg, rgba(239,68,68,0.35), rgba(185,28,28,0.55))',
-            border: '1px solid rgba(248,113,113,0.35)',
-          }}
-        >
-          <IconHangup size={14} /> Encerrar
-        </button>
+        ) : null}
       </header>
 
-      {!live.simulatorMode && !live.miniProvaMode ? (
-        <div className="px-4 pb-1 shrink-0">
-          <ConversationProgressBar current={progressCurrent} total={live.targetTurns} />
-        </div>
-      ) : null}
+      {/* Palco central: orb + fala — preenche o meio sem empurrar o mic */}
+      <div className="session-compose__stage px-5">
+        <PremiumOrb state={orbState} label={orbLabel} />
 
-      <div className="flex-1 min-h-0 overflow-y-auto scrollbar-hide px-4 flex flex-col">
-        {/* Badge professor + status */}
-        <div className="flex items-center justify-center gap-2 pt-1 pb-2 flex-wrap">
-          <span
-            className="inline-flex items-center px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-[0.1em] text-[#C4B5FD]"
-            style={{
-              background: 'rgba(139,92,246,0.15)',
-              border: '1px solid rgba(139,92,246,0.35)',
-            }}
-          >
-            Professor de IA
-          </span>
-          <span
-            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold"
-            style={{
-              color: orbState === 'listening' || orbState === 'speaking' ? '#67E8F9' : '#A78BFA',
-              background:
-                orbState === 'listening' || orbState === 'speaking'
-                  ? 'rgba(0,242,254,0.12)'
-                  : 'rgba(139,92,246,0.12)',
-              border:
-                orbState === 'listening' || orbState === 'speaking'
-                  ? '1px solid rgba(0,242,254,0.3)'
-                  : '1px solid rgba(139,92,246,0.28)',
-            }}
-          >
-            <span
-              className={`w-1.5 h-1.5 rounded-full ${
-                orbState === 'listening' || orbState === 'speaking' ? 'animate-pulse bg-[#00F2FE]' : 'bg-[#A78BFA]'
-              }`}
-              aria-hidden
-            />
-            {statusBadge}
-          </span>
+        <div className="w-full max-w-[340px] mx-auto">
+          <SpeechSurface
+            german={professorLine || undefined}
+            portuguese={professorLine && showSecondaryPt ? secondaryPt : undefined}
+            onReplay={professorLine ? replayTeacher : undefined}
+            emptyHint={emptyHint}
+            roleLabel={orbState === 'speaking' && professorLine ? 'Professor' : undefined}
+          />
+          {professorLine && translationMode === 'ondemand' && secondaryPt && !ptRevealed ? (
+            <button
+              type="button"
+              onClick={() => setPtRevealed(true)}
+              className="mt-1.5 w-full text-center text-[11px] font-semibold text-[var(--text-faint)]"
+            >
+              Ver tradução
+            </button>
+          ) : null}
         </div>
 
-        {/* Fala do professor — protagonista (transcript real) */}
-        <div className="text-center px-2 min-h-[72px] flex flex-col items-center justify-center">
-          {professorLine ? (
-            <>
-              <p className="talk-live-de text-white font-[family-name:var(--font-display)]">
-                {professorLine}
-              </p>
-              {secondaryPt ? (
-                <p className="mt-2 text-[13px] text-[#94A3B8] max-w-[320px] leading-snug line-clamp-2">
-                  {secondaryPt}
-                </p>
-              ) : null}
-            </>
-          ) : (
-            <p className="text-[15px] text-[#94A3B8]">{emptyHint}</p>
-          )}
-        </div>
+        <button
+          type="button"
+          onClick={() => {
+            setHintOpen((v) => !v);
+            if (!hintOpen) askHelp();
+          }}
+          className="inline-flex items-center gap-1.5 min-h-8 px-3.5 rounded-full text-[11px] font-semibold text-[var(--text-secondary)]"
+          style={{
+            background: 'color-mix(in srgb, var(--surface) 80%, transparent)',
+            border: '1px solid var(--border-subtle)',
+          }}
+          aria-expanded={hintOpen}
+        >
+          <IconLightbulb size={13} />
+          Ver pista
+          <span aria-hidden className="text-[9px] opacity-60">{hintOpen ? '▴' : '▾'}</span>
+        </button>
 
-        {/* Orb central */}
-        <div className="flex-1 flex flex-col items-center justify-center min-h-[200px] py-3 relative">
-          <span className="talk-orb-halo" aria-hidden />
-          <DTAudioOrb state={orbState} size={220} />
-        </div>
+        {hintOpen && (pedagogicalOverflow || live.microFeedback) ? (
+          <p className="text-[11px] text-[var(--text-secondary)] text-center leading-snug px-3 line-clamp-3 max-w-[320px]">
+            {live.microFeedback || pedagogicalOverflow}
+          </p>
+        ) : null}
 
-        {/* Resposta do usuário — linha compacta, não card dashboard */}
+        {/* Feedback curto do aluno — não ocupa o dock do mic */}
         {live.userText && responseStatus !== 'none' ? (
-          <div className="mb-2 px-3 py-2.5 rounded-[16px] text-center" style={{ background: 'rgba(255,255,255,0.04)' }}>
-            <p className="text-[10px] font-bold uppercase tracking-wider text-[#60A5FA]">Você</p>
-            <p className="mt-1 text-[15px] font-semibold text-white leading-snug" style={{ overflowWrap: 'anywhere' }}>
+          <div className="w-full max-w-[320px] px-3 py-1.5 rounded-[14px] text-center dt-speech-surface--subtle">
+            <p className="text-[9px] font-bold uppercase tracking-wider text-[var(--voice-cyan)]">Você</p>
+            <p className="text-[13px] font-semibold text-[var(--text-primary)] leading-snug line-clamp-2">
               {live.userText}
             </p>
-            {responseStatus === 'processing' ? (
-              <p className="mt-1 text-[11px] text-[#94A3B8]">Pensando…</p>
-            ) : null}
             {responseStatus === 'received' && feedback.text ? (
               <p
-                className="mt-1 text-[12px] font-medium"
+                className="mt-0.5 text-[11px] font-medium line-clamp-1"
                 style={{
                   color:
                     feedback.tone === 'adjust'
-                      ? '#FBBF24'
+                      ? 'var(--warning)'
                       : feedback.tone === 'neutral'
-                        ? '#94A3B8'
-                        : '#34D399',
+                        ? 'var(--text-secondary)'
+                        : 'var(--success)',
                 }}
               >
                 {feedback.text}
@@ -514,7 +589,7 @@ export function GeminiConversation({ profile, onFinish }: { profile: UserProfile
         ) : null}
 
         {live.microPractice ? (
-          <div className="mb-2">
+          <div className="w-full max-w-[340px] max-h-[28vh] overflow-y-auto scrollbar-hide">
             <MicroPracticePanel
               session={live.microPractice}
               feedback={live.microFeedback}
@@ -533,117 +608,138 @@ export function GeminiConversation({ profile, onFinish }: { profile: UserProfile
         ) : null}
 
         {live.error ? (
-          <div className="mb-2 rounded-[20px] p-4 text-center" style={{ background: 'rgba(255,255,255,0.04)' }}>
-            <p className="text-[14px] text-white font-semibold">Não foi possível continuar a conversa.</p>
-            <p className="text-[12px] text-[#94A3B8] mt-1">{live.error}</p>
+          <div className="w-full max-w-[320px] rounded-[16px] p-3 text-center" style={{ background: 'var(--surface)' }}>
+            <p className="text-[12px] text-[var(--text-primary)] font-semibold">Não foi possível continuar.</p>
             <button
               type="button"
               onClick={() => {
                 void live.start();
               }}
-              className="mt-3 px-5 py-2.5 rounded-full text-[13px] font-semibold text-white"
-              style={{ background: 'linear-gradient(135deg, #8B5CF6, #00F2FE)' }}
+              className="mt-2 px-4 py-2 rounded-full text-[12px] font-semibold text-white dt-cta-primary"
             >
               Tentar novamente
             </button>
           </div>
         ) : null}
-
-        {live.assistantSpeaking && live.state === 'connected' && !live.micActive ? (
-          <button
-            type="button"
-            onClick={() => {
-              haptic(8);
-              live.interrupt();
-            }}
-            className="mb-1 self-center inline-flex items-center gap-2 text-[12px] text-[#64748B] min-h-10"
-          >
-            <IconStop size={14} /> Interromper
-          </button>
-        ) : null}
       </div>
 
-      {/* Controles cockpit discretos */}
-      <div className="px-4 pt-1 flex items-center justify-center gap-5 shrink-0">
-        {[
-          { icon: <IconRefresh size={18} />, label: 'Repetir', onClick: replayTeacher },
-          { icon: <IconLightbulb size={18} />, label: 'Ajuda', onClick: askHelp },
-          { icon: <IconTurtle size={18} />, label: 'Mais devagar', onClick: askSlow },
-        ].map((a) => (
-          <button
-            key={a.label}
-            type="button"
-            onClick={a.onClick}
-            className="flex flex-col items-center gap-1 active:scale-95 transition-transform"
-            aria-label={a.label}
-          >
-            <span
-              className="w-11 h-11 rounded-2xl flex items-center justify-center text-[#CBD5E1]"
-              style={{
-                background: 'rgba(255,255,255,0.05)',
-                border: '1px solid rgba(255,255,255,0.08)',
-              }}
-            >
-              {a.icon}
-            </span>
-            <span className="text-[10px] font-semibold text-[#64748B]">{a.label}</span>
-          </button>
-        ))}
-      </div>
-
-      {/* Microfone dominante — voice-first, sem digitar */}
+      {/* Dock fixo: controles + microfone — sempre visível */}
       <div
-        className="flex flex-col items-center pt-2 shrink-0 px-3"
+        className="session-compose__dock shrink-0 px-5"
         style={{ paddingBottom: 'calc(0.75rem + env(safe-area-inset-bottom, 0px))' }}
       >
-        <button
-          type="button"
-          onClick={() => void handleMic()}
-          disabled={connecting}
-          aria-label={micLabel}
-          className="talk-mic-btn relative active:scale-[0.96] transition-transform disabled:opacity-70"
-        >
-          <span
-            className={`talk-mic-halo ${live.micActive ? 'talk-mic-halo--hot' : ''}`}
-            aria-hidden
+        <DiscreteActions
+          items={[
+            { key: 'repeat', icon: <IconRefresh size={15} />, label: 'Repetir', onClick: replayTeacher },
+            { key: 'hint', icon: <IconLightbulb size={15} />, label: 'Pista', onClick: askHelp },
+            { key: 'slow', icon: <IconTurtle size={15} />, label: 'Mais devagar', onClick: askSlow },
+          ]}
+        />
+        <div className="mt-3">
+          <MicCTA
+            active={live.micActive}
+            disabled={connecting}
+            label={micLabel}
+            onClick={() => void handleMic()}
+            size={96}
           />
-          <span
-            className={`talk-mic-core relative z-[1] w-[88px] h-[88px] rounded-full flex items-center justify-center ${
-              live.micActive ? 'talk-mic-core--hot' : ''
-            }`}
-          >
-            <IconMic size={34} className="text-white" />
-          </span>
-        </button>
-        <p className="mt-2 text-[12px] font-bold text-white">{micLabel}</p>
-        {live.micState === 'ERROR' ? (
-          <p className="mt-1 text-[11px] text-[#F87171]">Verifique a permissão do microfone.</p>
-        ) : null}
-        {started && live.audioInputs.length > 1 ? (
-          <button
-            type="button"
-            onClick={() => setShowMicSettings((s) => !s)}
-            className="mt-2 text-[10px] font-semibold text-[#64748B]"
-          >
-            Microfone
-          </button>
-        ) : null}
-        {showMicSettings && started && live.audioInputs.length > 0 ? (
-          <select
-            value={live.selectedDeviceId || ''}
-            onChange={(e) => live.selectDevice(e.target.value)}
-            className="mt-2 w-full max-w-xs bg-[#0f172a] text-[#94A3B8] text-[12px] rounded-[14px] px-3 py-2 border border-white/10"
-            aria-label="Escolher microfone"
-          >
-            <option value="">Padrão do sistema</option>
-            {live.audioInputs.map((d) => (
-              <option key={d.deviceId} value={d.deviceId}>
-                {d.label || 'dispositivo sem nome'}
-              </option>
-            ))}
-          </select>
-        ) : null}
+          {live.assistantSpeaking && live.state === 'connected' && !live.micActive ? (
+            <button
+              type="button"
+              onClick={() => {
+                haptic(8);
+                live.interrupt();
+              }}
+              className="mx-auto mt-1 flex items-center gap-1 text-[10px] text-[var(--text-faint)] min-h-8"
+            >
+              <IconStop size={11} /> Interromper
+            </button>
+          ) : null}
+          {live.micState === 'ERROR' ? (
+            <p className="mt-1 text-center text-[11px] text-[var(--danger)]">
+              Verifique a permissão do microfone.
+            </p>
+          ) : null}
+          {started && live.audioInputs.length > 1 ? (
+            <button
+              type="button"
+              onClick={() => setShowMicSettings((s) => !s)}
+              className="mt-1 mx-auto block text-[10px] font-semibold text-[var(--text-faint)]"
+            >
+              Microfone
+            </button>
+          ) : null}
+          {showMicSettings && started && live.audioInputs.length > 0 ? (
+            <select
+              value={live.selectedDeviceId || ''}
+              onChange={(e) => live.selectDevice(e.target.value)}
+              className="mt-2 w-full max-w-xs mx-auto block text-[12px] rounded-[14px] px-3 py-2"
+              style={{
+                background: 'var(--surface)',
+                color: 'var(--text-secondary)',
+                border: '1px solid var(--border-subtle)',
+              }}
+              aria-label="Escolher microfone"
+            >
+              <option value="">Padrão do sistema</option>
+              {live.audioInputs.map((d) => (
+                <option key={d.deviceId} value={d.deviceId}>
+                  {d.label || 'dispositivo sem nome'}
+                </option>
+              ))}
+            </select>
+          ) : null}
+        </div>
       </div>
-    </div>
+
+      {confirmAbandon ? (
+        <div
+          className="fixed inset-0 z-50 flex items-end sm:items-center justify-center px-4 pb-8 sm:pb-0"
+          style={{ background: 'color-mix(in srgb, var(--bg) 72%, transparent)' }}
+          role="presentation"
+          onClick={stayInSession}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="abandon-title"
+            aria-describedby="abandon-desc"
+            className="w-full max-w-sm rounded-[24px] p-5 shadow-2xl"
+            style={{
+              background: 'var(--surface-elevated, var(--surface))',
+              border: '1px solid var(--border-subtle)',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 id="abandon-title" className="text-[17px] font-bold text-[var(--text-primary)]">
+              Abandonar este treino?
+            </h2>
+            <p id="abandon-desc" className="mt-2 text-[13px] text-[var(--text-secondary)] leading-snug">
+              Seu progresso desta sessão pode não ser concluído.
+            </p>
+            <div className="mt-5 flex flex-col gap-2">
+              <button
+                type="button"
+                onClick={stayInSession}
+                className="min-h-11 w-full rounded-[16px] text-[14px] font-bold text-white dt-cta-primary"
+              >
+                Continuar treino
+              </button>
+              <button
+                type="button"
+                onClick={abandon}
+                className="min-h-11 w-full rounded-[16px] text-[14px] font-semibold text-[var(--danger)]"
+                style={{
+                  background: 'color-mix(in srgb, var(--danger) 12%, transparent)',
+                  border: '1px solid color-mix(in srgb, var(--danger) 35%, transparent)',
+                }}
+              >
+                Sair
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </AppColumn>
   );
 }

@@ -4,7 +4,6 @@
  */
 import type { UserProfile } from '@/types';
 import type { UserLearningProfile } from '@/services/learning/ConfidenceService';
-import { isZeroLanguagePhraseAccepted, isL0CoreCurriculumComplete } from '@/services/teacher/ZeroLanguageMode';
 import {
   loadCourseProgress,
   saveCourseProgress,
@@ -16,61 +15,41 @@ import {
 import type { CourseProgress } from './types';
 import { competenciesForLevel, COMPETENCY_BY_ID } from './competencies';
 import { gradeAssessment, nextAssessmentTarget } from './LevelAssessment';
-import { isA1CurriculumComplete, a1CompetencyMasteryFromLearning, getA1TargetsByCompetency } from './A1Curriculum';
+import {
+  isL0CurriculumComplete,
+  gradeL0ExitAssessment,
+  l0CompetencyMasteryFromLearning,
+} from './L0Curriculum';
+import { isA1CurriculumComplete, a1CompetencyMasteryFromLearning, getA1TargetsByCompetency, gradeA1ExitAssessment } from './A1Curriculum';
 import {
   isA2CurriculumComplete,
   a2CompetencyMasteryFromLearning,
   getA2TargetsByCompetency,
+  gradeA2ExitAssessment,
 } from './A2Curriculum';
 import {
   isB1CurriculumComplete,
   b1CompetencyMasteryFromLearning,
   getB1TargetsByCompetency,
+  gradeB1ExitAssessment,
 } from './B1Curriculum';
 import {
   isB2CurriculumComplete,
   b2CompetencyMasteryFromLearning,
   getB2TargetsByCompetency,
+  gradeB2ExitAssessment,
 } from './B2Curriculum';
 import {
   isC1CurriculumComplete,
   c1CompetencyMasteryFromLearning,
   getC1TargetsByCompetency,
+  gradeC1ExitAssessment,
 } from './C1Curriculum';
 import {
   isC2CurriculumComplete,
   c2CompetencyMasteryFromLearning,
+  gradeC2ExitAssessment,
 } from './C2Curriculum';
-
-/** Evidência L0 por competência (IDs reais do ZeroLanguageMode). */
-const L0_COMPETENCY_PHRASE_IDS: Record<string, string[]> = {
-  'l0.greet': ['l0-guten-morgen', 'l0-guten-tag', 'l0-guten-abend', 'l0-gute-nacht', 'l0-hallo', 'l0-tschuess'],
-  'l0.introduce': ['l0-ich-heisse', 'l0-ich-bin'],
-  'l0.basics': ['l0-ich-wohne', 'l0-ich-komme', 'survival-arbeite'],
-  'l0.yesno': ['l0-ja', 'l0-nein'],
-  'l0.thanks': ['l0-danke', 'l0-bitte'],
-  'l0.needs': ['l0-pause', 'l0-hook-ich-moechte', 'l0-hook-ich-brauche'],
-  'l0.help': ['l0-hilfe', 'l0-verstehe-nicht'],
-  'l0.repeat': ['l0-noch-einmal'],
-};
-
-function masteryFromPhraseIds(learning: UserLearningProfile, ids: string[]): number {
-  if (ids.length === 0) return 0;
-  let accepted = 0;
-  let produced = 0;
-  let confidenceSum = 0;
-  for (const id of ids) {
-    const c = learning.phrases[id];
-    if (!c) continue;
-    if (isZeroLanguagePhraseAccepted(c)) accepted += 1;
-    if ((c.timesProduced ?? 0) > 0 || (c.timesCorrect ?? 0) > 0) produced += 1;
-    confidenceSum += c.confidence ?? 0;
-  }
-  const acceptRate = accepted / ids.length;
-  const produceRate = produced / ids.length;
-  const avgConf = confidenceSum / Math.max(1, ids.filter((id) => learning.phrases[id]).length);
-  return Math.round(Math.min(100, acceptRate * 55 + produceRate * 25 + (avgConf / 100) * 20));
-}
 
 /** Sincroniza competencyMastery L0 a partir do learning real (não inventa progresso). */
 export function syncL0CompetencyMasteryFromLearning(
@@ -78,11 +57,10 @@ export function syncL0CompetencyMasteryFromLearning(
   learning: UserLearningProfile,
 ): CourseProgress {
   let p = progress;
-  const coreDone = isL0CoreCurriculumComplete(learning);
+  const coreDone = isL0CurriculumComplete(learning);
   for (const comp of competenciesForLevel('L0')) {
-    const ids = L0_COMPETENCY_PHRASE_IDS[comp.id] ?? [];
-    let m = masteryFromPhraseIds(learning, ids);
-    // Cobertura core L0 completa → competências atingem o limiar (ainda exige assessment).
+    let m = l0CompetencyMasteryFromLearning(comp.id, learning);
+    // Cobertura curricular L0 completa → competências atingem o limiar (ainda exige exit + assessment).
     if (coreDone && m < comp.masteryThreshold) {
       m = comp.masteryThreshold;
     }
@@ -124,10 +102,11 @@ export type GraduationResult = {
 /**
  * Avalia e, se aprovado, avança L0 → A1.
  * Requisitos cumulativos (não só contagem de frases):
- * 1) evidência core L0 aceita (pré-condição de cobertura)
- * 2) sync mastery → readyForNextLevel
- * 3) gradeAssessment('A1', …) aprovado
- * 4) advanceToNextLevel
+ * 1) currículo L0 dos 8 módulos completo (completion)
+ * 2) sync mastery → readyForNextLevel (mastery + autonomy/skills)
+ * 3) gradeL0ExitAssessment — situações comunicativas
+ * 4) gradeAssessment('A1', …) — assessment existente
+ * 5) advanceToNextLevel
  */
 export async function maybeGraduateL0ToA1(
   profile: UserProfile,
@@ -140,7 +119,7 @@ export async function maybeGraduateL0ToA1(
     return { graduated: false, reason: `already_${p.currentLevel}`, progress: p };
   }
 
-  if (!isL0CoreCurriculumComplete(learning)) {
+  if (!isL0CurriculumComplete(learning)) {
     return { graduated: false, reason: 'l0_core_incomplete', progress: p };
   }
 
@@ -149,6 +128,17 @@ export async function maybeGraduateL0ToA1(
   if (!readyForNextLevel(p)) {
     await saveCourseProgress(p);
     return { graduated: false, reason: 'not_ready_for_next_level', progress: p };
+  }
+
+  const exitGrade = gradeL0ExitAssessment(learning);
+  if (!exitGrade.passed) {
+    await saveCourseProgress(p);
+    return {
+      graduated: false,
+      reason: `l0_exit_failed:${exitGrade.reason}`,
+      progress: p,
+      assessmentScore: exitGrade.score,
+    };
   }
 
   const target = nextAssessmentTarget(p);
@@ -173,7 +163,7 @@ export async function maybeGraduateL0ToA1(
 
   return {
     graduated: true,
-    reason: 'l0_to_a1_via_readyForNextLevel+gradeAssessment',
+    reason: 'l0_to_a1_via_completion+mastery+exit+gradeAssessment',
     progress: p,
     assessmentScore: grade.score,
   };
@@ -211,6 +201,28 @@ export async function maybeGraduateA1ToA2(
     return { graduated: false, reason: 'not_ready_for_a2_assessment', progress: p };
   }
 
+  const exitGrade = gradeA1ExitAssessment(learning);
+  if (!exitGrade.passed) {
+    await saveCourseProgress(p);
+    return {
+      graduated: false,
+      reason: `a1_exit_incomplete:${exitGrade.reason}`,
+      progress: p,
+      assessmentScore: exitGrade.score,
+    };
+  }
+
+  /**
+   * gradeAssessment(nextLevel): igual L0→A1 / A2→B1…
+   * NÃO carrega currículo A2 — só pontua produção (spoken/spontaneous/reinforced)
+   * já filtrada aos IDs A1 abaixo. O parâmetro é o nível-destino para o rótulo.
+   */
+  const nextTarget = nextAssessmentTarget(p);
+  if (nextTarget !== 'A2') {
+    await saveCourseProgress(p);
+    return { graduated: false, reason: `unexpected_next_${nextTarget}`, progress: p };
+  }
+
   const stats = learningAssessmentStats(learning);
   const a1Ids = new Set(
     competenciesForLevel('A1').flatMap((c) => getA1TargetsByCompetency(c.id).map((t) => t.id)),
@@ -233,12 +245,12 @@ export async function maybeGraduateA1ToA2(
     reinforced = stats.reinforced;
   }
 
-  const grade = gradeAssessment('A2', spoken, spontaneous, reinforced);
+  const grade = gradeAssessment(nextTarget, spoken, spontaneous, reinforced);
   if (!grade.passed) {
     await saveCourseProgress(p);
     return {
       graduated: false,
-      reason: `a2_assessment_failed:${grade.reason}`,
+      reason: `a2_readiness_failed:${grade.reason}`,
       progress: p,
       assessmentScore: grade.score,
     };
@@ -249,7 +261,7 @@ export async function maybeGraduateA1ToA2(
 
   return {
     graduated: true,
-    reason: 'a1_to_a2_via_readyForNextLevel+gradeAssessment',
+    reason: 'a1_to_a2_via_complete+ready+exit+gradeAssessment(next)',
     progress: p,
     assessmentScore: grade.score,
   };
@@ -291,7 +303,11 @@ export async function recordA2TargetSuccess(
 
 /**
  * Gate A2 → B1 (currículo B1 executável via B1Curriculum).
- * Mesma arquitetura: complete → mastery sync → readyForNextLevel → assessment → advance.
+ * Fluxo: complete → mastery sync → readyForNextLevel → exit situacional A2
+ * → gradeAssessment(nextAssessmentTarget=B1) com evidência só A2 → advance.
+ *
+ * Semântica de gradeAssessment(destino): o 1º argumento é o nível-destino
+ * (rótulo/threshold), NÃO o nível avaliado. Stats já filtrados aos IDs A2.
  */
 export async function maybeGraduateA2ToB1(
   profile: UserProfile,
@@ -323,6 +339,23 @@ export async function maybeGraduateA2ToB1(
     return { graduated: false, reason: 'not_ready_for_b1_assessment', progress: p };
   }
 
+  const exitGrade = gradeA2ExitAssessment(learning);
+  if (!exitGrade.passed) {
+    await saveCourseProgress(p);
+    return {
+      graduated: false,
+      reason: `a2_exit_incomplete:${exitGrade.reason}`,
+      progress: p,
+      assessmentScore: exitGrade.score,
+    };
+  }
+
+  const nextTarget = nextAssessmentTarget(p);
+  if (nextTarget !== 'B1') {
+    await saveCourseProgress(p);
+    return { graduated: false, reason: `unexpected_next_${nextTarget}`, progress: p };
+  }
+
   const stats = learningAssessmentStats(learning);
   const a2Ids = new Set(
     competenciesForLevel('A2').flatMap((c) => getA2TargetsByCompetency(c.id).map((t) => t.id)),
@@ -345,7 +378,7 @@ export async function maybeGraduateA2ToB1(
     reinforced = stats.reinforced;
   }
 
-  const grade = gradeAssessment('B1', spoken, spontaneous, reinforced);
+  const grade = gradeAssessment(nextTarget, spoken, spontaneous, reinforced);
   if (!grade.passed) {
     await saveCourseProgress(p);
     return {
@@ -361,7 +394,7 @@ export async function maybeGraduateA2ToB1(
 
   return {
     graduated: true,
-    reason: 'a2_to_b1_via_readyForNextLevel+gradeAssessment',
+    reason: 'a2_to_b1_via_readyForNextLevel+exit+gradeAssessment',
     progress: p,
     assessmentScore: grade.score,
   };
@@ -386,6 +419,11 @@ export async function recordB1TargetSuccess(
 
 /**
  * Gate B1 → B2 (currículo B2 executável).
+ * Fluxo: complete → mastery sync → readyForNextLevel → exit situacional B1
+ * → gradeAssessment(nextAssessmentTarget=B2) com evidência só B1 → advance.
+ *
+ * Semântica de gradeAssessment(destino): o 1º argumento é o nível-destino
+ * (rótulo/threshold), NÃO o nível avaliado. Stats já filtrados aos IDs B1.
  */
 export async function maybeGraduateB1ToB2(
   profile: UserProfile,
@@ -423,6 +461,23 @@ export async function maybeGraduateB1ToB2(
     return { graduated: false, reason: 'not_ready_for_b2_assessment', progress: p };
   }
 
+  const exitGrade = gradeB1ExitAssessment(learning);
+  if (!exitGrade.passed) {
+    await saveCourseProgress(p);
+    return {
+      graduated: false,
+      reason: `b1_exit_incomplete:${exitGrade.reason}`,
+      progress: p,
+      assessmentScore: exitGrade.score,
+    };
+  }
+
+  const nextTarget = nextAssessmentTarget(p);
+  if (nextTarget !== 'B2') {
+    await saveCourseProgress(p);
+    return { graduated: false, reason: `unexpected_next_${nextTarget}`, progress: p };
+  }
+
   const stats = learningAssessmentStats(learning);
   const b1Ids = new Set(
     competenciesForLevel('B1').flatMap((c) => getB1TargetsByCompetency(c.id).map((t) => t.id)),
@@ -445,7 +500,7 @@ export async function maybeGraduateB1ToB2(
     reinforced = stats.reinforced;
   }
 
-  const grade = gradeAssessment('B2', spoken, spontaneous, reinforced);
+  const grade = gradeAssessment(nextTarget, spoken, spontaneous, reinforced);
   if (!grade.passed) {
     await saveCourseProgress(p);
     return {
@@ -461,7 +516,7 @@ export async function maybeGraduateB1ToB2(
 
   return {
     graduated: true,
-    reason: 'b1_to_b2_via_readyForNextLevel+gradeAssessment',
+    reason: 'b1_to_b2_via_readyForNextLevel+exit+gradeAssessment',
     progress: p,
     assessmentScore: grade.score,
   };
@@ -486,6 +541,11 @@ export async function recordB2TargetSuccess(
 
 /**
  * Gate B2 → C1 (currículo C1 executável).
+ * Fluxo: complete → mastery sync → readyForNextLevel → exit situacional B2
+ * → gradeAssessment(nextAssessmentTarget=C1) com evidência só B2 → advance.
+ *
+ * Semântica de gradeAssessment(destino): o 1º argumento é o nível-destino
+ * (rótulo/threshold), NÃO o nível avaliado. Stats já filtrados aos IDs B2.
  */
 export async function maybeGraduateB2ToC1(
   profile: UserProfile,
@@ -524,6 +584,23 @@ export async function maybeGraduateB2ToC1(
     return { graduated: false, reason: 'not_ready_for_c1_assessment', progress: p };
   }
 
+  const exitGrade = gradeB2ExitAssessment(learning);
+  if (!exitGrade.passed) {
+    await saveCourseProgress(p);
+    return {
+      graduated: false,
+      reason: `b2_exit_incomplete:${exitGrade.reason}`,
+      progress: p,
+      assessmentScore: exitGrade.score,
+    };
+  }
+
+  const nextTarget = nextAssessmentTarget(p);
+  if (nextTarget !== 'C1') {
+    await saveCourseProgress(p);
+    return { graduated: false, reason: `unexpected_next_${nextTarget}`, progress: p };
+  }
+
   const stats = learningAssessmentStats(learning);
   const b2Ids = new Set(
     competenciesForLevel('B2').flatMap((c) => getB2TargetsByCompetency(c.id).map((t) => t.id)),
@@ -546,7 +623,7 @@ export async function maybeGraduateB2ToC1(
     reinforced = stats.reinforced;
   }
 
-  const grade = gradeAssessment('C1', spoken, spontaneous, reinforced);
+  const grade = gradeAssessment(nextTarget, spoken, spontaneous, reinforced);
   if (!grade.passed) {
     await saveCourseProgress(p);
     return {
@@ -562,7 +639,7 @@ export async function maybeGraduateB2ToC1(
 
   return {
     graduated: true,
-    reason: 'b2_to_c1_via_readyForNextLevel+gradeAssessment',
+    reason: 'b2_to_c1_via_readyForNextLevel+exit+gradeAssessment',
     progress: p,
     assessmentScore: grade.score,
   };
@@ -587,6 +664,11 @@ export async function recordC1TargetSuccess(
 
 /**
  * Gate C1 → C2 (currículo C2 executável).
+ * Fluxo: complete → mastery sync → readyForNextLevel → exit situacional C1
+ * → gradeAssessment(nextAssessmentTarget=C2) com evidência só C1 → advance.
+ *
+ * Semântica de gradeAssessment(destino): o 1º argumento é o nível-destino
+ * (rótulo/threshold), NÃO o nível avaliado. Stats já filtrados aos IDs C1.
  */
 export async function maybeGraduateC1ToC2(
   profile: UserProfile,
@@ -626,6 +708,23 @@ export async function maybeGraduateC1ToC2(
     return { graduated: false, reason: 'not_ready_for_c2_assessment', progress: p };
   }
 
+  const exitGrade = gradeC1ExitAssessment(learning);
+  if (!exitGrade.passed) {
+    await saveCourseProgress(p);
+    return {
+      graduated: false,
+      reason: `c1_exit_incomplete:${exitGrade.reason}`,
+      progress: p,
+      assessmentScore: exitGrade.score,
+    };
+  }
+
+  const nextTarget = nextAssessmentTarget(p);
+  if (nextTarget !== 'C2') {
+    await saveCourseProgress(p);
+    return { graduated: false, reason: `unexpected_next_${nextTarget}`, progress: p };
+  }
+
   const stats = learningAssessmentStats(learning);
   const c1Ids = new Set(
     competenciesForLevel('C1').flatMap((c) => getC1TargetsByCompetency(c.id).map((t) => t.id)),
@@ -648,7 +747,7 @@ export async function maybeGraduateC1ToC2(
     reinforced = stats.reinforced;
   }
 
-  const grade = gradeAssessment('C2', spoken, spontaneous, reinforced);
+  const grade = gradeAssessment(nextTarget, spoken, spontaneous, reinforced);
   if (!grade.passed) {
     await saveCourseProgress(p);
     return {
@@ -664,7 +763,7 @@ export async function maybeGraduateC1ToC2(
 
   return {
     graduated: true,
-    reason: 'c1_to_c2_via_readyForNextLevel+gradeAssessment',
+    reason: 'c1_to_c2_via_readyForNextLevel+exit+gradeAssessment',
     progress: p,
     assessmentScore: grade.score,
   };
@@ -724,12 +823,23 @@ export async function maybeGraduateC2ToHigher(
     }
   }
 
-  // readyForNextLevel é false em C2 (não existe nextLevel). Exigir mastery; se OK → terminal.
+  // readyForNextLevel é false em C2 (não existe nextLevel). Exigir mastery; se OK → exit situacional → terminal.
   const comps = competenciesForLevel('C2');
   const allStrong = comps.every((c) => (p.competencyMastery[c.id] ?? 0) >= c.masteryThreshold);
   if (!allStrong) {
     await saveCourseProgress(p);
     return { graduated: false, reason: 'not ready', progress: p };
+  }
+
+  const exitGrade = gradeC2ExitAssessment(learning);
+  if (!exitGrade.passed) {
+    await saveCourseProgress(p);
+    return {
+      graduated: false,
+      reason: `c2_exit_incomplete:${exitGrade.reason}`,
+      progress: p,
+      assessmentScore: exitGrade.score,
+    };
   }
 
   // Nunca advanceToNextLevel / nunca criar D1 — C2 é terminal.
@@ -738,6 +848,7 @@ export async function maybeGraduateC2ToHigher(
     graduated: false,
     reason: 'c2_terminal_no_higher_curriculum',
     progress: p,
+    assessmentScore: exitGrade.score,
   };
 }
 

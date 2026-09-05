@@ -139,15 +139,15 @@ async function main() {
   const integrity = assertC2CurriculumIntegrity();
   check('1. integrity ok', integrity.ok);
   if (!integrity.ok) console.error(integrity.errors);
-  check('2. 24 targets', getC2Targets().length === 24);
+  check('2. 56 targets', getC2Targets().length === 56);
   check('3. all ids c2-', getC2Targets().every((t) => t.id.startsWith('c2-')));
   check('4. 8 units', c2UnitIdsInOrder().length === 8);
   check('5. 8 competencies', competenciesForLevel('C2').length === 8);
   check('6. first target id', c2FirstTarget().id === 'c2-nuance-ambivalent');
   check('7. first german', c2FirstTarget().german.includes('keineswegs eindeutig'));
   check('8. getById', getC2TargetById('c2-nuance-ambivalent')?.unitId === 'c2.u1');
-  check('9. unit u1 has 3', getC2TargetsByUnit('c2.u1').length === 3);
-  check('10. nuance competency 3', getC2TargetsByCompetency('c2.nuance').length === 3);
+  check('9. unit u1 has 7', getC2TargetsByUnit('c2.u1').length === 7);
+  check('10. nuance competency 7', getC2TargetsByCompetency('c2.nuance').length === 7);
   const curatedC2 = CURATED.filter((c) => c.level === 'C2');
   check('11. curated blocks have ids', curatedC2.every((b) => b.core.every((p) => !!p.id && !!p.unitId)));
   const units = LEVEL_BY_ID.C2.modules.flatMap((m) => m.units);

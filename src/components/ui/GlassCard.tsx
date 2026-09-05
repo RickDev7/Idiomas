@@ -1,22 +1,26 @@
 import type { CSSProperties, HTMLAttributes, ReactNode } from 'react';
 
+/** Estilos glass theme-aware (tokens em index.css). */
 export const glassStyle: CSSProperties = {
-  background: 'rgba(11, 16, 34, 0.78)',
-  border: '1px solid rgba(255, 255, 255, 0.08)',
+  background: 'var(--surface)',
+  border: '1px solid var(--border-subtle)',
+  boxShadow: 'var(--shadow-md), inset 0 1px 0 var(--glass-inset)',
   backdropFilter: 'blur(18px)',
   WebkitBackdropFilter: 'blur(18px)',
 };
 
 export const glassVioletStyle: CSSProperties = {
   ...glassStyle,
-  border: '1px solid rgba(139, 92, 246, 0.35)',
-  boxShadow: '0 0 18px rgba(139, 92, 246, 0.22)',
+  background: 'var(--surface-strong)',
+  border: '1px solid color-mix(in srgb, var(--learning-violet) 40%, transparent)',
+  boxShadow: 'var(--shadow-glow-purple), inset 0 1px 0 var(--glass-inset)',
 };
 
 export const glassCyanStyle: CSSProperties = {
   ...glassStyle,
-  border: '1px solid rgba(0, 242, 254, 0.30)',
-  boxShadow: '0 0 18px rgba(0, 242, 254, 0.18)',
+  background: 'var(--surface-strong)',
+  border: '1px solid color-mix(in srgb, var(--voice-cyan) 40%, transparent)',
+  boxShadow: 'var(--shadow-glow), inset 0 1px 0 var(--glass-inset)',
 };
 
 type GlassCardProps = HTMLAttributes<HTMLDivElement> & {
@@ -26,11 +30,11 @@ type GlassCardProps = HTMLAttributes<HTMLDivElement> & {
   asButton?: boolean;
 };
 
-/** Card glass reutilizável — Design System Fase 1. */
+/** Card glass reutilizável — Design System Deutsch Turbo. */
 export function GlassCard({
   children,
   variant = 'default',
-  radius = 24,
+  radius = 22,
   className = '',
   style,
   ...rest

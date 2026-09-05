@@ -18,6 +18,7 @@ import {
 } from '@/components/dt';
 import { LoadingScreen } from '@/components/ui/LoadingScreen';
 import { IconBolt, IconMic, IconSparkle, IconTarget } from '@/components/ui/Icons';
+import { APP_ROUTES, goAprender, navigateBack } from '@/services/ui/AppRoutes';
 import { useProfile } from '@/hooks/useProfile';
 import { MemoryService } from '@/services/learning/MemoryService';
 import { StorageService } from '@/services/storage/StorageService';
@@ -123,7 +124,7 @@ export function SimulatorPage() {
             ? `${preview.emoji} ${preview.titleDe}`
             : 'Fale o máximo de alemão possível — sem pressão'
         }
-        onBack={() => navigate(-1)}
+        onBack={() => navigateBack(navigate, APP_ROUTES.home)}
         right={<DTBadge color="#00F2FE">Imersão</DTBadge>}
       />
 
@@ -134,7 +135,7 @@ export function SimulatorPage() {
               Ainda não há conteúdo suficiente. Aprenda algumas lições L0 primeiro.
             </p>
             <div className="mt-5">
-              <DTNeonButton onClick={() => navigate('/aprender')}>Ir para Aprender</DTNeonButton>
+              <DTNeonButton onClick={() => goAprender(navigate)}>Ir para Aprender</DTNeonButton>
             </div>
           </DTGlassCard>
         ) : (

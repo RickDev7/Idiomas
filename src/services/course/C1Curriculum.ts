@@ -9,6 +9,7 @@ import { isAutomated, readAutomationScore } from '@/services/learning/Automation
 import { CURATED } from './content';
 import { LEVEL_BY_ID } from './levels';
 import { COMPETENCY_BY_ID } from './competencies';
+import { scopeCurriculumTargets, scopePhrasePool, isInModuleScope } from './PlannerModuleRestrict';
 
 export interface C1Target {
   id: string;
@@ -140,14 +141,17 @@ function isDeferred(conf: PhraseConfidence | undefined): boolean {
 export function getNextC1Target(
   currentTargetId: string | null | undefined,
   learning: UserLearningProfile,
-  opts?: { excludePhraseId?: string | null; skipPhraseIds?: string[] | null },
+  opts?: { excludePhraseId?: string | null; skipPhraseIds?: string[] | null; restrictToTargetIds?: readonly string[] | null },
 ): C1Target | null {
   const skip = new Set<string>(opts?.skipPhraseIds ?? []);
   if (opts?.excludePhraseId) skip.add(opts.excludePhraseId);
   if (currentTargetId) skip.add(currentTargetId);
 
-  const ordered = C1_CURRICULUM;
-  const current = currentTargetId ? BY_ID.get(currentTargetId) : undefined;
+  const ordered = scopeCurriculumTargets(C1_CURRICULUM, opts?.restrictToTargetIds);
+  if (ordered.length === 0) return null;
+
+  const currentRaw = currentTargetId ? BY_ID.get(currentTargetId) : undefined;
+  const current = currentRaw && isInModuleScope(currentRaw.id, opts?.restrictToTargetIds) ? currentRaw : undefined;
 
   const pickFirstOpen = (candidates: C1Target[]): C1Target | null => {
     for (const t of candidates) {
@@ -161,7 +165,7 @@ export function getNextC1Target(
   };
 
   if (current) {
-    const sameUnit = getC1TargetsByUnit(current.unitId).filter((t) => t.order > current.order);
+    const sameUnit = scopeCurriculumTargets(getC1TargetsByUnit(current.unitId), opts?.restrictToTargetIds).filter((t) => t.order > current.order);
     const nextInUnit = pickFirstOpen(sameUnit);
     if (nextInUnit) return nextInUnit;
   }
@@ -169,7 +173,7 @@ export function getNextC1Target(
   const unitOrder = c1UnitIdsInOrder();
   const startUnitIdx = current ? Math.max(0, unitOrder.indexOf(current.unitId)) : 0;
   for (let i = startUnitIdx; i < unitOrder.length; i++) {
-    const unitTargets = getC1TargetsByUnit(unitOrder[i]);
+    const unitTargets = scopeCurriculumTargets(getC1TargetsByUnit(unitOrder[i]), opts?.restrictToTargetIds);
     const open = pickFirstOpen(unitTargets);
     if (open) return open;
   }
@@ -196,11 +200,15 @@ export function getNextC1Target(
 export function pickC1PlannerTarget(
   learning: UserLearningProfile,
   phrases: Phrase[],
-  opts?: { excludePhraseId?: string | null; skipPhraseIds?: string[] | null; stickPhraseId?: string | null },
+  opts?: { excludePhraseId?: string | null; skipPhraseIds?: string[] | null; stickPhraseId?: string | null; restrictToTargetIds?: readonly string[] | null },
 ): { conf: PhraseConfidence | undefined; phrase: Phrase | null; action: 'introduce' | 'practice' | 'recall' | 'converse' } {
-  const pool = c1PhrasePool(phrases);
+  const pool = scopePhrasePool(c1PhrasePool(phrases), opts?.restrictToTargetIds);
 
-  if (opts?.stickPhraseId && isC1TargetId(opts.stickPhraseId)) {
+  if (
+    opts?.stickPhraseId &&
+    isC1TargetId(opts.stickPhraseId) &&
+    isInModuleScope(opts.stickPhraseId, opts?.restrictToTargetIds)
+  ) {
     const stuck = pool.find((p) => p.id === opts.stickPhraseId) ?? null;
     if (stuck) {
       const conf = learning.phrases[stuck.id];
@@ -287,4 +295,210 @@ export function assertC1CurriculumIntegrity(): { ok: boolean; errors: string[] }
 
   if (C1_CURRICULUM.length === 0) errors.push('no C1 targets');
   return { ok: errors.length === 0, errors };
+}
+
+/** Colocação pré-reforma escolar C1 (24 targets esqueleto). */
+export const C1_LEGACY_PLACEMENT: Record<string, { unitId: string; competencyId: string }> = {
+  'c1-nuance-perspektive': { unitId: 'c1.u1', competencyId: 'c1.nuance' },
+  'c1-nuance-anders': { unitId: 'c1.u1', competencyId: 'c1.nuance' },
+  'c1-nuance-nuance': { unitId: 'c1.u1', competencyId: 'c1.nuance' },
+  'c1-argue-zwar': { unitId: 'c1.u2', competencyId: 'c1.argue' },
+  'c1-argue-grundlage': { unitId: 'c1.u2', competencyId: 'c1.argue' },
+  'c1-argue-folgerung': { unitId: 'c1.u2', competencyId: 'c1.argue' },
+  'c1-debate-einwand': { unitId: 'c1.u3', competencyId: 'c1.debate' },
+  'c1-debate-entkraeftet': { unitId: 'c1.u3', competencyId: 'c1.debate' },
+  'c1-debate-differenzieren': { unitId: 'c1.u3', competencyId: 'c1.debate' },
+  'c1-hyp-angenommen': { unitId: 'c1.u4', competencyId: 'c1.hypothesis' },
+  'c1-hyp-waere': { unitId: 'c1.u4', competencyId: 'c1.hypothesis' },
+  'c1-hyp-szenario': { unitId: 'c1.u4', competencyId: 'c1.hypothesis' },
+  'c1-reg-formal': { unitId: 'c1.u5', competencyId: 'c1.register' },
+  'c1-reg-informal': { unitId: 'c1.u5', competencyId: 'c1.register' },
+  'c1-reg-neutral': { unitId: 'c1.u5', competencyId: 'c1.register' },
+  'c1-abs-gesellschaft': { unitId: 'c1.u6', competencyId: 'c1.abstract' },
+  'c1-abs-verantwortung': { unitId: 'c1.u6', competencyId: 'c1.abstract' },
+  'c1-abs-spannung': { unitId: 'c1.u6', competencyId: 'c1.abstract' },
+  'c1-neg-interesse': { unitId: 'c1.u7', competencyId: 'c1.negotiate' },
+  'c1-neg-kompromiss': { unitId: 'c1.u7', competencyId: 'c1.negotiate' },
+  'c1-neg-entspannen': { unitId: 'c1.u7', competencyId: 'c1.negotiate' },
+  'c1-spon-ehrlich': { unitId: 'c1.u8', competencyId: 'c1.spontaneous' },
+  'c1-spon-anschluss': { unitId: 'c1.u8', competencyId: 'c1.spontaneous' },
+  'c1-spon-fazit': { unitId: 'c1.u8', competencyId: 'c1.spontaneous' },
+};
+
+export type C1TargetAuditStatus = 'REUTILIZADO' | 'NOVO';
+
+export type C1TargetAuditRow = {
+  targetId: string;
+  moduleId: string;
+  competencyId: string;
+  status: C1TargetAuditStatus;
+  previousUnitId: string | null;
+  previousCompetencyId: string | null;
+  reorganized: boolean;
+};
+
+export function auditC1Targets(): {
+  rows: C1TargetAuditRow[];
+  total: number;
+  reused: number;
+  novo: number;
+  reorganizedAmongReused: number;
+  duplicateIds: string[];
+} {
+  const seen = new Set<string>();
+  const duplicateIds: string[] = [];
+  const rows: C1TargetAuditRow[] = C1_CURRICULUM.map((t) => {
+    if (seen.has(t.id)) duplicateIds.push(t.id);
+    seen.add(t.id);
+    const legacy = C1_LEGACY_PLACEMENT[t.id];
+    const status: C1TargetAuditStatus = legacy ? 'REUTILIZADO' : 'NOVO';
+    const previousUnitId = legacy?.unitId ?? null;
+    const previousCompetencyId = legacy?.competencyId ?? null;
+    const reorganized = !!(
+      legacy
+      && (legacy.unitId !== t.unitId || legacy.competencyId !== t.competencyId)
+    );
+    return {
+      targetId: t.id,
+      moduleId: t.unitId,
+      competencyId: t.competencyId,
+      status,
+      previousUnitId,
+      previousCompetencyId,
+      reorganized,
+    };
+  });
+  return {
+    rows,
+    total: rows.length,
+    reused: rows.filter((r) => r.status === 'REUTILIZADO').length,
+    novo: rows.filter((r) => r.status === 'NOVO').length,
+    reorganizedAmongReused: rows.filter((r) => r.reorganized).length,
+    duplicateIds,
+  };
+}
+
+export type C1ExitScenario = {
+  id: string;
+  titlePt: string;
+  situationPt: string;
+  competencyIds: string[];
+  evidenceTargetIds: string[];
+};
+
+/** Avaliação situacional de saída C1 (escola de idiomas). */
+export const C1_EXIT_SCENARIOS: C1ExitScenario[] = [
+  {
+    id: 'c1-exit-position',
+    titlePt: 'Defender posição complexa',
+    situationPt: 'Defender posição sobre tema complexo com evidência e conclusão.',
+    competencyIds: ['c1.argue'],
+    evidenceTargetIds: ['c1-argue-grundlage', 'c1-argue-beispiel', 'c1-argue-schluss'],
+  },
+  {
+    id: 'c1-exit-counter',
+    titlePt: 'Contraponto com nuance',
+    situationPt: 'Reconhecer contraponto e responder com nuance.',
+    competencyIds: ['c1.debate', 'c1.nuance'],
+    evidenceTargetIds: ['c1-debate-einwand', 'c1-debate-zugeben', 'c1-nuance-nuance'],
+  },
+  {
+    id: 'c1-exit-professional',
+    titlePt: 'Proposta profissional',
+    situationPt: 'Apresentar proposta profissional com prioridade e risco.',
+    competencyIds: ['c1.register'],
+    evidenceTargetIds: ['c1-pro-praesentation', 'c1-pro-prioritaeten', 'c1-pro-risiko'],
+  },
+  {
+    id: 'c1-exit-synthesis',
+    titlePt: 'Síntese de perspectivas',
+    situationPt: 'Sintetizar informação de mais de uma fonte ou perspectiva.',
+    competencyIds: ['c1.hypothesis'],
+    evidenceTargetIds: ['c1-acad-zusammenfassen', 'c1-acad-quellen', 'c1-acad-unterscheiden'],
+  },
+  {
+    id: 'c1-exit-mediate',
+    titlePt: 'Mediação ou negociação',
+    situationPt: 'Mediar conflito ou negociar solução sob pressão.',
+    competencyIds: ['c1.negotiate'],
+    evidenceTargetIds: ['c1-neg-kompromiss', 'c1-crisis-mediation', 'c1-crisis-naechste'],
+  },
+  {
+    id: 'c1-exit-ethics',
+    titlePt: 'Tema social ou ético',
+    situationPt: 'Explicar tema social/ético abstrato com proposta.',
+    competencyIds: ['c1.abstract'],
+    evidenceTargetIds: ['c1-abs-verantwortung', 'c1-abs-nachhaltigkeit', 'c1-abs-vorschlag'],
+  },
+  {
+    id: 'c1-exit-culture',
+    titlePt: 'Análise cultural ou de mídia',
+    situationPt: 'Comentar obra, mídia ou experiência cultural.',
+    competencyIds: ['c1.nuance'],
+    evidenceTargetIds: ['c1-culture-werk', 'c1-culture-medien', 'c1-culture-alternative'],
+  },
+  {
+    id: 'c1-exit-formal',
+    titlePt: 'Situação formal complexa',
+    situationPt: 'Resolver situação formal (contrato, urgência, pedido).',
+    competencyIds: ['c1.negotiate', 'c1.register'],
+    evidenceTargetIds: ['c1-crisis-vertrag', 'c1-crisis-dringlichkeit', 'c1-reg-formal'],
+  },
+  {
+    id: 'c1-exit-register',
+    titlePt: 'Adaptação de registro',
+    situationPt: 'Adaptar o registro entre informal e profissional.',
+    competencyIds: ['c1.register', 'c1.spontaneous'],
+    evidenceTargetIds: ['c1-reg-formal', 'c1-reg-informal', 'c1-int-register'],
+  },
+  {
+    id: 'c1-exit-discussion',
+    titlePt: 'Discussão 7–10 minutos',
+    situationPt: 'Sustentar apresentação ou discussão estruturada com reação a contrapontos.',
+    competencyIds: ['c1.spontaneous', 'c1.debate'],
+    evidenceTargetIds: [
+      'c1-int-praesentation',
+      'c1-int-diskussion',
+      'c1-int-reaktion',
+      'c1-spon-fazit',
+    ],
+  },
+];
+
+/**
+ * Gate situacional C1: cada cenário exige evidência pronta em ≥50% dos targets
+ * e pelo menos 1 produção no cenário. Aprovação: ≥7 de 10 situações.
+ */
+export function gradeC1ExitAssessment(learning: UserLearningProfile): {
+  passed: boolean;
+  score: number;
+  reason: string;
+  scenariosPassed: number;
+  scenarioResults: Array<{ id: string; passed: boolean; coverage: number }>;
+} {
+  const scenarioResults = C1_EXIT_SCENARIOS.map((sc) => {
+    const ids = sc.evidenceTargetIds;
+    let ready = 0;
+    let produced = 0;
+    for (const id of ids) {
+      const c = learning.phrases[id];
+      if (isReadyForAdvance(c)) ready += 1;
+      if ((c?.timesProduced ?? 0) > 0 || (c?.timesCorrect ?? 0) > 0) produced += 1;
+    }
+    const coverage = ready / Math.max(1, ids.length);
+    const passed = coverage >= 0.5 && produced >= 1;
+    return { id: sc.id, passed, coverage };
+  });
+  const scenariosPassed = scenarioResults.filter((r) => r.passed).length;
+  const score = Math.round((scenariosPassed / C1_EXIT_SCENARIOS.length) * 100);
+  const passed = scenariosPassed >= 7;
+  return {
+    passed,
+    score,
+    reason: passed
+      ? 'Produção situacional C1 suficiente para avançar.'
+      : 'Ainda faltam situações comunicativas C1 de comunicação avançada.',
+    scenariosPassed,
+    scenarioResults,
+  };
 }

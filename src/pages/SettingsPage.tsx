@@ -1,6 +1,6 @@
 /**
  * Configurações — seções GERAL / ÁUDIO / APRENDIZADO / NOTIFICAÇÕES.
- * Preferências e opções existentes preservadas; t() força pt-BR.
+ * Idioma da interface via t(); conteúdo pedagógico permanece em alemão.
  */
 import { useEffect, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -13,19 +13,17 @@ import {
   DTGlassCard,
   glassStyle,
 } from '@/components/dt';
-import { IconSun, IconMoon, IconUser } from '@/components/ui/Icons';
+import { IconUser } from '@/components/ui/Icons';
+import { ThemePreviewCard } from '@/components/ui/BrandPrimitives';
 import { useProfile } from '@/hooks/useProfile';
 import type { SessionDuration, SpeechSpeed } from '@/types';
 import { ThemeService, type Theme } from '@/services/ui/ThemeService';
-import {
-  UiPrefsService,
-  immersionHint,
-  type UiPrefs,
-} from '@/services/ui/UiPrefsService';
+import { UiPrefsService, type UiPrefs } from '@/services/ui/UiPrefsService';
 import { HapticService, haptic } from '@/services/ui/HapticService';
 import { SoundService } from '@/services/ui/SoundService';
 import { NotificationService } from '@/services/ui/NotificationService';
 import { LocaleService, t, immersionHintLocalized } from '@/services/ui/LocaleService';
+import { APP_ROUTES, navigateBack } from '@/services/ui/AppRoutes';
 
 export function SettingsPage() {
   const navigate = useNavigate();
@@ -100,10 +98,18 @@ export function SettingsPage() {
   };
 
   const resetPrefs = () => {
+    if (!window.confirm(t('settings.reset.hint'))) return;
     const next = UiPrefsService.reset();
     setPrefs(next);
     LocaleService.applyDocumentLang(next.interfaceLanguage);
-    void updateProfile({ germanPercentage: next.immersionTarget, turboMode: false });
+    ThemeService.reset();
+    setTheme(ThemeService.get());
+    void updateProfile({
+      germanPercentage: next.immersionTarget,
+      turboMode: false,
+      dailyMinutes: 20,
+      speechSpeed: 'normal',
+    });
     NotificationService.disable();
     SoundService.play('tap');
     bumpLang((n) => n + 1);
@@ -112,13 +118,13 @@ export function SettingsPage() {
   return (
     <DTPage>
       <DTTopBar
-        title="CONFIGURAÇÕES"
-        subtitle="Preferências"
-        onBack={() => navigate(-1)}
+        title={t('settings.title')}
+        subtitle={t('settings.subtitle')}
+        onBack={() => navigateBack(navigate, APP_ROUTES.home)}
         right={
           <button
             type="button"
-            onClick={() => navigate('/perfil')}
+            onClick={() => navigate(APP_ROUTES.perfil)}
             aria-label="Perfil"
             className="w-10 h-10 rounded-full flex items-center justify-center text-[#00F2FE]"
             style={glassStyle}
@@ -130,7 +136,7 @@ export function SettingsPage() {
 
       <DTMain>
         <div className="pt-3 space-y-6">
-          <Section title="GERAL">
+          <Section title={t('settings.section.general')}>
             <p className="text-[11px] text-[#64748B] mb-2">{t('settings.language')}</p>
             <div className="flex gap-2 mb-4">
               <Choice
@@ -159,25 +165,34 @@ export function SettingsPage() {
               />
             </div>
 
-            <p className="text-[11px] text-[#64748B] mb-2">{t('settings.theme')}</p>
-            <div className="flex gap-2 mb-4">
-              <Choice
-                active={theme === 'dark'}
-                onClick={() => changeTheme('dark')}
-                icon={<IconMoon size={16} />}
-                label={t('settings.theme.dark')}
-              />
-              <Choice
-                active={theme === 'light'}
-                onClick={() => changeTheme('light')}
-                icon={<IconSun size={16} />}
-                label={t('settings.theme.light')}
-              />
-              <Choice
-                active={theme === 'system'}
-                onClick={() => changeTheme('system')}
-                label={t('settings.theme.system')}
-              />
+            <p className="text-[11px] text-[var(--text-faint)] mb-2">{t('settings.theme')}</p>
+            <div className="rounded-[22px] p-3 mb-4" style={{
+              background: 'var(--surface)',
+              border: '1px solid var(--border-subtle)',
+            }}>
+              <p className="text-[12px] font-bold text-[var(--text-primary)] mb-2 px-1">
+                Aparência
+              </p>
+              <div className="flex gap-2">
+                <ThemePreviewCard
+                  label={t('settings.theme.dark')}
+                  active={theme === 'dark'}
+                  onSelect={() => changeTheme('dark')}
+                  preview="dark"
+                />
+                <ThemePreviewCard
+                  label={t('settings.theme.light')}
+                  active={theme === 'light'}
+                  onSelect={() => changeTheme('light')}
+                  preview="light"
+                />
+                <ThemePreviewCard
+                  label={t('settings.theme.system')}
+                  active={theme === 'system'}
+                  onSelect={() => changeTheme('system')}
+                  preview="system"
+                />
+              </div>
             </div>
 
             <p className="text-[11px] text-[#64748B] mb-2">{t('settings.training')}</p>
@@ -196,7 +211,7 @@ export function SettingsPage() {
             </div>
           </Section>
 
-          <Section title="ÁUDIO">
+          <Section title={t('settings.section.audio')}>
             <p className="text-[11px] text-[#64748B] mb-2">{t('settings.voice')}</p>
             <div className="flex gap-2">
               {speeds.map((s) => (
@@ -226,7 +241,7 @@ export function SettingsPage() {
             </div>
           </Section>
 
-          <Section title="APRENDIZADO">
+          <Section title={t('settings.section.learning')}>
             <p className="text-[11px] text-[#64748B] mb-2">{t('settings.translation')}</p>
             <div className="space-y-2 mb-4">
               <ChoiceRow
@@ -310,7 +325,7 @@ export function SettingsPage() {
             />
           </Section>
 
-          <Section title="NOTIFICAÇÕES">
+          <Section title={t('settings.section.notifications')}>
             <Toggle
               label={t('settings.notifications')}
               hint={t('settings.notifications.hint')}
@@ -347,7 +362,7 @@ export function SettingsPage() {
           </Section>
 
           <p className="text-[11px] text-[#64748B] leading-relaxed pb-2">
-            {t('settings.immersion')} {immersion}% — {immersionHint(immersion)}. {t('settings.privacy')}
+            {t('settings.immersion')} {immersion}% — {immersionHintLocalized(immersion)}. {t('settings.privacy')}
           </p>
         </div>
       </DTMain>
@@ -386,12 +401,12 @@ function Choice({
       style={
         active
           ? {
-              background: 'rgba(139,92,246,0.28)',
-              border: '1px solid rgba(168,85,247,0.45)',
-              color: '#fff',
-              boxShadow: '0 0 12px rgba(139,92,246,0.25)',
+              background: 'var(--voice-cyan-glow)',
+              border: '1px solid var(--voice-cyan)',
+              color: 'var(--text-primary)',
+              boxShadow: 'var(--shadow-glow)',
             }
-          : { ...glassStyle, color: '#94A3B8' }
+          : { ...glassStyle, color: 'var(--text-secondary)' }
       }
     >
       {icon}

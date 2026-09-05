@@ -45,7 +45,15 @@ function IconSparkle({ size = 14 }: { size?: number }) {
 }
 
 /* ---------- Session title (header center) ---------- */
-export function SessionProgress({ current, total }: { current: number; total: number }) {
+export function SessionProgress({
+  current,
+  total,
+  modeLabel = 'Treino',
+}: {
+  current: number;
+  total: number;
+  modeLabel?: string;
+}) {
   const safeTotal = Math.max(1, total);
   const filled = Math.min(safeTotal, Math.max(0, current));
   return (
@@ -56,26 +64,44 @@ export function SessionProgress({ current, total }: { current: number; total: nu
         border: '1px solid rgba(255, 255, 255, 0.08)',
         backdropFilter: 'blur(16px)',
       }}
-      aria-label={`Conversa ${filled} de ${safeTotal}`}
+      aria-label={`${modeLabel} ${filled} de ${safeTotal}`}
     >
-      Conversa {Math.max(1, filled || 1)} de {safeTotal}
+      {modeLabel} {Math.max(1, filled || 1)} de {safeTotal}
     </span>
   );
 }
 
 /* ---------- Thin conversation progress bar ---------- */
 export function ConversationProgressBar({ current, total }: { current: number; total: number }) {
-  const pct = Math.max(4, Math.min(100, (Math.max(0, current) / Math.max(1, total)) * 100));
+  const n = Math.max(1, Math.min(8, total || 4));
+  const filled = Math.max(0, Math.min(n, current));
   return (
-    <div className="w-full h-[3px] rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.08)' }} aria-hidden>
-      <div
-        className="h-full rounded-full transition-all duration-500"
-        style={{
-          width: `${pct}%`,
-          background: 'linear-gradient(90deg, #00F2FE 0%, #3B82F6 50%, #8B5CF6 100%)',
-          boxShadow: '0 0 12px rgba(0,242,254,0.45)',
-        }}
-      />
+    <div
+      className="flex items-center justify-center gap-[6px]"
+      role="progressbar"
+      aria-valuenow={filled}
+      aria-valuemin={0}
+      aria-valuemax={n}
+      aria-hidden
+    >
+      {Array.from({ length: n }).map((_, i) => {
+        const on = i < filled;
+        return (
+          <span
+            key={i}
+            className="rounded-full transition-all duration-500"
+            style={{
+              width: on ? 22 : 18,
+              height: 5,
+              background: on
+                ? 'linear-gradient(90deg, #00F2FE, #3A7BD5 55%, #8B5CF6)'
+                : 'rgba(255,255,255,0.12)',
+              boxShadow: on ? '0 0 10px rgba(0,242,254,0.45)' : undefined,
+              opacity: on ? 1 : 0.55,
+            }}
+          />
+        );
+      })}
     </div>
   );
 }
@@ -135,11 +161,11 @@ export function TeacherCard({
 
   return (
     <section
-      className="rounded-[24px] p-4 animate-fade-in"
+      className="rounded-[22px] p-4 animate-fade-in"
       style={{
-        background: 'rgba(255,255,255,0.04)',
-        border: '1px solid rgba(59,130,246,0.35)',
-        boxShadow: '0 0 24px rgba(59,130,246,0.12), inset 0 1px 0 rgba(255,255,255,0.06)',
+        background: 'var(--surface)',
+        border: '1px solid var(--border-cyan)',
+        boxShadow: 'var(--shadow-glow), inset 0 1px 0 var(--glass-inset)',
         backdropFilter: 'blur(12px)',
         WebkitBackdropFilter: 'blur(12px)',
       }}
@@ -170,7 +196,7 @@ export function TeacherCard({
             </span>
           </div>
 
-          <p className="text-[1.35rem] font-bold text-white leading-snug pr-1" style={{ overflowWrap: 'anywhere' }}>
+          <p className="text-[1.35rem] font-bold text-[var(--text-primary)] leading-snug pr-1" style={{ overflowWrap: 'anywhere' }}>
             {parts ? (
               <>
                 {parts.prefix}

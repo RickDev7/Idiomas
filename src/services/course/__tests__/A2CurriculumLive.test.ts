@@ -164,7 +164,7 @@ async function main() {
   const integrity = assertA2CurriculumIntegrity();
   check('1. integrity ok', integrity.ok);
   if (!integrity.ok) console.error(integrity.errors);
-  check('1. 18 A2 targets', getA2Targets().length === 18);
+  check('1. 57 A2 targets', getA2Targets().length === 57);
   check('1. all ids a2-', A2_CURRICULUM.every((t) => t.id.startsWith('a2-') && t.level === 'A2'));
   check('1. CURATED A2 all have ids', CURATED.filter((c) => c.level === 'A2').every((c) =>
     c.core.every((p) => !!p.id && !!p.unitId && p.id.startsWith('a2-')),
@@ -174,8 +174,8 @@ async function main() {
     m.units.every((u) => u.phraseIds.length > 0 && u.phraseIds.every((id) => isA2TargetId(id))),
   ));
   check('3. 6 A2 competencies', competenciesForLevel('A2').length === 6);
-  check('3. getByCompetency past', getA2TargetsByCompetency('a2.past').length === 3);
-  check('3. getByUnit u1', getA2TargetsByUnit('a2.u1').length === 3);
+  check('3. getByCompetency past', getA2TargetsByCompetency('a2.past').length === 9);
+  check('3. getByUnit u1', getA2TargetsByUnit('a2.u1').length === 9);
   check('3. getById', getA2TargetById('a2-past-gearbeitet')?.german.includes('gearbeitet') === true);
   check('4. primeiro target', a2FirstTarget().id === 'a2-past-gearbeitet');
 

@@ -14,6 +14,11 @@ import { useChunkTracker } from '@/hooks/useChunkTracker';
 import { SoundService } from '@/services/ui/SoundService';
 import { getTodaySession } from '@/services/storage/initData';
 import { getIncompleteSession } from '@/services/teacher/sessionContinuity';
+import {
+  beginSelectedLearningSession,
+  clearSelectedLearningTarget,
+} from '@/services/teacher/LessonStartIntent';
+import { APP_ROUTES, navigateBack } from '@/services/ui/AppRoutes';
 
 /** Etapas da metodologia (rótulos de UI) — progresso vem do ChunkTracker real. */
 const STAGE_COUNT = 5;
@@ -73,7 +78,22 @@ export function TrainingPage() {
       await getTodaySession(profile);
       SoundService.play('start');
       const type = profile.firstLessonComplete ? 'lesson' : 'first';
-      navigate(`/sessao?type=${type}`);
+      const baseId = activeChunk.baseId?.trim();
+      if (baseId) {
+        beginSelectedLearningSession(
+          navigate,
+          {
+            source: 'other',
+            targetId: baseId,
+            baseId,
+            targetPhrase: activeChunk.german || undefined,
+          },
+          type,
+        );
+      } else {
+        clearSelectedLearningTarget();
+        navigate(`${APP_ROUTES.sessao}?type=${type}`);
+      }
     } catch {
       setUiState('ready');
     }
@@ -86,7 +106,7 @@ export function TrainingPage() {
         <div className="flex items-center gap-3">
           <button
             type="button"
-            onClick={() => navigate(-1)}
+            onClick={() => navigateBack(navigate, APP_ROUTES.home)}
             aria-label="Voltar"
             className="w-9 h-9 rounded-full flex items-center justify-center text-white shrink-0"
             style={{ background: 'rgba(255,255,255,0.05)' }}

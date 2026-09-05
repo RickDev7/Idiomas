@@ -27,7 +27,10 @@ import {
   isZeroLanguagePhraseAccepted,
   zeroLanguageSeedPhrases,
 } from '@/services/teacher/ZeroLanguageMode';
-import mascotImg from '@/assets/mascot/deutsch-turbo-mascot.png';
+import { DT_ASSETS } from '@/assets/deutsch-turbo';
+import { beginSelectedLearningSession } from '@/services/teacher/LessonStartIntent';
+import { SoundService } from '@/services/ui/SoundService';
+import { APP_ROUTES, goAprender, navigateBack } from '@/services/ui/AppRoutes';
 
 type ChunkRow = {
   id: string;
@@ -92,6 +95,16 @@ export function MyGermanPage() {
   const filtered = rows.filter((r) => (filter === 'todos' ? true : r.status === filter));
   const featured = filtered[0] ?? null;
 
+  const startChunk = (row: ChunkRow) => {
+    SoundService.play('start');
+    beginSelectedLearningSession(navigate, {
+      source: 'chunks',
+      targetId: row.id,
+      baseId: row.id,
+      targetPhrase: row.german,
+    });
+  };
+
   if (loading || !profile) return <LoadingScreen />;
 
   return (
@@ -99,7 +112,7 @@ export function MyGermanPage() {
       <DTTopBar
         title="Meus Chunks"
         subtitle="Suas estruturas"
-        onBack={() => navigate(-1)}
+        onBack={() => navigateBack(navigate, APP_ROUTES.home)}
       />
 
       <div className="px-4 pt-3 flex gap-2 overflow-x-auto scrollbar-hide">
@@ -127,12 +140,12 @@ export function MyGermanPage() {
       <DTMain withNav className="pt-3 space-y-3">
         {filtered.length === 0 && (
           <DTEmptyState
-            imageSrc={mascotImg}
+            imageSrc={DT_ASSETS.mascot}
             imageAlt=""
             title="Ainda sem chunks"
             subtitle="Comece uma sessão para montar sua coleção."
             footer={
-              <DTNeonButton onClick={() => navigate('/aprender')}>
+              <DTNeonButton onClick={() => goAprender(navigate)}>
                 Ir para Aprender
               </DTNeonButton>
             }
@@ -147,7 +160,7 @@ export function MyGermanPage() {
               border: '1px solid rgba(139,92,246,0.45)',
               boxShadow: '0 0 28px rgba(139,92,246,0.22)',
             }}
-            onClick={() => navigate(`/estrutura/${encodeURIComponent(featured.id)}`)}
+            onClick={() => startChunk(featured)}
           >
             <span
               className="absolute -top-16 -right-8 w-40 h-40 rounded-full pointer-events-none"
@@ -184,7 +197,7 @@ export function MyGermanPage() {
               pct={row.pct}
               tint={tint}
               icon={<Icon size={16} />}
-              onClick={() => navigate(`/estrutura/${encodeURIComponent(row.id)}`)}
+              onClick={() => startChunk(row)}
             />
           );
         })}
